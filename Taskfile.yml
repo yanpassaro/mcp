@@ -26,6 +26,7 @@ tasks:
       - task: build:search
       - task: build:sqlize
       - task: build:vision
+      - task: build:fetch
       - task: build:anydoc
 
   build:git:
@@ -73,6 +74,7 @@ tasks:
       - task: format:search
       - task: format:sqlize
       - task: format:vision
+      - task: format:fetch
 
   format:git:
     desc: Format the git module
@@ -113,6 +115,20 @@ tasks:
       - gofmt -w .
       - go mod tidy
       - go vet ./...
+
+  format:fetch:
+    desc: Format the fetch module
+    dir: fetch
+    cmds:
+      - gofmt -w .
+      - go mod tidy
+      - go vet ./...
+
+  build:fetch:
+    desc: Build fetch-mcp.exe
+    dir: fetch
+    cmds:
+      - go build -o ../{{.DIST}}/fetch-mcp.exe ./cmd/fetch-mcp
 
   clean:
     desc: Remove dist/

@@ -12,6 +12,7 @@ Servidores MCP usados pelos agentes do Zed, padronizados conforme o
 | `search-mcp` | Busca web e fetch de páginas via Exa Search API | Go | `EXA_API_KEY` |
 | `sqlize-mcp` | Importa, consulta, exporta e compara dados (SQLite local + Postgres/MySQL read-only) | Go | `SQLIZE_STATE_DIR` (opcional) |
 | `vision-mcp` | Análise de imagens/vídeos com modelo de visão OpenAI-compatible | Go | `VISION_API_KEY` |
+| `fetch-mcp` | Testa endpoints HTTP da allowlist (`FETCH_ALLOW_HOST`): status, headers, corpo JSON/XML; gerencia cookies | Go | `FETCH_ALLOW_HOST` |
 | `anydoc` | Converte e exporta documentos (Word, PDF, Excel, etc.) | Deno/TypeScript | — |
 
 Cada servidor é um módulo Go **independente** (próprio `go.mod`, `module
@@ -95,6 +96,12 @@ Adicione os servidores em `~/.config/zed/settings.json` (bloco `context_servers`
       "command": "C:/Users/<usuario>/nautidesk/mcp/dist/vision-mcp.exe",
       "env": {
         "VISION_API_KEY": "<sua-chave>"
+      }
+    },
+    "fetch": {
+      "command": "C:/Users/<usuario>/nautidesk/mcp/dist/fetch-mcp.exe",
+      "env": {
+        "FETCH_ALLOW_HOST": "localhost,example.com"
       }
     },
     "anydoc": {
