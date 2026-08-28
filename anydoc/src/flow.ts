@@ -1,12 +1,16 @@
-import { ResourceStore, pt } from "@reamkit";
+import { pt, ResourceStore } from "@reamkit";
 import type { FlowDoc } from "@reamkit";
 import type { BodyElement } from "@reamkit/document-model";
 import { highlight } from "./highlight.ts";
 import { parseInline, slug } from "./markdown.ts";
 import { colorDiagram, renderMermaidDiagram } from "./mermaid.ts";
 
-type Alignment =
-  NonNullable<Extract<BodyElement, { kind: "paragraph" }>["paragraph"]["properties"]["alignment"]>;
+type Alignment = NonNullable<
+  Extract<
+    BodyElement,
+    { kind: "paragraph" }
+  >["paragraph"]["properties"]["alignment"]
+>;
 
 type FlowRun = ReturnType<typeof makeRun>;
 
@@ -105,7 +109,10 @@ function hex(color?: string): string | undefined {
 function cleanText(s: string): string {
   // Remove apenas caracteres de controle (preservando tab/nova linha); emojis e
   // símbolos passam intactos para o DOCX/PDF.
-  return s.replace(/[\p{Cc}]/gu, (ch) => (ch === "\t" || ch === "\n" || ch === "\r" ? ch : ""));
+  return s.replace(
+    /[\p{Cc}]/gu,
+    (ch) => (ch === "\t" || ch === "\n" || ch === "\r" ? ch : ""),
+  );
 }
 
 const ZWSP = "\u200B";
@@ -210,7 +217,9 @@ function makeRun(text: string, opts: RunOpts = {}) {
       strike: opts.strike ?? false,
       verticalAlign: opts.verticalAlign ?? "baseline",
       ...(shading ? { shadingColorHex: shading } : {}),
-      ...(opts.letterSpacing !== undefined ? { letterSpacingPt: pt(opts.letterSpacing) } : {}),
+      ...(opts.letterSpacing !== undefined
+        ? { letterSpacingPt: pt(opts.letterSpacing) }
+        : {}),
     },
     // Internal/external hyperlink. These are first-class Run fields in
     // reamkit's document model (not a separate body element), so a clickable
@@ -220,12 +229,17 @@ function makeRun(text: string, opts: RunOpts = {}) {
   };
 }
 
-function run(text: string, opts: RunOpts & { bookmarks?: string[] } = {}): BodyElement {
+function run(
+  text: string,
+  opts: RunOpts & { bookmarks?: string[] } = {},
+): BodyElement {
   const shading = hex(opts.shading);
   return {
     kind: "paragraph",
     paragraph: {
-      ...(opts.bookmarks && opts.bookmarks.length ? { bookmarks: opts.bookmarks } : {}),
+      ...(opts.bookmarks && opts.bookmarks.length
+        ? { bookmarks: opts.bookmarks }
+        : {}),
       properties: {
         spacingBefore: pt(opts.spacingBefore ?? (opts.bold ? 10 : 4)),
         spacingAfter: pt(opts.spacingAfter ?? 6),
@@ -278,11 +292,23 @@ function paragraphWithRuns(
         // the same anchor into <w:hyperlink w:anchor="…">, so this is exactly
         // the structure a clickable in-document link needs — no separate body
         // element (which reamkit does not model and would drop silently).
-        out.push(makeRun(r.text ?? "", { underline: true, color: "1A0DAB", anchor: slug(url.slice(1)) }));
+        out.push(
+          makeRun(r.text ?? "", {
+            underline: true,
+            color: "1A0DAB",
+            anchor: slug(url.slice(1)),
+          }),
+        );
       } else {
         const safe = sanitizeHref(url);
         if (safe !== undefined) {
-          out.push(makeRun(r.text ?? "", { underline: true, color: "1A0DAB", href: safe }));
+          out.push(
+            makeRun(r.text ?? "", {
+              underline: true,
+              color: "1A0DAB",
+              href: safe,
+            }),
+          );
         } else {
           // Disallowed scheme: keep the words, surface the raw target, no jump.
           out.push(makeRun(r.text ?? "", { color: opts.color }));
@@ -332,7 +358,11 @@ interface TableOpts {
   alignCols?: string[];
 }
 
-function tableBlock(columns: string[], rows: string[][], opts: TableOpts = {}): BodyElement {
+function tableBlock(
+  columns: string[],
+  rows: string[][],
+  opts: TableOpts = {},
+): BodyElement {
   const headerBackground = hex(opts.headerBackground);
   const headerColor = hex(opts.headerColor);
   const border = opts.borders
@@ -340,7 +370,11 @@ function tableBlock(columns: string[], rows: string[][], opts: TableOpts = {}): 
     : undefined;
   const cellProps = (background?: string) => ({
     ...(background ? { shading: { colorHex: background } } : {}),
-    ...(border ? { borders: { top: border, right: border, bottom: border, left: border } } : {}),
+    ...(border
+      ? {
+        borders: { top: border, right: border, bottom: border, left: border },
+      }
+      : {}),
   });
   const zebraBackground = "f3f3f5";
   const all = [columns, ...rows];
@@ -352,13 +386,16 @@ function tableBlock(columns: string[], rows: string[][], opts: TableOpts = {}): 
     let w = 0;
     // Strip inline markdown to get plain text, but account for code spans
     const codeSegments: string[] = [];
-    const plain = cell.replace(/`([^`]+)`/g, (_, m) => { codeSegments.push(m); return m; });
+    const plain = cell.replace(/`([^`]+)`/g, (_, m) => {
+      codeSegments.push(m);
+      return m;
+    });
     for (const ch of plain) w += /\P{ASCII}/u.test(ch) ? 1.2 : 1; // accented chars slightly wider
     for (const seg of codeSegments) w += seg.length * 0.55; // extra cost for code runs already counted in plain
     return Math.max(w, 1);
   }
   const maxLens = columns.map((_, ci) => {
-    let maxLen = cellRenderWidth(columns[ci] ?? "");
+    let maxLen = cellRenderWidth(columns[ci] ?? "") * 1.15; // header em negrito é ~15% mais largo
     for (const row of rows) {
       const w = cellRenderWidth(row[ci] ?? "");
       if (w > maxLen) maxLen = w;
@@ -370,22 +407,35 @@ function tableBlock(columns: string[], rows: string[][], opts: TableOpts = {}): 
   // largura útil da página (ex.: tabela com muitas colunas), abandona o piso e
   // reescala — a grade nunca estoura no PDF nem no Word (a última coluna
   // absorve o arredondamento).
-  let widths = maxLens.map((len) => Math.max(Math.floor((len / totalLen) * PAGE_CONTENT_WIDTH), 36));
+  let widths = maxLens.map((len) =>
+    Math.max(Math.floor((len / totalLen) * PAGE_CONTENT_WIDTH), 36)
+  );
   let widthSum = widths.reduce((a, b) => a + b, 0);
   if (widthSum > PAGE_CONTENT_WIDTH) {
-    widths = maxLens.map((len) => Math.floor((len / totalLen) * PAGE_CONTENT_WIDTH));
+    widths = maxLens.map((len) =>
+      Math.floor((len / totalLen) * PAGE_CONTENT_WIDTH)
+    );
     widthSum = widths.reduce((a, b) => a + b, 0);
   }
   if (widthSum < PAGE_CONTENT_WIDTH && widths.length > 0) {
     widths[widths.length - 1] += PAGE_CONTENT_WIDTH - widthSum;
   }
 
-  	return {
+  return {
     kind: "table",
     table: {
       properties: {
-        layout: "fixed",
-        ...(opts.borders ? { borders: { top: border, right: border, bottom: border, left: border } } : {}),
+        layout: "auto",
+        ...(opts.borders
+          ? {
+            borders: {
+              top: border,
+              right: border,
+              bottom: border,
+              left: border,
+            },
+          }
+          : {}),
       },
       grid: widths.map(pt),
       rows: all.map((cells, ri) => {
@@ -394,8 +444,8 @@ function tableBlock(columns: string[], rows: string[][], opts: TableOpts = {}): 
         const rowBackground = isHeader
           ? headerBackground
           : opts.striped && ri % 2 === 1
-            ? zebraBackground
-            : undefined;
+          ? zebraBackground
+          : undefined;
         return {
           // Mantém as linhas juntas (keepNext) e inteiras (cantSplit): tabela
           // pequena passa inteira para a próxima página em vez de quebrar no
@@ -431,7 +481,8 @@ function tableBlock(columns: string[], rows: string[][], opts: TableOpts = {}): 
 // then `docker compose …`) so each wrapped fragment stays a coherent command
 // rather than splitting mid-word. Longest forms first so `>>` wins over `>`,
 // `2>>` over `2>`, `&&` over `&`, etc.
-const SHELL_OPS = /<<<|2>>|2>|>>|&>|>&|\|&|\[\[|\]\]|<<&&\|\||<|>|\||;|&|==|!=|=|\$\(|\$\{|\$@|\$\*|\$\#|\$\?|\$\$|\$!|\[|\]|`/g;
+const SHELL_OPS =
+  /<<<|2>>|2>|>>|&>|>&|\|&|\[\[|\]\]|<<&&\|\||<|>|\||;|&|==|!=|=|\$\(|\$\{|\$@|\$\*|\$\#|\$\?|\$\$|\$!|\[|\]|`/g;
 
 function lastOperatorIndex(s: string, max: number): number {
   let best = -1;
@@ -532,27 +583,58 @@ function shadeHex(color: string, factor: number): string {
   if (!/^[0-9a-fA-F]{6}$/.test(h)) return color;
   const n = parseInt(h, 16);
   const mix = (shift: number) => Math.round(((n >> shift) & 255) * factor);
-  return (((mix(16) << 16) | (mix(8) << 8) | mix(0)).toString(16).padStart(6, "0"));
+  return (((mix(16) << 16) | (mix(8) << 8) | mix(0)).toString(16).padStart(
+    6,
+    "0",
+  ));
 }
 
 // Casca visual de um bloco de código/diagrama: badge do idioma em cima (com a
 // cor de identidade), fundo escuro e a borda esquerda grossa na mesma cor.
-function codeBlockShell(meta: { label: string; accent: string }, content: BodyElement[]): BodyElement[] {
+function codeBlockShell(
+  meta: { label: string; accent: string },
+  content: BodyElement[],
+): BodyElement[] {
   const bg = "1A1D23";
   const borderColor = "2B303B";
   const PAGE_CONTENT_WIDTH = 468;
-  const border = { style: "single" as const, width: pt(0.5), colorHex: borderColor };
-  const accentBorder = { style: "single" as const, width: pt(2), colorHex: meta.accent };
-  const headerBorder = { style: "single" as const, width: pt(0.5), colorHex: meta.accent };
+  const border = {
+    style: "single" as const,
+    width: pt(0.5),
+    colorHex: borderColor,
+  };
+  const accentBorder = {
+    style: "single" as const,
+    width: pt(2),
+    colorHex: meta.accent,
+  };
+  const headerBorder = {
+    style: "single" as const,
+    width: pt(0.5),
+    colorHex: meta.accent,
+  };
   const header = paragraphWithRuns(
     [{ text: " " }, { text: meta.label, color: meta.accent, bold: true }],
-    { fontFamily: "Courier New", size: 9, color: "8B949E", spacingBefore: 2, spacingAfter: 2 },
+    {
+      fontFamily: "Courier New",
+      size: 9,
+      color: "8B949E",
+      spacingBefore: 2,
+      spacingAfter: 2,
+    },
   );
   return [
     {
       kind: "table",
       table: {
-        properties: { borders: { top: border, right: border, bottom: border, left: accentBorder } },
+        properties: {
+          borders: {
+            top: border,
+            right: border,
+            bottom: border,
+            left: accentBorder,
+          },
+        },
         grid: [pt(PAGE_CONTENT_WIDTH)],
         rows: [
           {
@@ -560,7 +642,10 @@ function codeBlockShell(meta: { label: string; accent: string }, content: BodyEl
             // quebra entre páginas (o conversor respeita w:tblHeader).
             properties: { isHeader: true },
             cells: [{
-              properties: { shading: { colorHex: shadeHex(meta.accent, 0.14) }, borders: { bottom: headerBorder } },
+              properties: {
+                shading: { colorHex: shadeHex(meta.accent, 0.14) },
+                borders: { bottom: headerBorder },
+              },
               content: header,
             }],
           },
@@ -580,7 +665,10 @@ function codeBlockShell(meta: { label: string; accent: string }, content: BodyEl
 
 // Diagrama mermaid embutido como imagem centralizada, limitada à largura da
 // página (dimensões de design → pt; o PNG rasterizado em 2x fica nítido).
-function mermaidImageBlock(png: MermaidImageData, resources: ResourceStore): BodyElement {
+function mermaidImageBlock(
+  png: MermaidImageData,
+  resources: ResourceStore,
+): BodyElement {
   const MAX_W = 430;
   const MAX_H = 440;
   const MIN_W = 150;
@@ -628,7 +716,14 @@ function renderCodeBlock(b: DocumentBlock): BodyElement[] {
         content.push(...paragraphWithRuns(
           [{ text: " " }, ...runs],
           // Rótulos em neve para ler bem sobre o fundo escuro.
-          { fontFamily: "Courier New", size: 8.5, color: "E6EDF3", spacingBefore: 0, spacingAfter: k === n - 1 ? 2 : 0, keepNext: true },
+          {
+            fontFamily: "Courier New",
+            size: 8.5,
+            color: "E6EDF3",
+            spacingBefore: 0,
+            spacingAfter: k === n - 1 ? 2 : 0,
+            keepNext: true,
+          },
         ));
       }
       return codeBlockShell(meta, content);
@@ -647,7 +742,14 @@ function renderCodeBlock(b: DocumentBlock): BodyElement[] {
       content.push(...paragraphWithRuns(
         [{ text: isLast ? " " : "  " }, ...highlight(subs[k], b.language)],
         // keepNext: as linhas do bloco viajam juntas entre páginas.
-        { fontFamily: "Courier New", size: 8.5, color: fg, spacingBefore: 0, spacingAfter: isLast ? 2 : 1, keepNext: true },
+        {
+          fontFamily: "Courier New",
+          size: 8.5,
+          color: fg,
+          spacingBefore: 0,
+          spacingAfter: isLast ? 2 : 1,
+          keepNext: true,
+        },
       ));
     }
   }
@@ -662,8 +764,14 @@ export interface FlowDocOptions {
 // Escala tipográfica dos títulos. H1 carrega a cor de marca (a mesma da barra
 // do blockquote) e abre capítulo em página nova; os demais níveis escurecem e
 // encolhem até se aproximarem do texto corrido.
-function headingProps(level: number):
-  { size: number; color: string; spacingBefore: number; spacingAfter: number } {
+function headingProps(
+  level: number,
+): {
+  size: number;
+  color: string;
+  spacingBefore: number;
+  spacingAfter: number;
+} {
   switch (level) {
     case 1:
       return { size: 18, color: "D85131", spacingBefore: 6, spacingAfter: 8 };
@@ -695,7 +803,14 @@ export function jsonToFlowDoc(
   const resources = new ResourceStore();
 
   if (typeof c.title === "string" && c.title) {
-    body.push(run(c.title, { bold: true, size: 20, align: "center", bookmarks: [slug(c.title)] }));
+    body.push(
+      run(c.title, {
+        bold: true,
+        size: 20,
+        align: "center",
+        bookmarks: [slug(c.title)],
+      }),
+    );
   }
   if (typeof c.subtitle === "string" && c.subtitle) {
     body.push(run(c.subtitle, { size: 13, align: "center" }));
@@ -748,10 +863,20 @@ export function jsonToFlowDoc(
       }
     } else if (kind === "list") {
       for (const item of b.items ?? []) {
-        body.push(...paragraphWithRuns([{ text: "•  " }, ...parseInline(item)], { ...style }));
+        body.push(
+          ...paragraphWithRuns([{ text: "•  " }, ...parseInline(item)], {
+            ...style,
+          }),
+        );
       }
     } else if (kind === "table") {
-      body.push({ kind: "paragraph", paragraph: { properties: { spacingBefore: pt(8), spacingAfter: pt(2) }, runs: [{ text: "", properties: baseRunProps() }] } });
+      body.push({
+        kind: "paragraph",
+        paragraph: {
+          properties: { spacingBefore: pt(8), spacingAfter: pt(2) },
+          runs: [{ text: "", properties: baseRunProps() }],
+        },
+      });
       body.push(tableBlock(b.columns ?? [], b.rows ?? [], {
         headerBackground: b.headerBackground,
         headerColor: b.headerColor,
@@ -785,7 +910,9 @@ export function jsonToFlowDoc(
           },
         });
       } else {
-        body.push(run(`[image not loaded: ${b.url}]`, { italic: true, size: 9 }));
+        body.push(
+          run(`[image not loaded: ${b.url}]`, { italic: true, size: 9 }),
+        );
       }
     } else if (kind === "codeblock") {
       const lang = String(b.language ?? "").toLowerCase();
@@ -855,7 +982,10 @@ export function jsonToFlowDoc(
       defaultRunProperties: {},
       styles: new Map(),
     },
-    sections: [{ endIndex: body.length, properties: { headers: [], footers: [] } }],
+    sections: [{
+      endIndex: body.length,
+      properties: { headers: [], footers: [] },
+    }],
     resources,
   };
 }
@@ -885,12 +1015,24 @@ export function withUtcDates<T>(fn: () => T): T {
     getMinutes: proto.getMinutes,
     getSeconds: proto.getSeconds,
   };
-  proto.getFullYear = function (this: DateProto) { return this.getUTCFullYear(); };
-  proto.getMonth = function (this: DateProto) { return this.getUTCMonth(); };
-  proto.getDate = function (this: DateProto) { return this.getUTCDate(); };
-  proto.getHours = function (this: DateProto) { return this.getUTCHours(); };
-  proto.getMinutes = function (this: DateProto) { return this.getUTCMinutes(); };
-  proto.getSeconds = function (this: DateProto) { return this.getUTCSeconds(); };
+  proto.getFullYear = function (this: DateProto) {
+    return this.getUTCFullYear();
+  };
+  proto.getMonth = function (this: DateProto) {
+    return this.getUTCMonth();
+  };
+  proto.getDate = function (this: DateProto) {
+    return this.getUTCDate();
+  };
+  proto.getHours = function (this: DateProto) {
+    return this.getUTCHours();
+  };
+  proto.getMinutes = function (this: DateProto) {
+    return this.getUTCMinutes();
+  };
+  proto.getSeconds = function (this: DateProto) {
+    return this.getUTCSeconds();
+  };
   try {
     return fn();
   } finally {
