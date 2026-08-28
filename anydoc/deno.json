@@ -1,0 +1,15 @@
+{
+  "tasks": {
+    "compile": "deno compile --bundle --include=wasm/anydoc_wasm_bg.wasm --no-check --allow-read --allow-write --allow-net --allow-env --allow-ffi --minify --output ../dist/anydoc.exe main.ts"
+  },
+  "imports": {
+    "@anydoc": "npm:@firecrawl/anydoc-wasm",
+    "@mcp": "npm:@modelcontextprotocol/sdk",
+    "@mcp/server": "npm:@modelcontextprotocol/server",
+    "@zod": "npm:zod/v4",
+    "@reamkit": "npm:reamkit@latest",
+    "@reamkit/document-model": "npm:reamkit@latest/document-model",
+    "@fflate": "npm:fflate@0.8.3",
+    "exceljs": "npm:exceljs"
+  }
+}

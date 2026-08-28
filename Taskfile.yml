@@ -1,0 +1,132 @@
+version: '3'
+
+vars:
+  DIST: dist
+  GOOS: windows
+  GOARCH: amd64
+  CGO_ENABLED: '0'
+
+env:
+  GOOS: '{{.GOOS}}'
+  GOARCH: '{{.GOARCH}}'
+  CGO_ENABLED: '{{.CGO_ENABLED}}'
+
+tasks:
+  default:
+    desc: Build all MCP servers (.exe) into dist/
+    cmds:
+      - task: build
+
+  build:
+    desc: Build all MCP servers
+    deps: [prep]
+    cmds:
+      - task: build:git
+      - task: build:github
+      - task: build:search
+      - task: build:sqlize
+      - task: build:vision
+      - task: build:anydoc
+
+  build:git:
+    desc: Build git-mcp.exe
+    dir: git
+    cmds:
+      - go build -o ../{{.DIST}}/git-mcp.exe ./cmd/git-mcp
+
+  build:github:
+    desc: Build github-mcp.exe
+    dir: github
+    cmds:
+      - go build -o ../{{.DIST}}/github-mcp.exe ./cmd/github-mcp
+
+  build:search:
+    desc: Build search-mcp.exe
+    dir: search
+    cmds:
+      - go build -o ../{{.DIST}}/search-mcp.exe ./cmd/search-mcp
+
+  build:sqlize:
+    desc: Build sqlize-mcp.exe
+    dir: sqlize
+    cmds:
+      - go build -o ../{{.DIST}}/sqlize-mcp.exe ./cmd/sqlize-mcp
+
+  build:vision:
+    desc: Build vision-mcp.exe
+    dir: vision
+    cmds:
+      - go build -o ../{{.DIST}}/vision-mcp.exe ./cmd/vision-mcp
+
+  build:anydoc:
+    desc: Build anydoc.exe into dist/ (Deno)
+    dir: anydoc
+    deps: [prep]
+    cmds:
+      - deno task compile
+
+  format:
+    desc: Format all Go modules (gofmt -w, go mod tidy, go vet)
+    cmds:
+      - task: format:git
+      - task: format:github
+      - task: format:search
+      - task: format:sqlize
+      - task: format:vision
+
+  format:git:
+    desc: Format the git module
+    dir: git
+    cmds:
+      - gofmt -w .
+      - go mod tidy
+      - go vet ./...
+
+  format:github:
+    desc: Format the github module
+    dir: github
+    cmds:
+      - gofmt -w .
+      - go mod tidy
+      - go vet ./...
+
+  format:search:
+    desc: Format the search module
+    dir: search
+    cmds:
+      - gofmt -w .
+      - go mod tidy
+      - go vet ./...
+
+  format:sqlize:
+    desc: Format the sqlize module
+    dir: sqlize
+    cmds:
+      - gofmt -w .
+      - go mod tidy
+      - go vet ./...
+
+  format:vision:
+    desc: Format the vision module
+    dir: vision
+    cmds:
+      - gofmt -w .
+      - go mod tidy
+      - go vet ./...
+
+  clean:
+    desc: Remove dist/
+    cmds:
+      - cmd: rm -rf {{.DIST}}
+        ignore_error: true
+      - cmd: powershell -NoProfile -Command "Remove-Item -Recurse -Force '{{.DIST}}'"
+        ignore_error: true
+
+  prep:
+    desc: Create dist/
+    internal: true
+    cmds:
+      - cmd: mkdir -p {{.DIST}}
+        ignore_error: true
+      - cmd: powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '{{.DIST}}'"
+        ignore_error: true
