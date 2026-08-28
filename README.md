@@ -98,7 +98,7 @@ Adicione os servidores em `~/.config/zed/settings.json` (bloco `context_servers`
       }
     },
     "anydoc": {
-      "command": "anydoc.exe",
+      "command": "C:/Users/<usuario>/nautidesk/mcp/dist/anydoc.exe",
     }
   }
 }
