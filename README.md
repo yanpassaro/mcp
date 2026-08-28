@@ -98,8 +98,7 @@ Adicione os servidores em `~/.config/zed/settings.json` (bloco `context_servers`
       }
     },
     "anydoc": {
-      "command": "deno",
-      "args": ["run", "--allow-read", "--allow-write", "--allow-net", "--allow-env", "--allow-ffi", "C:/Users/<usuario>/nautidesk/mcp/anydoc/main.ts"]
+      "command": "anydoc.exe",
     }
   }
 }
