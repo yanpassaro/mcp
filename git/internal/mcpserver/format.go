@@ -463,14 +463,13 @@ func compactPatchText(text string, context int) string {
 	if context < 0 {
 		return text
 	}
-	lines := strings.Split(text, "\n")
-	out := make([]string, 0, len(lines))
+	out := make([]string, 0)
 	hold := make([]string, 0, context)
 	flush := func() {
 		out = append(out, hold...)
 		hold = hold[:0]
 	}
-	for _, line := range lines {
+	for line := range strings.SplitSeq(text, "\n") {
 		switch {
 		case strings.HasPrefix(line, "@@") || isDiffHeader(line):
 			flush()

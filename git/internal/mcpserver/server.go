@@ -1029,7 +1029,7 @@ func (s *Server) stashList(ctx context.Context, _ *mcp.CallToolRequest, in stash
 		return nil, nil, err
 	}
 	rows := make([]stashRow, 0)
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -1087,7 +1087,7 @@ func blameLineOf(c *object.Commit) blameLine {
 }
 
 func countLines(u string, added, deleted *int) {
-	for _, l := range strings.Split(u, "\n") {
+	for l := range strings.SplitSeq(u, "\n") {
 		if strings.HasPrefix(l, "+") {
 			*added++
 		} else if strings.HasPrefix(l, "-") {

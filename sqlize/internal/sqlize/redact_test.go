@@ -37,6 +37,17 @@ func TestRedactRows(t *testing.T) {
 		{"phone em coluna inglesa", "phone", "(11) 98765-4321", "11*******-21"},
 		{"name em coluna inglesa", "customer", "Joao Barbosa", "J***"},
 		{"password em coluna inglesa", "password", "senha123", "***"},
+		{"nome estrangeiro fora da lista", "descricao", "Falei com Tomasz Kowalski ontem", "Falei com T*** ontem"},
+		{"nome composto fora da lista", "descricao", "Akira Tanaka enviou o arquivo", "A*** enviou o arquivo"},
+		{"nome unico com contexto", "descricao", "Falei com Maria ontem", "Falei com M*** ontem"},
+		{"nome com honorifico", "descricao", "Chamei o Sr. Tomasz para a reuniao", "Chamei o Sr. T*** para a reuniao"},
+		{"produto nao e pessoa", "descricao", "Produto de Limpeza Multiuso", "Produto de Limpeza Multiuso"},
+		{"orgao nao e pessoa", "descricao", "Banco do Brasil", "Banco do Brasil"},
+		{"dia da semana nao e pessoa", "descricao", "Segunda Feira", "Segunda Feira"},
+		{"termo generico em ingles", "descricao", "Product Overview", "Product Overview"},
+		{"rua nao e pessoa", "descricao", "Atendemos na Rua das Flores", "Atendemos na R***"},
+		{"com boleto nao e pessoa", "descricao", "Pago com Boleto", "Pago com Boleto"},
+		{"sobrenome de cidade nao quebra nome", "descricao", "Falei com Joao Santos ontem", "Falei com J*** ontem"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

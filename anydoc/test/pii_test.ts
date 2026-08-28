@@ -52,6 +52,19 @@ Deno.test("nomes compostos em texto livre", () => {
   check("nome primeiro termo", redactPII("O Joao Silva saiu"), "O J*** saiu");
 });
 
+Deno.test("nomes independentes da lista fixa", () => {
+  check("nome fora da lista", redactPII("Falei com Tomasz Kowalski ontem"), "Falei com T*** ontem");
+  check("nome unico com contexto", redactPII("Falei com Maria ontem"), "Falei com M*** ontem");
+  check("sobrenome de cidade", redactPII("Falei com Joao Santos ontem"), "Falei com J*** ontem");
+});
+
+Deno.test("não-nomes continuam intactos", () => {
+  check("produto", redactPII("Produto de Limpeza Multiuso"), "Produto de Limpeza Multiuso");
+  check("orgao", redactPII("Banco do Brasil"), "Banco do Brasil");
+  check("dia da semana", redactPII("Segunda Feira"), "Segunda Feira");
+  check("com boleto", redactPII("Pago com Boleto"), "Pago com Boleto");
+});
+
 Deno.test("cidades e estados não são mascarados", () => {
   check("cidade famosa", redactPII("Mudança para São Paulo em 2025"), "Mudança para São Paulo em 2025");
   check("capital com nome próprio", redactPII("fui a João Pessoa no fim de semana"), "fui a João Pessoa no fim de semana");

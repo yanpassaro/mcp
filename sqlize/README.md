@@ -125,9 +125,18 @@ redator é inspirado na arquitetura do [Presidio](https://github.com/data-privac
 3. **Contexto de coluna (pt + en)**: colunas como `cpf`, `nome`, `email`,
    `senha` — ou `customer`, `phone`, `password`, `address` — recebem score
    1.0 e são sempre mascaradas, mesmo sem bater padrão.
-4. **Pessoas**: deny-list embutida de nomes comuns BR (aumentável por
-   `SQLIZE_PII_NAMES`, um nome por linha) + reconhecimento de nomes compostos
-   (`João da Silva`) detecta PESSOAS em qualquer coluna.
+4. **Pessoas**: detecção **sem depender de lista de nomes**: seqüências de
+   2+ palavras capitalizadas (`João da Silva`, `Tomasz Kowalski`), nomes
+   únicos após honoríficos/preposições (`Sr. Pedro`, `falei com Maria`) e
+   células inteiras no formato de nome ganham score por **forma + contexto**.
+   A deny-list embutida de nomes BR (`brFirstNames`) virou apenas um **booster**
+   (não é mais requisito), e o conjunto usado para **excluir** não-nomes é
+   fechado e pequeno: dias/meses, produtos, cargos, logradouros, órgãos,
+   geográficos (estados, capitais, países) e sufixos de razão social.
+   Aumentáveis por arquivo: `SQLIZE_PII_NAMES` (nomes para reforçar, um por
+   linha) e `SQLIZE_PII_WORDS` (palavras comuns do seu domínio para excluir,
+   ex.: nomes de produtos internos) — ambos normalizados (lowercase, sem
+   acento), com a mesma regra do contexto de coluna.
 5. **Limiar** (`score >= 0.5`) e **resolução de sobreposição** decidem o que
    é mascarado; o operador de máscara é escolhido pela entidade.
 

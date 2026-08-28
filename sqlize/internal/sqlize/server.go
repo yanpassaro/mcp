@@ -266,7 +266,7 @@ func (s *Server) compareTool(ctx context.Context, _ *mcp.CallToolRequest, in com
 		}
 	}
 	keyCols := make([]string, 0)
-	for _, k := range strings.Split(in.Key, ",") {
+	for k := range strings.SplitSeq(in.Key, ",") {
 		if k = strings.TrimSpace(k); k != "" {
 			keyCols = append(keyCols, k)
 		}

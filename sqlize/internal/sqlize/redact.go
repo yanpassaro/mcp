@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 const maskThreshold = 0.5
@@ -263,6 +265,17 @@ var nameStopwords = map[string]bool{
 	"de": true, "da": true, "do": true, "dos": true, "das": true, "e": true, "a": true, "o": true,
 }
 
+var reNameContext = regexp.MustCompile(`(?i)\b(?:com|para|por|sr\.?|sra\.?|srta\.?|dr\.?|dra\.?|senhor|senhora|dona|dom|prof\.?|eng\.?|adv\.?)\s+$`)
+
+var reSingleName = regexp.MustCompile(`(?i:\b(?:sr\.?|sra\.?|srta\.?|dr\.?|dra\.?|senhor|senhora|dona|dom|prof\.?|eng\.?|adv\.?|com|para|por)\s+)(\p{Lu}\p{Ll}+)`)
+
+func nameContext(prev string) bool {
+	if len(prev) > 24 {
+		prev = prev[len(prev)-24:]
+	}
+	return reNameContext.MatchString(prev)
+}
+
 func findNameMatches(colName, cell string) []match {
 	if cell == "" {
 		return nil
@@ -271,8 +284,16 @@ func findNameMatches(colName, cell string) []match {
 
 	for _, idx := range reNameSpan.FindAllStringIndex(cell, -1) {
 		span := cell[idx[0]:idx[1]]
-		if s := nameScore(span); s > 0 {
+		if s := nameScore(span, cell[:idx[0]]); s > 0 {
 			out = append(out, match{start: idx[0], end: idx[1], entity: "PERSON", score: s})
+		}
+	}
+
+	for _, idx := range reSingleName.FindAllStringSubmatchIndex(cell, -1) {
+		start, end := idx[2], idx[3]
+		span := cell[start:end]
+		if s := nameScore(span, cell[:start]); s > 0 {
+			out = append(out, match{start: start, end: end, entity: "PERSON", score: s})
 		}
 	}
 
@@ -284,32 +305,60 @@ func findNameMatches(colName, cell string) []match {
 	return out
 }
 
+func deniedToken(t string) bool {
+	if brFirstNames[t] {
+		return false
+	}
+	return wordDeny[t] || geoDeny[t]
+}
+
 func wholeCellName(_ string, cell string) (match, bool) {
-	norm := normalizeWord(cell)
+	raw := strings.TrimSpace(cell)
+	if raw == "" {
+		return match{}, false
+	}
+	r0, _ := utf8.DecodeRuneInString(raw)
+	if !unicode.IsUpper(r0) {
+		return match{}, false
+	}
+	norm := normalizeWord(raw)
 	tokens := strings.Fields(norm)
-	if len(tokens) == 0 || len(tokens) > 3 {
+	if len(tokens) == 0 || len(tokens) > 4 {
 		return match{}, false
 	}
 	hasPrep := false
 	known := 0
+	first := ""
 	for _, t := range tokens {
 		if nameStopwords[t] {
 			hasPrep = true
 			continue
 		}
+		if first == "" {
+			first = t
+		}
 		if brFirstNames[t] {
 			known++
 		}
 	}
+	if first == "" || deniedToken(first) || geoDeny[norm] || orgSuffix[tokens[len(tokens)-1]] {
+		return match{}, false
+	}
+	for _, t := range tokens {
+		if t != first && wordDeny[t] {
+			return match{}, false
+		}
+	}
 	score := 0.0
 	switch {
-	case len(tokens) == 1 && known == 1:
-		score = 0.85
-	case hasPrep && known >= 1:
+	case known >= 1:
 		score = 0.9
-	}
-	if score <= 0 {
-		return match{}, false
+	case hasPrep && len(tokens) >= 3:
+		score = 0.85
+	case len(tokens) == 1:
+		score = 0.55
+	case len(tokens) >= 2:
+		score = 0.7
 	}
 	return match{start: 0, end: len(cell), entity: "PERSON", score: score}, true
 }
@@ -336,18 +385,32 @@ var geoDeny = map[string]bool{
 	"sao jose dos campos": true, "sao luis": true, "sao vicente": true,
 	"sorocaba": true, "teresina": true, "vitoria": true,
 	"vitoria da conquista": true,
-	"africa do sul":        true, "arabia saudita": true, "coreia do norte": true,
+	"africa do sul": true, "arabia saudita": true, "coreia do norte": true,
 	"coreia do sul": true, "costa do marfim": true, "emirados arabes": true,
 	"estados unidos": true, "nova zelandia": true, "reino unido": true,
+	"brasil": true, "argentina": true, "portugal": true, "italia": true,
+	"franca": true, "espanha": true, "alemanha": true, "inglaterra": true,
+	"eua": true, "canada": true, "mexico": true, "chile": true,
+	"uruguai": true, "paraguai": true, "china": true, "japao": true,
+	"india": true, "russia": true, "australia": true, "suica": true,
+	"holanda": true, "belgica": true, "suecia": true, "noruega": true,
+	"finlandia": true, "grecia": true, "irlanda": true, "polonia": true,
+	"ucrania": true, "turquia": true, "egito": true, "marrocos": true,
+	"porto seguro": true, "rio grande": true,
 }
 
-func nameScore(span string) float64 {
+func nameScore(span, prev string) float64 {
 	norm := normalizeWord(span)
 	tokens := strings.Fields(norm)
+	if len(tokens) == 0 {
+		return 0
+	}
 	known := 0
+	hasPrep := false
 	first := ""
 	for _, t := range tokens {
 		if nameStopwords[t] {
+			hasPrep = true
 			continue
 		}
 		if first == "" {
@@ -357,19 +420,21 @@ func nameScore(span string) float64 {
 			known++
 		}
 	}
-	if known == 0 {
+	if first == "" || deniedToken(first) || geoDeny[norm] || orgSuffix[tokens[len(tokens)-1]] {
 		return 0
 	}
-	if !brFirstNames[first] {
-		return 0
-	}
-	if geoDeny[norm] {
-		return 0
-	}
-	if known >= 2 || len(tokens) >= 3 {
+	switch {
+	case known >= 1:
 		return 0.9
+	case hasPrep && len(tokens) >= 3:
+		return 0.85
+	case nameContext(prev):
+		return 0.85
+	case len(tokens) >= 2:
+		return 0.7
+	default:
+		return 0
 	}
-	return 0.85
 }
 
 func analyzeCell(colName, cell string) []match {

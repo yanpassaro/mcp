@@ -197,24 +197,121 @@ const GEO_DENY = new Set([
   // países/regiões
   "africa do sul", "arabia saudita", "coreia do norte", "coreia do sul",
   "costa do marfim", "emirados arabes", "estados unidos", "nova zelandia",
-  "reino unido",
+  "reino unido", "brasil", "argentina", "portugal", "italia", "franca",
+  "espanha", "alemanha", "inglaterra", "eua", "canada", "mexico",
+  "chile", "uruguai", "paraguai", "china", "japao", "india", "russia",
+  "australia", "suica", "holanda", "belgica", "suecia", "noruega",
+  "finlandia", "grecia", "irlanda", "polonia", "ucrania", "turquia",
+  "egito", "marrocos", "porto seguro", "rio grande",
 ]);
 
-function nameScore(span: string): number {
-  const tokens = normalizeWord(span).split(/\s+/);
+// Palavras comuns (pt/en, normalizadas) que não são nomes próprios: o
+// conjunto “fechado” que permite detectar pessoas por forma/contexto.
+const WORD_DENY = new Set([
+  "bom", "boa", "inicio", "fim", "topo", "rodape", "anexo", "atencao",
+  "aviso", "erro", "sucesso", "falha", "alerta", "pendente", "cancelado",
+  "concluido", "ativo", "inativo", "bloqueado", "liberado", "sim", "nao",
+  "novo", "usado", "seminovo", "obrigatorio", "opcional", "padrao",
+  "janeiro", "fevereiro", "abril", "maio", "junho", "julho", "agosto",
+  "setembro", "outubro", "novembro", "dezembro", "segunda", "terca",
+  "quarta", "quinta", "sexta", "sabado", "domingo", "monday", "tuesday",
+  "wednesday", "thursday", "friday", "saturday", "sunday", "january",
+  "february", "march", "april", "may", "june", "july", "august",
+  "september", "october", "november", "december", "total", "valor",
+  "valores", "quantidade", "status", "situacao", "pedido", "venda",
+  "vendas", "compra", "compras", "item", "itens", "lote", "serie",
+  "numero", "codigo", "nota", "relatorio", "orcamento", "contrato",
+  "fatura", "cobranca", "desconto", "imposto", "taxa", "frete",
+  "entrega", "prazo", "garantia", "modelo", "marca", "categoria", "tipo",
+  "descricao", "observacao", "detalhe", "motivo", "origem", "destino",
+  "forma", "meio", "canal", "campanha", "promocao", "produto", "produtos",
+  "servico", "servicos", "limpeza", "manutencao", "instalacao", "montagem",
+  "reparo", "seguro", "aluguel", "assinatura", "mensalidade", "projeto",
+  "processo", "atividade", "tarefa", "reuniao", "treinamento", "suporte",
+  "equipe", "time", "departamento", "setor", "unidade", "filial", "matriz",
+  "escritorio", "loja", "estoque", "documento", "pagamento", "confirmado",
+  "emitida", "emitido", "recebido", "faturamento", "mensagem", "historico",
+  "boleto", "descarte", "devolucao", "cancelamento", "retirada", "coleta",
+  "aprovacao", "analise", "revisao", "auditoria", "inspecao", "validacao",
+  "emissao", "impressao", "digitalizacao", "arquivamento", "armazenamento",
+  "movimentacao", "remessa", "separacao", "embalagem", "expedicao",
+  "financeiro", "contabil", "fiscal", "comercial", "administrativo",
+  "atualizacao", "sincronizacao", "integracao", "migracao", "backup",
+  "restauracao", "exclusao", "inclusao", "alteracao", "consulta",
+  "registro", "cadastro", "login", "acesso", "permissao", "usuario",
+  "sessao", "conexao", "gerente", "diretor", "coordenador", "supervisor",
+  "analista", "assistente", "consultor", "vendedor", "atendente", "tecnico",
+  "engenheiro", "advogado", "arquiteto", "motorista", "recepcionista",
+  "caixa", "porteiro", "auxiliar", "estagiario", "aprendiz", "presidente",
+  "secretaria", "cozinheiro", "conferente", "rua", "avenida", "travessa",
+  "alameda", "estrada", "rodovia", "praca", "beco", "largo", "viela",
+  "condominio", "conjunto", "residencial", "loteamento", "chacara", "sitio",
+  "fazenda", "quadra", "bloco", "andar", "sala", "apto", "apartamento",
+  "casa", "predio", "edificio", "torre", "terreno", "banco", "empresa",
+  "grupo", "fundacao", "associacao", "cooperativa", "sindicato",
+  "universidade", "faculdade", "colegio", "escola", "hospital", "clinica",
+  "laboratorio", "instituto", "centro", "prefeitura", "ministerio",
+  "governo", "autarquia", "agencia", "sociedade", "companhia", "industria",
+  "fabrica", "comercio", "distribuidora", "transportadora", "construtora",
+  "imobiliaria", "product", "service", "services", "amount", "value",
+  "quantity", "order", "sale", "purchase", "items", "number", "code",
+  "report", "budget", "contract", "invoice", "discount", "tax", "fee",
+  "shipping", "delivery", "deadline", "warranty", "model", "brand",
+  "category", "type", "description", "reason", "origin", "destination",
+  "payment", "plan", "project", "task", "meeting", "support", "team",
+  "department", "unit", "branch", "store", "stock", "title", "document",
+  "message", "history", "manager", "director", "coordinator", "analyst",
+  "assistant", "consultant", "salesperson", "technician", "engineer",
+  "lawyer", "driver", "receptionist", "intern", "president", "secretary",
+  "street", "avenue", "road", "highway", "lane", "square", "building",
+  "floor", "suite", "apartment", "house", "bank", "company", "group",
+  "foundation", "association", "cooperative", "university", "college",
+  "school", "clinic", "laboratory", "institute", "center", "government",
+  "ministry", "agency", "society", "industry", "factory", "review",
+  "approval", "analysis", "inspection", "validation", "printing", "removal",
+  "testing", "processing", "handling", "storage", "packing", "dispatch",
+  "update", "query", "record", "registration", "access", "permission",
+  "user", "session", "connection", "sync", "integration", "migration",
+  "restore", "deletion", "insertion", "alteration", "exclusion", "inclusion",
+]);
+
+const ORG_SUFFIX = new Set(["ltda", "eireli", "epp"]);
+
+function deniedToken(t: string): boolean {
+  if (brFirstNames.has(t)) return false;
+  return WORD_DENY.has(t) || GEO_DENY.has(t);
+}
+
+function nameContext(prev: string): boolean {
+  return /(?:com|para|por|sr\.?|sra\.?|srta\.?|dr\.?|dra\.?|senhor|senhora|dona|dom|prof\.?|eng\.?|adv\.?)\s+$/i
+    .test(prev.slice(-24));
+}
+
+const RE_SINGLE_NAME = /\b(?:com|para|por|sr\.?|sra\.?|srta\.?|dr\.?|dra\.?|senhor|senhora|dona|dom|prof\.?|eng\.?|adv\.?)\s+(\p{Lu}\p{Ll}+)/giu;
+
+function nameScore(span: string, prev = ""): number {
+  const norm = normalizeWord(span);
+  const tokens = norm.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return 0;
   let known = 0;
+  let hasPrep = false;
+  let first = "";
   for (const t of tokens) {
-    if (NAME_STOPWORDS.has(t)) continue;
+    if (NAME_STOPWORDS.has(t)) {
+      hasPrep = true;
+      continue;
+    }
+    if (!first) first = t;
     if (brFirstNames.has(t)) known++;
   }
-  if (known === 0) return 0;
-  // a 1ª palavra precisa ser um nome conhecido: "São Paulo" (são+paulo),
-  // "São José dos Campos" etc. começam com não-nome e não são personas.
-  const first = tokens.find((t) => !NAME_STOPWORDS.has(t));
-  if (!first || !brFirstNames.has(first)) return 0;
-  // geográficos que começam com nome próprio ("João Pessoa", "Paulo Afonso").
-  if (GEO_DENY.has(normalizeWord(span))) return 0;
-  return known >= 2 || tokens.length >= 3 ? 0.9 : 0.85;
+  if (!first || deniedToken(first) || GEO_DENY.has(norm) || ORG_SUFFIX.has(tokens[tokens.length - 1])) {
+    return 0;
+  }
+  if (known >= 1) return 0.9;
+  if (hasPrep && tokens.length >= 3) return 0.85;
+  if (nameContext(prev)) return 0.85;
+  if (tokens.length >= 2) return 0.7;
+  return 0;
 }
 
 // endereços por logradouro ("Rua das Flores, 123"). A 1ª palavra após o
@@ -302,8 +399,8 @@ function redactAddresses(md: string): string {
 }
 
 function redactNames(md: string): string {
-  return md.replace(RE_NAME_SPAN, (m) => {
-    if (nameScore(m) <= 0) return m;
+  let out = md.replace(RE_NAME_SPAN, (m, offset, str) => {
+    if (nameScore(m, str.slice(Math.max(0, offset - 24), offset)) <= 0) return m;
     // O regex engloba stopwords no início/fim do span ("O Joao Silva"); a
     // máscara deve preservá-las e cobrir só o núcleo nomeado ("O J***").
     const words = m.split(/\s+/);
@@ -317,6 +414,12 @@ function redactNames(md: string): string {
     const tail = words.slice(end).join(" ");
     return [head, masked, tail].filter(Boolean).join(" ");
   });
+  out = out.replace(RE_SINGLE_NAME, (m, name, offset, str) => {
+    if (!name || !/\p{Lu}/u.test(name[0])) return m;
+    if (nameScore(name, str.slice(Math.max(0, offset - 24), offset)) <= 0) return m;
+    return m.slice(0, m.length - name.length) + maskByName(name);
+  });
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -519,7 +622,7 @@ function redactBody(md: string): string {
   out = redactFields(out); // "campo: valor" em texto
   out = redactText(out); // formatos (regex + checksum)
   out = redactAddresses(out); // endereços por logradouro
-  out = redactNames(out); // nomes compostos via deny-list
+  out = redactNames(out); // nomes por forma/contexto (lista de nomes é só reforço)
   return out;
 }
 
