@@ -380,10 +380,13 @@ function tableBlock(columns: string[], rows: string[][], opts: TableOpts = {}): 
     widths[widths.length - 1] += PAGE_CONTENT_WIDTH - widthSum;
   }
 
-  return {
+  	return {
     kind: "table",
     table: {
-      properties: opts.borders ? { borders: { top: border, right: border, bottom: border, left: border } } : {},
+      properties: {
+        layout: "fixed",
+        ...(opts.borders ? { borders: { top: border, right: border, bottom: border, left: border } } : {}),
+      },
       grid: widths.map(pt),
       rows: all.map((cells, ri) => {
         const isHeader = ri === 0;
