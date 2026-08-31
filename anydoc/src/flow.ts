@@ -279,6 +279,9 @@ function paragraphWithRuns(
     indent?: number;
     keepNext?: boolean;
     pageBreakBefore?: boolean;
+    // Cor do `code` inline. O vermelho padrão fica ilegível sobre fundo
+    // escuro, então o card de dica passa um tom claro aqui.
+    codeColor?: string;
   } = {},
 ): BodyElement[] {
   const shading = hex(opts.shading);
@@ -324,7 +327,9 @@ function paragraphWithRuns(
         strike: r.strike,
         code: r.code,
         fontFamily: r.code ? "Courier New" : opts.fontFamily,
-        color: r.code ? "D85131" : (r.color ?? opts.color),
+        color: r.code
+          ? (opts.codeColor ?? "D85131")
+          : (r.color ?? opts.color),
         size: opts.size,
         shading: opts.shading,
         verticalAlign: r.verticalAlign,
@@ -380,46 +385,77 @@ function tableBlock(
   const all = [columns, ...rows];
 
   const PAGE_CONTENT_WIDTH = 468;
-  // Measure the *rendered* width of each cell by simulating font metrics.
-  // Courier New (code) is ~1.6x wider per character than Arial.
   function cellRenderWidth(cell: string): number {
     let w = 0;
-    // Strip inline markdown to get plain text, but account for code spans
     const codeSegments: string[] = [];
     const plain = cell.replace(/`([^`]+)`/g, (_, m) => {
       codeSegments.push(m);
       return m;
     });
-    for (const ch of plain) w += /\P{ASCII}/u.test(ch) ? 1.2 : 1; // accented chars slightly wider
-    for (const seg of codeSegments) w += seg.length * 0.55; // extra cost for code runs already counted in plain
+    for (const ch of plain) w += /\P{ASCII}/u.test(ch) ? 1.2 : 1;
+    for (const seg of codeSegments) w += seg.length * 0.55;
     return Math.max(w, 1);
   }
-  const maxLens = columns.map((_, ci) => {
-    let maxLen = cellRenderWidth(columns[ci] ?? "") * 1.15; // header em negrito é ~15% mais largo
+  const charToPt = 5.6;
+  // Largura desejada (conteúdo mais largo) e largura mínima (maior palavra
+  // indivisível). O header entra nas duas: o título nunca pode ser espremido
+  // a ponto de quebrar, que era o caso de "Frequência"/"Rotina" colidindo.
+  const CELL_PADDING = 12;
+  function longestWordWidth(cell: string): number {
+    let w = 0;
+    for (const word of String(cell).split(/\s+/)) {
+      const ww = cellRenderWidth(word);
+      if (ww > w) w = ww;
+    }
+    return w;
+  }
+  const desired = columns.map((_, ci) => {
+    let maxLen = cellRenderWidth(columns[ci] ?? "");
     for (const row of rows) {
       const w = cellRenderWidth(row[ci] ?? "");
       if (w > maxLen) maxLen = w;
     }
-    return Math.max(maxLen, 1);
+    return Math.max(maxLen, 1) * charToPt + CELL_PADDING;
   });
-  const totalLen = maxLens.reduce((a, b) => a + b, 0);
-  // Larguras proporcionais ao conteúdo, com piso de 36pt. Se a soma passar da
-  // largura útil da página (ex.: tabela com muitas colunas), abandona o piso e
-  // reescala — a grade nunca estoura no PDF nem no Word (a última coluna
-  // absorve o arredondamento).
-  let widths = maxLens.map((len) =>
-    Math.max(Math.floor((len / totalLen) * PAGE_CONTENT_WIDTH), 36)
-  );
+  // Piso por coluna: o header inteiro em uma linha (títulos são curtos) ou a
+  // maior palavra do corpo, o que for maior.
+  const minWidths = columns.map((_, ci) => {
+    // A maior PALAVRA do header também entra no piso: títulos como
+    // "DEFAULTCHARACTERSET_NAME" são indivisíveis, e considerar só as palavras
+    // do corpo fazia a coluna encolher abaixo do título e os headers colidirem.
+    let floor = longestWordWidth(columns[ci] ?? "");
+    for (const row of rows) {
+      const w = longestWordWidth(row[ci] ?? "");
+      if (w > floor) floor = w;
+    }
+    return floor * charToPt + CELL_PADDING;
+  });
+
+  let widths = desired.slice();
   let widthSum = widths.reduce((a, b) => a + b, 0);
   if (widthSum > PAGE_CONTENT_WIDTH) {
-    widths = maxLens.map((len) =>
-      Math.floor((len / totalLen) * PAGE_CONTENT_WIDTH)
-    );
+    // Encolhe só a folga acima do piso, proporcionalmente: colunas de texto
+    // longo cedem espaço, colunas estreitas mantêm o header legível.
+    const minSum = minWidths.reduce((a, b) => a + b, 0);
+    if (minSum >= PAGE_CONTENT_WIDTH) {
+      const k = PAGE_CONTENT_WIDTH / minSum;
+      widths = minWidths.map((w) => w * k);
+    } else {
+      const slack = widths.map((w, i) => w - minWidths[i]);
+      const slackSum = slack.reduce((a, b) => a + b, 0);
+      const excess = widthSum - PAGE_CONTENT_WIDTH;
+      widths = widths.map((w, i) =>
+        slackSum > 0 ? w - (slack[i] / slackSum) * excess : w
+      );
+    }
     widthSum = widths.reduce((a, b) => a + b, 0);
   }
   if (widthSum < PAGE_CONTENT_WIDTH && widths.length > 0) {
     widths[widths.length - 1] += PAGE_CONTENT_WIDTH - widthSum;
   }
+  widths = widths.map((w) => Math.floor(w));
+  const drift = PAGE_CONTENT_WIDTH - widths.reduce((a, b) => a + b, 0);
+  if (drift !== 0 && widths.length > 0) widths[widths.length - 1] += drift;
 
   return {
     kind: "table",
@@ -440,19 +476,23 @@ function tableBlock(
       grid: widths.map(pt),
       rows: all.map((cells, ri) => {
         const isHeader = ri === 0;
-        const isLast = ri === all.length - 1;
         const rowBackground = isHeader
           ? headerBackground
           : opts.striped && ri % 2 === 1
           ? zebraBackground
           : undefined;
         return {
-          // Mantém as linhas juntas (keepNext) e inteiras (cantSplit): tabela
-          // pequena passa inteira para a próxima página em vez de quebrar no
-          // meio — sem header “órfão/duplicado” na quebra.
+          // Sem isHeader e sem keepNext encadeado.
+          //
+          // isHeader repetia o cabeçalho na quebra; combinado ao keepNext em
+          // toda linha não-final (que prende a tabela ao parágrafo seguinte e
+          // empurra o conjunto inteiro), o resultado era o cabeçalho impresso
+          // no pé de uma página e repetido na outra — o "header fantasma".
+          //
+          // keepNext só no cabeçalho: ele nunca fica sozinho no rodapé, mas a
+          // tabela deixa de ser um bloco indivisível e quebra naturalmente.
           properties: {
-            ...(isHeader ? { isHeader: true } : {}),
-            ...(isLast ? {} : { keepNext: true }),
+            ...(isHeader ? { keepNext: true } : {}),
             cantSplit: true,
           },
           cells: cells.map((c, ci) => ({
@@ -594,6 +634,9 @@ function shadeHex(color: string, factor: number): string {
 function codeBlockShell(
   meta: { label: string; accent: string },
   content: BodyElement[],
+  // Quando um blockquote vem logo abaixo, o bloco não fecha com espaçador: o
+  // quote encosta na casca e os dois leem como uma única peça.
+  attachedBelow = false,
 ): BodyElement[] {
   const bg = "1A1D23";
   const borderColor = "2B303B";
@@ -608,6 +651,8 @@ function codeBlockShell(
     width: pt(2),
     colorHex: meta.accent,
   };
+
+
   const headerBorder = {
     style: "single" as const,
     width: pt(0.5),
@@ -621,6 +666,7 @@ function codeBlockShell(
       color: "8B949E",
       spacingBefore: 2,
       spacingAfter: 2,
+      keepNext: true,
     },
   );
   return [
@@ -628,6 +674,9 @@ function codeBlockShell(
       kind: "table",
       table: {
         properties: {
+          // Mesma estratégia das demais tabelas: largura da grid respeitada,
+          // sem o renderizador redistribuir altura para preencher a página.
+          layout: "fixed",
           borders: {
             top: border,
             right: border,
@@ -638,9 +687,10 @@ function codeBlockShell(
         grid: [pt(PAGE_CONTENT_WIDTH)],
         rows: [
           {
-            // isHeader: true repete o badge do idioma quando um bloco longo
-            // quebra entre páginas (o conversor respeita w:tblHeader).
-            properties: { isHeader: true },
+            // Badge em linha própria com shading de CÉLULA (pinta a faixa
+            // inteira; shading de parágrafo cobria só o texto). Sem isHeader,
+            // que era o responsável por repetir a faixa na quebra.
+            properties: { cantSplit: true },
             cells: [{
               properties: {
                 shading: { colorHex: shadeHex(meta.accent, 0.14) },
@@ -659,7 +709,9 @@ function codeBlockShell(
         ],
       },
     },
-    run("", { spacingBefore: 2, spacingAfter: 10 }),
+    ...(attachedBelow
+      ? []
+      : [run("", { spacingBefore: 0, spacingAfter: 0, size: 1 })]),
   ];
 }
 
@@ -696,7 +748,10 @@ function mermaidImageBlock(
   };
 }
 
-function renderCodeBlock(b: DocumentBlock): BodyElement[] {
+function renderCodeBlock(
+  b: DocumentBlock,
+  attachedBelow = false,
+): BodyElement[] {
   const meta = langMeta(b.language);
   const fg = "ABB2BF";
   const MAX_CODE_COLS = 88;
@@ -722,11 +777,10 @@ function renderCodeBlock(b: DocumentBlock): BodyElement[] {
             color: "E6EDF3",
             spacingBefore: 0,
             spacingAfter: k === n - 1 ? 2 : 0,
-            keepNext: true,
           },
         ));
       }
-      return codeBlockShell(meta, content);
+      return codeBlockShell(meta, content, attachedBelow);
     }
   }
 
@@ -735,25 +789,27 @@ function renderCodeBlock(b: DocumentBlock): BodyElement[] {
   // One solid paragraph per source line: the inline comment stays glued to its
   // code (the highlighter dims it), empty lines are preserved, and wrapped
   // continuations are indented so the block reads as a single unit.
-  for (const line of lines) {
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
     const subs = splitLongLine(line, MAX_CODE_COLS);
     for (let k = 0; k < subs.length; k++) {
       const isLast = k === subs.length - 1;
+      // Sem keepNext: o badge já viaja na mesma linha de tabela que o código,
+      // e keepNext em todas as linhas fazia o bloco longo ser tratado como
+      // indivisível, migrando inteiro e deixando a casca vazia para trás.
       content.push(...paragraphWithRuns(
         [{ text: isLast ? " " : "  " }, ...highlight(subs[k], b.language)],
-        // keepNext: as linhas do bloco viajam juntas entre páginas.
         {
           fontFamily: "Courier New",
           size: 8.5,
           color: fg,
           spacingBefore: 0,
           spacingAfter: isLast ? 2 : 1,
-          keepNext: true,
         },
       ));
     }
   }
-  return codeBlockShell(meta, content);
+  return codeBlockShell(meta, content, attachedBelow);
 }
 
 export interface FlowDocOptions {
@@ -863,8 +919,27 @@ export function jsonToFlowDoc(
       }
     } else if (kind === "list") {
       for (const item of b.items ?? []) {
+        // Task list (`- [ ]` / `- [x]`): vira uma caixinha de verdade em vez do
+        // literal "[ ]" colado no bullet. Marcado ganha ☑ em verde e o texto
+        // esmaecido; pendente fica ☐ na cor do texto.
+        const task = /^\[([ xX])\]\s+(.*)$/.exec(item);
+        if (task) {
+          const done = task[1].toLowerCase() === "x";
+          body.push(
+            ...paragraphWithRuns([
+              {
+                text: done ? "\u2611  " : "\u2610  ",
+                color: done ? "2E7D32" : "6B7280",
+              },
+              ...parseInline(task[2]).map((r) =>
+                done ? { ...r, color: r.color ?? "6B7280" } : r
+              ),
+            ], { ...style, indent: 1 }),
+          );
+          continue;
+        }
         body.push(
-          ...paragraphWithRuns([{ text: "•  " }, ...parseInline(item)], {
+          ...paragraphWithRuns([{ text: "\u2022  " }, ...parseInline(item)], {
             ...style,
           }),
         );
@@ -925,40 +1000,83 @@ export function jsonToFlowDoc(
           continue;
         }
       }
-      body.push(...renderCodeBlock(b));
+      const nextIsQuote = String(blocks[bi + 1]?.kind ?? "") === "blockquote";
+      body.push(...renderCodeBlock(b, nextIsQuote));
     } else if (kind === "blockquote") {
-      const bg = "F5F5F7";
-      const bar = "D85131";
-      const textColor = "374151";
+      // Quote logo após um bloco de código vira a "legenda" dele: encosta na
+      // casca, herda a cor da linguagem na barra e usa um cinza mais escuro,
+      // de modo que os dois formem visualmente a mesma seção.
+      const prev = blocks[bi - 1];
+      const afterCode = String(prev?.kind ?? "") === "codeblock";
+      // Card de dica do JetBrains: fundo verde-escuro e texto claro. A barra
+      // lateral herda a cor da linguagem do bloco acima (BASH âmbar, XML
+      // ciano...), amarrando visualmente o comentário ao seu código.
+      const accent = afterCode ? langMeta(prev?.language).accent : undefined;
+      const bg = afterCode ? "1F2D22" : "F5F5F7";
+      const bar = afterCode ? (accent ?? "3E5C42") : "D85131";
+      const textColor = afterCode ? "C8D6C4" : "374151";
       const PAGE_CONTENT_WIDTH = 468;
       const content: BodyElement[] = [];
       const lines = (b.items ?? []).length ? (b.items ?? []) : [""];
-      for (const line of lines) {
+      lines.forEach((line, idx) => {
+        // Ícone só na primeira linha. Usa ☼ (263C) e não 💡 (1F4A1): o
+        // conversor de PDF só embute glifos do plano básico.
+        const icon = afterCode && idx === 0
+          ? [{ text: "\u263C  ", color: accent ?? "E8C547", size: 11 }]
+          : [];
         content.push(...paragraphWithRuns(
-          parseInline(line || " "),
-          { size: 10.5, color: textColor, spacingBefore: 0, spacingAfter: 3 },
+          [...icon, ...parseInline(line || " ")],
+          {
+            // 9.5pt: menor que o texto corrido (10.5) para ficar claro que é
+            // uma nota do bloco, mas ainda confortável para vários parágrafos
+            // de prosa — 8.5pt (corpo do código) apertava demais.
+            size: afterCode ? 9.5 : 10.5,
+            color: textColor,
+            spacingBefore: 0,
+            spacingAfter: afterCode ? 1 : 3,
+            ...(afterCode ? { codeColor: "9CCFA0" } : {}),
+          },
         ));
+      });
+      // Card escuro: contorno fino esverdeado nos três lados + barra esquerda
+      // grossa na cor da linguagem do bloco acima.
+      const border = afterCode
+        ? { style: "single" as const, width: pt(0.75), colorHex: "3E5C42" }
+        : { style: "single" as const, width: pt(2), colorHex: bar };
+      // Mesma espessura da borda de destaque do bloco de código (accentBorder,
+      // 2pt): as duas barras formam uma linha contínua na lateral.
+      const leftBar = afterCode
+        ? { style: "single" as const, width: pt(2), colorHex: bar }
+        : border;
+      // Acoplado ao código: sem espaçador acima, encostando na casca.
+      if (!afterCode) {
+        body.push(run("", { spacingBefore: 0, spacingAfter: 0, size: 1 }));
       }
-      const border = { style: "single" as const, width: pt(2), colorHex: bar };
-      body.push(run("", { spacingBefore: 10, spacingAfter: 0 }));
       body.push({
         kind: "table",
         table: {
-          properties: {},
+          properties: { layout: "fixed" },
           grid: [pt(PAGE_CONTENT_WIDTH)],
           rows: [{
             properties: { isHeader: false },
             cells: [{
               properties: {
                 shading: { colorHex: bg },
-                borders: { left: border },
+                borders: afterCode
+                  ? {
+                    top: border,
+                    right: border,
+                    bottom: border,
+                    left: leftBar,
+                  }
+                  : { left: leftBar },
               },
               content,
             }],
           }],
         },
       });
-      body.push(run("", { spacingBefore: 0, spacingAfter: 10 }));
+      body.push(run("", { spacingBefore: 0, spacingAfter: 0, size: 1 }));
     }
   }
 

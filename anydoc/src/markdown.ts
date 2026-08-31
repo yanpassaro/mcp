@@ -51,8 +51,11 @@ function pushEmph(runs: RunSpec[], inner: string, flags: Partial<RunSpec>, refs:
 export function parseInline(text: string, refs: Record<string, string> = {}): RunSpec[] {
   const src = normalizeHtml(text);
   const runs: RunSpec[] = [];
+  // Ênfase com "_" não vale no meio de palavra (regra do CommonMark): sem os
+  // lookarounds, identificadores como utf8mb4_unicode_ci eram lidos como
+  // ênfase e perdiam os underscores (viravam "utf8mb4unicodeci").
   const re =
-    /(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|\_[^_]+\_|`[^`]+`|~~[^~]+~~|\[\^([^\]]+)\]|\[[^\]]+\]\([^)]+\)|\[[^\]]+\]\[[^\]]+\]|<https?:\/\/[^\s>]+>)/g;
+    /(\*\*[^*]+\*\*|(?<![A-Za-z0-9])__[^_]+__(?![A-Za-z0-9])|\*[^*]+\*|(?<![A-Za-z0-9])_[^_]+_(?![A-Za-z0-9])|`[^`]+`|~~[^~]+~~|\[\^([^\]]+)\]|\[[^\]]+\]\([^)]+\)|\[[^\]]+\]\[[^\]]+\]|<https?:\/\/[^\s>]+>)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) {
