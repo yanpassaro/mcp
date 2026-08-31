@@ -1,13 +1,28 @@
+# Compila todos os servidores MCP para Windows (dist/*.exe) e publica os
+# binários no GitHub Release, prontos para baixar.
+#
+# Triggers:
+#   - push para main                     -> atualiza a release rolante "latest"
+#                                            (sem precisar de tag; link fixo:
+#                                            github.com/<repo>/releases/latest)
+#   - push de tag "v*"                   -> cria/atualiza a release daquela tag
+#   - workflow_dispatch (manual)         -> build sob demanda; input "tag"
+#                                            opcional: informe uma tag para
+#                                            lançar release versionada, ou
+#                                            deixe vazio para atualizar "latest"
+
 name: Build Windows
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag da release (ex.: v1.0.0). Vazio = só build, sem release.'
+        description: 'Tag da release (ex.: v1.0.0). Vazio = atualiza a release "latest".'
         required: false
         default: ""
 
@@ -53,16 +68,30 @@ jobs:
           path: dist/
 
       - name: Create or update release
-        if: github.event_name == 'push' || inputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="${{ github.event_name == 'push' && github.ref_name || inputs.tag }}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.exe dist/SHA256SUMS --clobber
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="latest"
+          fi
+
+          if [ "$TAG" = "latest" ]; then
+            # Release rolante: apaga a anterior (release + tag) e recria
+            # apontando para o commit atual. Link fixo:
+            # https://github.com/yanpassaro/mcp/releases/latest
+            gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+            gh release create latest dist/*.exe dist/SHA256SUMS \
+              --title "MCP servers — build mais recente" \
+              --target "$GITHUB_SHA" \
+              --notes "Build automático do commit \`$GITHUB_SHA\` — sem tag de versão."
           else
-            gh release create "$TAG" dist/*.exe dist/SHA256SUMS \
-              --title "MCP servers $TAG" \
-              --generate-notes
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" dist/*.exe dist/SHA256SUMS --clobber
+            else
+              gh release create "$TAG" dist/*.exe dist/SHA256SUMS \
+                --title "MCP servers $TAG" \
+                --generate-notes
+            fi
           fi

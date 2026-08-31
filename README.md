@@ -92,11 +92,14 @@ compila todos os servidores para Windows (`dist/*.exe`) no GitHub Actions e
 publica os binários no **GitHub Release**, prontos para baixar (junto com um
 arquivo `SHA256SUMS` para conferência):
 
+- **Push para `main`** — atualiza a release rolante **`latest`**, sem precisar de
+  tag: o link `https://github.com/yanpassaro/mcp/releases/latest` sempre aponta
+  para os binários mais recentes;
 - **Push de tag `v*`** (ex.: `git tag v1.0.0 && git push origin v1.0.0`) — cria a
-  release da tag com os `.exe`;
+  release versionada da tag;
 - **Workflow manual** (aba *Actions* → *Build Windows* → *Run workflow*) — build
   sob demanda; se informar uma **tag** no input, cria/atualiza a release dela
-  (vazio = apenas build, sem release).
+  (vazio = atualiza a `latest`).
 
 ## Logs e dados persistidos
 
