@@ -85,6 +85,19 @@ cd anydoc
 deno task compile   # ou "deno task start" para rodar sem compilar
 ```
 
+## CI / Release
+
+O workflow [`.github/workflows/build-windows.yml`](./.github/workflows/build-windows.yml)
+compila todos os servidores para Windows (`dist/*.exe`) no GitHub Actions e
+publica os binários no **GitHub Release**, prontos para baixar (junto com um
+arquivo `SHA256SUMS` para conferência):
+
+- **Push de tag `v*`** (ex.: `git tag v1.0.0 && git push origin v1.0.0`) — cria a
+  release da tag com os `.exe`;
+- **Workflow manual** (aba *Actions* → *Build Windows* → *Run workflow*) — build
+  sob demanda; se informar uma **tag** no input, cria/atualiza a release dela
+  (vazio = apenas build, sem release).
+
 ## Logs e dados persistidos
 
 Todos os servidores Go gravam o log (apenas em stderr/arquivo, **nunca stdout**,
