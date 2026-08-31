@@ -1,22 +1,43 @@
 # MCP servers
 
-Servidores MCP usados pelos agentes do Zed, padronizados conforme o
-[`PADRÃO.md`](./PADRÃO.md) em `%USERPROFILE%\.local\share\mcp\<server>\logs`.
+Servidores MCP (Model Context Protocol) para agentes e clientes MCP em geral
+(Zed, Claude Desktop etc.). Cada servidor é um módulo **independente** (próprio
+`go.mod`, `module ntdsk.com/mcp/<server>`) na sua pasta; o único fora do Go é o
+`anydoc` (Deno/TypeScript).
+
+Todos os servidores falam o protocolo MCP por **stdio** e gravam os logs em
+`~/.local/share/mcp/<server>/logs/` (detalhes em [Logs](#logs-e-dados-persistidos)).
 
 ## Servidores
 
 | Servidor | O que faz | Tech | Variável de ambiente principal |
 | --- | --- | --- | --- |
-| `git-mcp` | Inspeção read-only de repositórios Git locais (go-git, sem git CLI) | Go | — |
-| `github-mcp` | Busca de código, docs, issues, PRs, releases e árvore de arquivos na API do GitHub | Go | `GITHUB_TOKEN` |
-| `search-mcp` | Busca web e fetch de páginas via Exa Search API | Go | `EXA_API_KEY` |
-| `sqlize-mcp` | Importa, consulta, exporta e compara dados (SQLite local + Postgres/MySQL read-only) | Go | `SQLIZE_STATE_DIR` (opcional) |
-| `vision-mcp` | Análise de imagens/vídeos com modelo de visão OpenAI-compatible | Go | `VISION_API_KEY` |
-| `fetch-mcp` | Testa endpoints HTTP da allowlist (`FETCH_ALLOW_HOST`): status, headers, corpo JSON/XML; gerencia cookies | Go | `FETCH_ALLOW_HOST` |
-| `anydoc` | Converte e exporta documentos (Word, PDF, Excel, etc.) | Deno/TypeScript | — |
+| `git-mcp` | Inspeção **read-only** de repositórios Git locais com [go-git](https://github.com/go-git/go-git) (sem `git` CLI): log, diff, branches, blame, stash, submodules | Go | — |
+| `github-mcp` | Consulta à API do GitHub (somente leitura): busca de código/commits/issues/PRs/usuários, releases, wiki, insights e árvore de arquivos | Go | `GITHUB_TOKEN` |
+| `search-mcp` | Busca web e fetch de páginas via [Exa Search API](https://exa.ai) (`exa_search`/`exa_fetch`) | Go | `EXA_API_KEY` |
+| `sqlize-mcp` | Importa, consulta, exporta e compara dados (SQLite em arquivo + Postgres/MySQL read-only), com redator de PII | Go | `SQLIZE_STATE_DIR` (opcional) |
+| `vision-mcp` | Análise de imagens/vídeos com modelo de visão OpenAI-compatible (`vision_image_analysis`, `vision_diff`, `vision_video_analysis`) | Go | `VISION_API_KEY` |
+| `fetch-mcp` | Testa endpoints HTTP da allowlist (`FETCH_ALLOW_HOST`, anti-SSRF): timing, status, headers, corpo JSON/XML pretty-printed, cookies e comando `curl` equivalente | Go | `FETCH_ALLOW_HOST` |
+| `anydoc` | Converte e exporta documentos (Word, PDF, Excel, OpenDocument, RTF, EPUB, CSV) com redator de PII embutido | Deno/TypeScript | — |
 
-Cada servidor é um módulo Go **independente** (próprio `go.mod`, `module
-ntdsk.com/mcp/<server>`) na sua pasta. O único servidor fora do Go é o `anydoc` (Deno).
+## Tools principais (resumo)
+
+A lista completa está no README de cada servidor:
+
+- **git**: `git_repo_info`, `git_status`, `git_log`, `git_show`, `git_diff`,
+  `git_blame`, `git_tree`, `git_read_file`, `git_find_files`, `git_contributors`
+- **github**: `github_search_code`, `github_search_issues`, `github_search_commits`,
+  `github_list_releases`, `github_list_wiki`/`github_fetch_wiki`,
+  `github_get_insights`, `github_get_tree`, `github_fetch_file`
+- **search**: `exa_search`, `exa_fetch`
+- **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`,
+  `sqlize_export`, `sqlize_compare` + tools de bancos ao vivo
+  (`postgres_*`/`mysql_*`)
+- **vision**: `vision_image_analysis`, `vision_diff`, `vision_video_analysis`
+- **fetch**: `fetch_request`, `cookie_list`, `cookie_clear`, `fetch_allowlist`,
+  `fetch_history`
+- **anydoc**: `anydoc_convert_to_markdown`, `anydoc_export_to_pdf`,
+  `anydoc_export_to_docx`, `anydoc_export_to_xlsx`
 
 ## Layout padrão
 
@@ -34,28 +55,39 @@ ntdsk.com/mcp/<server>`) na sua pasta. O único servidor fora do Go é o `anydoc
 
 ## Requisitos
 
-- Go 1.25+ (os módulos usam `go 1.26`);
+- Go 1.26+ (os `go.mod` declaram `go 1.26.0`);
 - [Task](https://taskfile.dev/) v3 (opcional — para build via `Taskfile.yml`);
-- Deno (apenas para o `anydoc`).
+- Deno 1.x+ (apenas para o `anydoc`).
 
 ## Build
 
-Com Task (gera os `.exe` em `dist/`):
+O `Taskfile.yml` fixa `GOOS=windows`, `GOARCH=amd64` e `CGO_ENABLED=0` e gera
+os executáveis em `dist/` (pasta criada automaticamente e ignorada pelo git):
 
 ```powershell
-task build
+task build          # todos os servidores
+task build:git      # apenas um servidor (git, github, search, sqlize, vision, fetch, anydoc)
+task clean          # remove dist/
 ```
 
-Direto, por servidor:
+Direto, por servidor (exemplo do `git`):
 
 ```powershell
 cd git
+go mod tidy
 go build -o ../dist/git-mcp.exe ./cmd/git-mcp
 ```
 
-## Logs
+O `anydoc` compila via Deno (o binário também vai para `dist/anydoc.exe`):
 
-Todos os servidores Go gravam o log (apenas stderr/arquivo, **nunca stdout**,
+```powershell
+cd anydoc
+deno task compile   # ou "deno task start" para rodar sem compilar
+```
+
+## Logs e dados persistidos
+
+Todos os servidores Go gravam o log (apenas em stderr/arquivo, **nunca stdout**,
 para não quebrar o protocolo stdio do MCP) em:
 
 ```text
@@ -64,48 +96,82 @@ para não quebrar o protocolo stdio do MCP) em:
 ```
 
 Se a pasta/arquivo não puder ser criado, o log cai para stderr com um aviso
-(o servidor não quebra). Dados persistidos (ex.: banco do `sqlize`) também
-ficam em `~/.local/share/mcp/<server>/`.
+(o servidor não quebra). O `anydoc` (Deno) também usa apenas stderr, sem arquivo.
 
-## Exemplo de configuração (Zed)
+Dados persistidos ficam em locais específicos de cada servidor:
 
-Adicione os servidores em `~/.config/zed/settings.json` (bloco `context_servers`):
+- **fetch** — cookies em `~/.local/share/mcp/fetch/cookies.json`
+  (configurável via `FETCH_COOKIE_FILE`);
+- **sqlize** — banco de estado em `~/.local/state/sqlize/sqlize.db`
+  (configurável via `SQLIZE_STATE_DIR`).
+
+## Variáveis de ambiente
+
+| Servidor | Variável | Padrão | Descrição |
+| --- | --- | --- | --- |
+| `git` | — | — | sem variáveis obrigatórias (repositório informado por chamada) |
+| `github` | `GITHUB_TOKEN` | obrigatório | Personal Access Token |
+| | `GITHUB_BASE_URL` | `https://api.github.com` | URL da API (GitHub Enterprise) |
+| | `GITHUB_TIMEOUT_SECONDS` | `60` | timeout de cada requisição HTTP |
+| `search` | `EXA_API_KEY` | obrigatório | chave da API do Exa |
+| | `EXA_SEARCH_TYPE` | `auto` | tipo de busca padrão do `exa_search` |
+| `sqlize` | `SQLIZE_STATE_DIR` | `~/.local/state/sqlize` | pasta do banco de estado |
+| | `{PREFIXO}_POSTGRES_URL` / `_DSN` | — | conexão Postgres read-only (1 por prefixo) |
+| | `{PREFIXO}_MYSQL_URL` / `_DSN` | — | conexão MySQL read-only (1 por prefixo) |
+| | `SQLIZE_PII_NAMES` / `SQLIZE_PII_WORDS` | — | reforços do redator PII (nomes/termos do domínio) |
+| `vision` | `VISION_BASE_URL` | `https://api.openai.com/v1` | base da API OpenAI-compatible |
+| | `VISION_API_KEY` | vazio | token Bearer (omitível em servidores locais) |
+| | `VISION_MODEL` | `gpt-4o` | modelo de visão |
+| | `VISION_TIMEOUT_SECONDS` | `120` | timeout de cada requisição HTTP |
+| | `VISION_MAX_TOKENS` | `1500` | `max_tokens` da geração |
+| | `VISION_MAX_IMAGE_MB` | `25` | limite de tamanho de imagem |
+| `fetch` | `FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | allowlist de hosts (`.domínio` libera subdomínios) |
+| | `FETCH_TIMEOUT_SECONDS` | `30` | timeout padrão de cada requisição |
+| | `FETCH_MAX_BODY_KB` | `1024` | teto do corpo da resposta |
+| | `FETCH_COOKIE_FILE` | `~/.local/share/mcp/fetch/cookies.json` | persistência dos cookies |
+| `anydoc` | — | — | sem variáveis de ambiente |
+
+## Exemplo de configuração
+
+Gere os executáveis com `task build` e registre os servidores no seu cliente
+MCP no Zed (bloco `context_servers` em `~/.config/zed/settings.json`), com
+caminhos no padrão Linux (`~` expande para o home do usuário):
 
 ```json
 {
   "context_servers": {
     "git": {
-      "command": "C:/Users/<usuario>/nautidesk/mcp/dist/git-mcp.exe"
+      "command": "~/nautidesk/mcp/dist/git-mcp.exe"
     },
     "github": {
-      "command": "C:/Users/<usuario>/nautidesk/mcp/dist/github-mcp.exe",
+      "command": "~/nautidesk/mcp/dist/github-mcp.exe",
       "env": {
         "GITHUB_TOKEN": "<seu-token>"
       }
     },
     "search": {
-      "command": "C:/Users/<usuario>/nautidesk/mcp/dist/search-mcp.exe",
+      "command": "~/nautidesk/mcp/dist/search-mcp.exe",
       "env": {
         "EXA_API_KEY": "<sua-chave>"
       }
     },
     "sqlize": {
-      "command": "C:/Users/<usuario>/nautidesk/mcp/dist/sqlize-mcp.exe"
+      "command": "~/nautidesk/mcp/dist/sqlize-mcp.exe"
     },
     "vision": {
-      "command": "C:/Users/<usuario>/nautidesk/mcp/dist/vision-mcp.exe",
+      "command": "~/nautidesk/mcp/dist/vision-mcp.exe",
       "env": {
         "VISION_API_KEY": "<sua-chave>"
       }
     },
     "fetch": {
-      "command": "C:/Users/<usuario>/nautidesk/mcp/dist/fetch-mcp.exe",
+      "command": "~/nautidesk/mcp/dist/fetch-mcp.exe",
       "env": {
         "FETCH_ALLOW_HOST": "localhost,example.com"
       }
     },
     "anydoc": {
-      "command": "C:/Users/<usuario>/nautidesk/mcp/dist/anydoc.exe",
+      "command": "~/nautidesk/mcp/dist/anydoc.exe"
     }
   }
 }
