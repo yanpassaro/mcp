@@ -11,9 +11,11 @@ reenviados automaticamente. Módulo independente (`module ntdsk.com/mcp/fetch`).
 
 | Tool | Descrição |
 | --- | --- |
-| `fetch_request` | Envia um HTTP request (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) para um host permitido: método, URL, headers opcionais, corpo (JSON/XML/texto), timeout, `noCookies`, `followRedirects` e `noBody`. Retorna timing (DNS/conexão/TLS/primeiro byte), status, tabela de headers selecionados, corpo pretty-printed e o `curl` equivalente. Respostas binárias são resumidas (não despejam bytes). |
+| `fetch_request` | Envia um HTTP request (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) para um host permitido: método, URL, headers opcionais, corpo (JSON/XML/texto), timeout, `noCookies`, `followRedirects` e `noBody`. Retorna timing (DNS/conexão/TLS/primeiro byte), status, lista leve de headers (data em hora local; `Set-Cookie` resumido ao **nome** dos cookies), corpo pretty-printed e o `curl` equivalente. Respostas binárias são resumidas (não despejam bytes). |
 | `cookie_list` | Lista os cookies salvos (domínio, nome, valor, path, expiração, flags). |
 | `cookie_clear` | Limpa cookies: tudo, um domínio, ou um cookie específico (`domain` + `name`). |
+| `fetch_allowlist` | Lista os hosts liberados por `FETCH_ALLOW_HOST`. |
+| `fetch_history` | Devolve as últimas N requisições (padrão 20, máx 200) gravadas no log da sessão — reaproveitáveis para reproduzir chamadas sem redigitar. |
 
 ## Recursos
 
@@ -88,6 +90,10 @@ $env:FETCH_ALLOW_HOST = "localhost,example.com"
 ```
 
 Uso pelo agente: `fetch_request(method: POST, url: http://localhost:8080/api/login, body: {"user":"a","pass":"b"})` → resposta com headers + JSON formatado; se vier `Set-Cookie`, o próximo `fetch_request` já manda o cookie de volta.
+
+Cada `fetch_request` bem-sucedido também é gravado no log da sessão (arquivo em
+`~/.local/share/mcp/fetch/logs/`), e o `fetch_history` devolve essas chamadas a
+partir do arquivo mais recente (as entradas incluem o `curl` para reproduzir).
 
 ## Logs
 

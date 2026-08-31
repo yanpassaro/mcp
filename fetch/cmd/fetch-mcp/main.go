@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	setupLog("fetch")
+	logFile := setupLog("fetch")
 
 	var hosts []string
 	if allowRaw := strings.TrimSpace(os.Getenv("FETCH_ALLOW_HOST")); allowRaw != "" {
@@ -52,26 +52,27 @@ func main() {
 	}
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "fetch-mcp", Version: "0.1.0"}, nil)
-	mcpserver.New(client).Register(server)
+	mcpserver.New(client, logFile).Register(server)
 
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Printf("fetch-mcp stopped: %v", err)
 	}
 }
 
-func setupLog(server string) {
+func setupLog(server string) *os.File {
 	dir := filepath.Join(userLocalDir(), "mcp", server, "logs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		log.Printf("aviso: falha ao criar %s; log segue para stderr: %v", dir, err)
-		return
+		return nil
 	}
 	path := filepath.Join(dir, server+"-"+time.Now().Format("2006-01-02_15-04-05")+".log")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Printf("aviso: falha ao abrir %s; log segue para stderr: %v", path, err)
-		return
+		return nil
 	}
 	log.SetOutput(f)
+	return f
 }
 
 func userLocalDir() string {

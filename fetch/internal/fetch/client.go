@@ -106,10 +106,14 @@ func (c *Client) allowHost(authority string) bool {
 type Req struct {
 	Method          string
 	URL             string
+	Query           map[string]string
 	Body            string
 	Headers         map[string]string
+	BasicAuth       string
+	BearerToken     string
 	NoCookies       bool
 	FollowRedirects bool
+	MaxRedirects    int
 	NoBody          bool
 	Timeout         time.Duration
 }
@@ -225,6 +229,13 @@ type Resp struct {
 
 func (c *Client) Do(ctx context.Context, in Req) (*Resp, error) {
 	u, err := url.Parse(strings.TrimSpace(in.URL))
+	if len(in.Query) > 0 {
+		q := u.Query()
+		for k, v := range in.Query {
+			q.Set(k, v)
+		}
+		u.RawQuery = q.Encode()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("URL inválida: %w", err)
 	}
@@ -252,7 +263,10 @@ func (c *Client) Do(ctx context.Context, in Req) (*Resp, error) {
 	start := time.Now()
 	hops := []string{u.String()}
 	cur := u
-	const maxHops = 10
+	maxHops := 10
+	if in.MaxRedirects > 0 {
+		maxHops = in.MaxRedirects
+	}
 	var timings []hopTiming
 	var curl string
 	for hop := 0; ; hop++ {
@@ -263,6 +277,18 @@ func (c *Client) Do(ctx context.Context, in Req) (*Resp, error) {
 		req, err := http.NewRequestWithContext(ctx, method, cur.String(), rd)
 		if err != nil {
 			return nil, fmt.Errorf("montar requisição: %w", err)
+		}
+		if req.Header.Get("User-Agent") == "" {
+			req.Header.Set("User-Agent", "NTDSK-FETCH/1.0")
+		}
+		if in.BasicAuth != "" {
+			parts := strings.SplitN(in.BasicAuth, ":", 2)
+			if len(parts) == 2 {
+				req.SetBasicAuth(parts[0], parts[1])
+			}
+		}
+		if in.BearerToken != "" {
+			req.Header.Set("Authorization", "Bearer "+in.BearerToken)
 		}
 		if !in.NoCookies {
 			secure := cur.Scheme == "https"

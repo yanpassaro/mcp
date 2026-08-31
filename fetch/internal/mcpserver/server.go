@@ -3,6 +3,12 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,10 +18,15 @@ import (
 
 type Server struct {
 	client *fetch.Client
+	log    *log.Logger // sem prefixo, para o histórico (linhas iniciam em "## Fetch")
 }
 
-func New(client *fetch.Client) *Server {
-	return &Server{client: client}
+func New(client *fetch.Client, logFile *os.File) *Server {
+	w := io.Writer(io.Discard)
+	if logFile != nil {
+		w = logFile
+	}
+	return &Server{client: client, log: log.New(w, "", 0)}
 }
 
 func (s *Server) Register(server *mcp.Server) {
@@ -33,6 +44,16 @@ func (s *Server) Register(server *mcp.Server) {
 		Name:        "cookie_clear",
 		Description: "Clear saved cookies: everything (no args), all cookies of one domain, or a single cookie (domain + name). Returns how many were removed.",
 	}, s.cookieClearTool)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "fetch_allowlist",
+		Description: "List the hosts allowed by FETCH_ALLOW_HOST for fetch_request.",
+	}, s.allowlistTool)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "fetch_history",
+		Description: "Return the last N fetch requests from the log files. Useful to reproduce recent calls without retyping them.",
+	}, s.historyTool)
 }
 
 type emptyInput struct{}
@@ -40,12 +61,17 @@ type emptyInput struct{}
 type requestInput struct {
 	Method           string            `json:"method,omitempty" jsonschema:"HTTP method: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS (default GET)."`
 	URL              string            `json:"url" jsonschema:"Full URL with scheme and host, e.g. http://localhost:8080/api/items. The host must be in the FETCH_ALLOW_HOST allowlist."`
+	Query            map[string]string `json:"query,omitempty" jsonschema:"Query parameters to append to the URL."`
 	Headers          map[string]string `json:"headers,omitempty" jsonschema:"Extra request headers (optional)."`
 	Body             string            `json:"body,omitempty" jsonschema:"Request body: JSON, XML or plain text. Content-Type is inferred from the body ({, [, <) unless you set one in headers."`
+	BasicAuth        string            `json:"basicAuth,omitempty" jsonschema:"Basic auth as user:pass."`
+	BearerToken      string            `json:"bearerToken,omitempty" jsonschema:"Bearer token for Authorization header."`
 	Timeout          int               `json:"timeout,omitempty" jsonschema:"Timeout in seconds (default 30)."`
 	NoCookies       bool  `json:"noCookies,omitempty" jsonschema:"If true, saved cookies are not attached to this request."`
 	FollowRedirects *bool `json:"followRedirects,omitempty" jsonschema:"If true, follows redirects (default true)."`
+	MaxRedirects     int   `json:"maxRedirects,omitempty" jsonschema:"Maximum number of redirects to follow (default 10)."`
 	NoBody          bool  `json:"noBody,omitempty" jsonschema:"If true, the response body is not read or shown (only status, headers and timing)."`
+	Summary         bool  `json:"summary,omitempty" jsonschema:"If true, return a short summary with status, timing, content-type, size and curl only."`
 	HTMLRaw         bool  `json:"htmlRaw,omitempty" jsonschema:"If true, HTML responses are shown as raw markup instead of extracted text."`
 	HTMLMaxChars    int   `json:"htmlMaxChars,omitempty" jsonschema:"Max characters of extracted HTML text (default 1200). Only applies when the response is HTML and htmlRaw is false."`
 }
@@ -58,17 +84,30 @@ func (s *Server) requestTool(ctx context.Context, _ *mcp.CallToolRequest, in req
 	resp, err := s.client.Do(ctx, fetch.Req{
 		Method:          in.Method,
 		URL:             in.URL,
+		Query:           in.Query,
 		Body:            in.Body,
 		Headers:         in.Headers,
+		BasicAuth:       in.BasicAuth,
+		BearerToken:     in.BearerToken,
 		NoCookies:       in.NoCookies,
 		FollowRedirects: follow,
+		MaxRedirects:    in.MaxRedirects,
 		NoBody:          in.NoBody,
 		Timeout:         time.Duration(in.Timeout) * time.Second,
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	return textResult(formatResponse(resp, s.client.MaxBody(), in.HTMLRaw, in.HTMLMaxChars))
+	var md string
+	if in.Summary {
+		md = formatSummary(resp)
+	} else {
+		md = formatResponse(resp, s.client.MaxBody(), in.HTMLRaw, in.HTMLMaxChars)
+	}
+	if md != "" {
+		s.log.Println(md)
+	}
+	return textResult(md)
 }
 
 func (s *Server) cookieListTool(ctx context.Context, _ *mcp.CallToolRequest, _ emptyInput) (*mcp.CallToolResult, any, error) {
@@ -78,6 +117,76 @@ func (s *Server) cookieListTool(ctx context.Context, _ *mcp.CallToolRequest, _ e
 func (s *Server) cookieClearTool(ctx context.Context, _ *mcp.CallToolRequest, in cookieClearInput) (*mcp.CallToolResult, any, error) {
 	n := s.client.ClearCookies(in.Domain, in.Name)
 	return textResult(clearMessage(n, in.Domain, in.Name))
+}
+
+func (s *Server) allowlistTool(ctx context.Context, _ *mcp.CallToolRequest, _ emptyInput) (*mcp.CallToolResult, any, error) {
+	hosts := s.client.AllowHosts()
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Allowed hosts (%d)\n\n", len(hosts))
+	for _, h := range hosts {
+		fmt.Fprintf(&b, "- `%s`\n", h)
+	}
+	return textResult(b.String())
+}
+
+type historyInput struct {
+	Limit int `json:"limit,omitempty" jsonschema:"Number of recent entries to return (default 20, max 200)."`
+}
+
+func (s *Server) historyTool(ctx context.Context, _ *mcp.CallToolRequest, in historyInput) (*mcp.CallToolResult, any, error) {
+	limit := in.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.Getenv("USERPROFILE")
+	}
+	logDir := filepath.Join(home, ".local", "share", "mcp", "fetch", "logs")
+	files, err := os.ReadDir(logDir)
+	if err != nil {
+		return textResult(fmt.Sprintf("## Fetch history\n\nLog directory not found: %s\n", logDir))
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Name() < files[j].Name() })
+	var entries []string
+	buf := ""
+	for i := len(files) - 1; i >= 0 && len(entries) < limit; i-- {
+		f := files[i]
+		if f.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(logDir, f.Name()))
+		if err != nil {
+			continue
+		}
+		for _, ln := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(ln, "## Fetch") {
+				if strings.TrimSpace(buf) != "" {
+					entries = append(entries, strings.TrimSpace(buf))
+					if len(entries) >= limit {
+						break
+					}
+				}
+				buf = ln
+			} else if buf != "" {
+				buf += "\n" + ln
+			}
+		}
+		if len(entries) < limit && strings.TrimSpace(buf) != "" {
+			entries = append(entries, strings.TrimSpace(buf))
+			buf = ""
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Fetch history (last %d entries)\n\n", limit)
+	if len(entries) == 0 {
+		b.WriteString("_Nenhum registro encontrado nos logs._\n")
+	} else {
+		for i, e := range entries {
+			fmt.Fprintf(&b, "### %d\n\n%s\n\n---\n\n", i+1, e)
+		}
+	}
+	return textResult(strings.TrimSpace(b.String()))
 }
 
 type cookieClearInput struct {

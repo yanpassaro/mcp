@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -37,7 +38,7 @@ func formatResponse(r *fetch.Resp, maxBody int64, htmlRaw bool, htmlMaxChars int
 		fmt.Fprintf(&b, "- **Redirecionamentos (%d):** %s\n", len(r.Hops)-1, strings.Join(r.Hops, " → "))
 	}
 	b.WriteString("\n### Headers\n\n")
-	b.WriteString(headerTable(r.Header))
+	b.WriteString(formatHeaders(r.Header))
 	b.WriteString("\n### Body\n\n")
 	b.WriteString(bodyBlock(r, htmlRaw, htmlMaxChars))
 	if r.Truncated {
@@ -152,31 +153,30 @@ func headerRank(k string) (int, bool) {
 	return 0, false
 }
 
-func headerTable(h map[string][]string) string {
+type headerRow struct {
+	name  string
+	value string
+	rank  int
+	bold  bool
+}
+
+func formatHeaders(h http.Header) string {
 	if len(h) == 0 {
 		return "_Sem headers._\n"
 	}
-	type row struct {
-		name  string
-		value string
-		rank  int
-		bold  bool
-	}
-	var rows []row
+	var rows []headerRow
+	var cookies []string
 	for k, vs := range h {
-		if p, ok := headerRank(k); ok {
-			rows = append(rows, row{name: k, value: strings.Join(vs, ", "), rank: p, bold: true})
+		if strings.EqualFold(k, "Set-Cookie") {
+			for _, v := range vs {
+				if name := cookieName(v); name != "" {
+					cookies = append(cookies, name)
+				}
+			}
+			continue
 		}
-	}
-	if len(rows) == 0 {
-		keys := make([]string, 0, len(h))
-		for k := range h {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			rows = append(rows, row{name: k, value: strings.Join(h[k], ", ")})
-		}
+		rk, known := headerRank(k)
+		rows = append(rows, headerRow{name: k, value: strings.Join(vs, ", "), rank: rk, bold: known})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].rank != rows[j].rank {
@@ -185,19 +185,39 @@ func headerTable(h map[string][]string) string {
 		return strings.ToLower(rows[i].name) < strings.ToLower(rows[j].name)
 	})
 	var b strings.Builder
-	b.WriteString("| Header | Valor |\n| --- | --- |\n")
 	for _, r := range rows {
+		val := r.value
+		if strings.EqualFold(r.name, "Date") {
+			if d := prettyDate(r.value); d != "" {
+				val = d
+			}
+		}
 		name := cell(r.name)
 		if r.bold {
 			name = "**" + name + "**"
 		}
-		b.WriteString("| ")
-		b.WriteString(name)
-		b.WriteString(" | ")
-		b.WriteString(cell(foldValue(r.value, 180)))
-		b.WriteString(" |\n")
+		fmt.Fprintf(&b, "- %s: `%s`\n", name, cell(foldValue(val, 160)))
+	}
+	if len(cookies) > 0 {
+		for i, c := range cookies {
+			cookies[i] = "`" + c + "`"
+		}
+		fmt.Fprintf(&b, "- **Cookies (%d):** %s\n", len(cookies), strings.Join(cookies, ", "))
 	}
 	return b.String()
+}
+
+func cookieName(v string) string {
+	// "nome=valor; Path=/; ..." → só o nome do cookie
+	return strings.TrimSpace(strings.SplitN(v, "=", 2)[0])
+}
+
+func prettyDate(s string) string {
+	t, err := time.Parse(http.TimeFormat, s)
+	if err != nil {
+		return ""
+	}
+	return t.Local().Format("02/01/2006 15:04:05")
 }
 
 func foldValue(s string, n int) string {
@@ -402,6 +422,32 @@ func truncate(s string, n int) string {
 		return string(r[:n]) + "…"
 	}
 	return s
+}
+
+func formatSummary(r *fetch.Resp) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Fetch `%s %s`\n\n", r.Method, r.URL)
+	size := int64(len(r.Body))
+	if r.NoBody {
+		if cl := r.Header.Get("Content-Length"); cl != "" {
+			if n, err := strconv.ParseInt(cl, 10, 64); err == nil && n >= 0 {
+				size = n
+			}
+		}
+	}
+	fmt.Fprintf(&b, "- **Status:** `%s` · **Tempo total:** %s · **Tamanho:** %s\n", r.Status, r.Duration.Round(time.Millisecond), sizeLabel(size))
+	if ct := r.Header.Get("Content-Type"); ct != "" {
+		fmt.Fprintf(&b, "- **Content-Type:** %s\n", ct)
+	}
+	if line := timingLine(r); line != "" {
+		fmt.Fprintf(&b, "- **Tempo (1º hop):** %s\n", line)
+	}
+	if r.Curl != "" {
+		b.WriteString("\n### Reproduzir\n\n```bash\n")
+		b.WriteString(r.Curl)
+		b.WriteString("\n```\n")
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func cell(s string) string {
