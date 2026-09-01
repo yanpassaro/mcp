@@ -296,7 +296,7 @@ func formatContributionHeatmap(counts map[string]int, start, now time.Time, week
 		header[i] = ' '
 	}
 	prevMonth := start.AddDate(0, -1, 0)
-	for w := 0; w < weeks; w++ {
+	for w := range weeks {
 		weekStart := start.AddDate(0, 0, w*7)
 		if weekStart.Month() != prevMonth.Month() || weekStart.Year() != prevMonth.Year() {
 			label := monthLabels[int(weekStart.Month())-1]
@@ -312,9 +312,9 @@ func formatContributionHeatmap(counts map[string]int, start, now time.Time, week
 	b.WriteString("\n")
 
 	dayNames := [7]string{"seg", "ter", "qua", "qui", "sex", "sáb", "dom"}
-	for d := 0; d < 7; d++ {
+	for d := range 7 {
 		line := []rune(dayNames[d] + " ")
-		for w := 0; w < weeks; w++ {
+		for w := range weeks {
 			day := start.AddDate(0, 0, w*7+d)
 			n := 0
 			if !day.After(now) {
@@ -478,7 +478,7 @@ func formatBlame(lines []string, blame []blameLine, maxLines int) string {
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "## Blame (%d linhas)\n\n", len(lines))
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		b := blame[i]
 		fmt.Fprintf(&sb, "%s %s | %s\n", b.SHA, b.Author, strings.TrimRight(lines[i], "\n"))
 	}
@@ -651,7 +651,7 @@ func diffLines(a, b []string) []diffLine {
 
 	solved := false
 	endD := 0
-	for d := 0; d <= max; d++ {
+	for d := range max + 1 {
 		trace = append(trace, append([]int(nil), v...))
 		for k := -d; k <= d; k += 2 {
 			x := 0

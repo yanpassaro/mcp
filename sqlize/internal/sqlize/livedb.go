@@ -358,49 +358,6 @@ func (c *liveDB) query(ctx context.Context, q string, args []string, strict, noL
 	return cols, out, nil
 }
 
-func (c *liveDB) explain(ctx context.Context, q string) (string, error) {
-	stmt := "EXPLAIN " + q
-	if c.driver == "pgx" {
-		stmt = "EXPLAIN (FORMAT TEXT) " + q
-	}
-	db, err := sql.Open(c.driver, c.dsn)
-	if err != nil {
-		return "", connErr("abrir conexão")
-	}
-	defer db.Close()
-	rs, err := db.QueryContext(ctx, stmt)
-	if err != nil {
-		return "", fmt.Errorf("EXPLAIN: %s", scrubInfra(err))
-	}
-	defer rs.Close()
-	cols, err := rs.Columns()
-	if err != nil {
-		return "", err
-	}
-	var b strings.Builder
-	for rs.Next() {
-		raw := make([]sql.RawBytes, len(cols))
-		ptrs := make([]any, len(cols))
-		for i := range raw {
-			ptrs[i] = &raw[i]
-		}
-		if err := rs.Scan(ptrs...); err != nil {
-			return "", err
-		}
-		cells := make([]string, len(cols))
-		for i, rb := range raw {
-			if rb != nil {
-				cells[i] = cleanCell(string(rb))
-			}
-		}
-		b.WriteString(strings.Join(cells, " | "))
-		b.WriteString("\n")
-	}
-	if err := rs.Err(); err != nil {
-		return "", err
-	}
-	return b.String(), nil
-}
 
 func (c *liveDB) tables(ctx context.Context) (string, error) {
 	var q string

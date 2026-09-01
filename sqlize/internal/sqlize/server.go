@@ -3,8 +3,6 @@ package sqlize
 import (
 	"context"
 	"fmt"
-	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -47,26 +45,6 @@ func (s *Server) Register(server *mcp.Server) {
 		Description: "Export the result of a query or a table to a file. Output formats: .json, .csv, .tsv, .xlsx, .sql, .html, .xml (determined by the 'path' extension).",
 	}, s.exportTool)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sqlize_compare",
-		Description: "Compare two tables or two SELECT queries in the local SQLite database by a key column. Shows a summary per status (only in A / only in B / differing rows) plus the details per key. 'key' is mandatory (comma separated for composite keys); provide one of table_a/query_a and one of table_b/query_b. Results are masked except 'redact': false.",
-	}, s.compareTool)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sqlize_profile",
-		Description: "Profile a table or a SELECT/WITH query in the local SQLite database: per column, computes non-null/distinct counts, numeric min/max/avg, the share of rows whose value would be masked (a PII indicator) and the most frequent values. Sources: 'table' or 'query' (inform one). Sample values are masked by default ('redact': false disables).",
-	}, s.profileTool)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sqlize_scan",
-		Description: "Scan a table or a SELECT/WITH query in the local SQLite database and report a PII inventory per column: counts of detected entities (CPF, CNPJ, e-mail, phone, card, IP, PERSON, etc.). Never exposes the sensitive values themselves - only counts. Sources: 'table' or 'query' (inform one).",
-	}, s.scanTool)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sqlize_sync",
-		Description: "Generate SQL (INSERT / UPDATE / DELETE) to make table_b look like table_a (or the result of a query), keyed by 'key' column(s). 'key' is mandatory (comma separated for composite keys); provide one of table_a/query_a and one of table_b/query_b. Value literals are masked by default ('redact': false to get an executable script).",
-	}, s.syncTool)
-
 	for _, cfg := range discoverLiveDBs() {
 		prefix := cfg.ToolPrefix()
 		env := cfg.EnvVar
@@ -86,10 +64,7 @@ func (s *Server) Register(server *mcp.Server) {
 			Name:        prefix + "_schema",
 			Description: fmt.Sprintf("Describe the columns (name + type) of a %s table (%s). Use 'schema.table' or just 'table'. Output is always redacted.", cfg.Engine, env),
 		}, s.liveSchemaHandler(cfg))
-		mcp.AddTool(server, &mcp.Tool{
-			Name:        prefix + "_explain",
-			Description: fmt.Sprintf("Explain a SQL query (SELECT or WITH) against the live %s database configured in %s WITHOUT executing it: shows the %s execution plan (EXPLAIN). Read-only and safe — literals are allowed (the query is not executed) but placeholders are not (EXPLAIN has no bound parameters).", cfg.Engine, env, cfg.Engine),
-		}, s.liveExplainHandler(cfg))
+
 	}
 }
 
@@ -225,131 +200,6 @@ func (s *Server) exportTool(ctx context.Context, _ *mcp.CallToolRequest, in expo
 	return textResult(res)
 }
 
-type compareInput struct {
-	Key    string `json:"key" jsonschema:"Column(s) used as the comparison key, comma separated (mandatory)."`
-	TableA string `json:"table_a,omitempty" jsonschema:"First table (alternative to query_a)."`
-	QueryA string `json:"query_a,omitempty" jsonschema:"First SELECT/WITH query (alternative to table_a)."`
-	TableB string `json:"table_b,omitempty" jsonschema:"Second table (alternative to query_b)."`
-	QueryB string `json:"query_b,omitempty" jsonschema:"Second SELECT/WITH query (alternative to table_b)."`
-	Redact *bool  `json:"redact,omitempty" jsonschema:"Apply partial masking to sensitive data. Default: true."`
-}
-
-func compareSource(table, query, label string) (string, error) {
-	t, q := strings.TrimSpace(table), strings.TrimSpace(query)
-	switch {
-	case t != "" && q != "":
-		return "", fmt.Errorf("informe apenas um de %s", label)
-	case t != "":
-		return "SELECT * FROM " + quoteIdent(t), nil
-	case q != "":
-		clean, err := sanitizeStoreQuery(q, nil)
-		if err != nil {
-			return "", err
-		}
-		return clean, nil
-	default:
-		return "", fmt.Errorf("informe %s (tabela ou query)", label)
-	}
-}
-
-func (s *Server) columnNames(ctx context.Context, q string) ([]string, error) {
-	cols, _, err := s.store.query(ctx, "SELECT * FROM ("+q+") _src LIMIT 0")
-	return cols, err
-}
-
-func (s *Server) compareTool(ctx context.Context, _ *mcp.CallToolRequest, in compareInput) (*mcp.CallToolResult, any, error) {
-	if strings.TrimSpace(in.Key) == "" {
-		return nil, nil, fmt.Errorf("'key' é obrigatório (coluna(s) separadas por vírgula)")
-	}
-	qa, err := compareSource(in.TableA, in.QueryA, "table_a/query_a")
-	if err != nil {
-		return nil, nil, err
-	}
-	qb, err := compareSource(in.TableB, in.QueryB, "table_b/query_b")
-	if err != nil {
-		return nil, nil, err
-	}
-	colsA, err := s.columnNames(ctx, qa)
-	if err != nil {
-		return nil, nil, fmt.Errorf("colunas de A: %w", err)
-	}
-	colsB, err := s.columnNames(ctx, qb)
-	if err != nil {
-		return nil, nil, fmt.Errorf("colunas de B: %w", err)
-	}
-	if len(colsA) != len(colsB) {
-		return nil, nil, fmt.Errorf("as fontes têm colunas diferentes (A: %s; B: %s)", strings.Join(colsA, ", "), strings.Join(colsB, ", "))
-	}
-	for i := range colsA {
-		if colsA[i] != colsB[i] {
-			return nil, nil, fmt.Errorf("coluna %d difere: A tem %q e B tem %q", i+1, colsA[i], colsB[i])
-		}
-	}
-	keyCols := make([]string, 0)
-	for k := range strings.SplitSeq(in.Key, ",") {
-		if k = strings.TrimSpace(k); k != "" {
-			keyCols = append(keyCols, k)
-		}
-	}
-	if len(keyCols) == 0 {
-		return nil, nil, fmt.Errorf("'key' vazia")
-	}
-	keySet := map[string]bool{}
-	for _, k := range keyCols {
-		keySet[k] = true
-		if !slices.Contains(colsA, k) {
-			return nil, nil, fmt.Errorf("coluna chave %q não existe nas fontes (disponíveis: %s)", k, strings.Join(colsA, ", "))
-		}
-	}
-	dataCols := make([]string, 0)
-	for _, c := range colsA {
-		if !keySet[c] {
-			dataCols = append(dataCols, c)
-		}
-	}
-	parts := make([]string, 0, len(keyCols)+2)
-	for _, k := range keyCols {
-		parts = append(parts, "COALESCE(a."+quoteIdent(k)+", b."+quoteIdent(k)+") AS "+quoteIdent(k))
-	}
-	status := "'igual'"
-	if len(dataCols) > 0 {
-		preds := make([]string, 0, len(dataCols))
-		for _, c := range dataCols {
-			preds = append(preds, "a."+quoteIdent(c)+" IS NOT b."+quoteIdent(c))
-		}
-		status = "CASE WHEN (" + strings.Join(preds, " OR ") + ") THEN 'diferente' ELSE 'igual' END"
-	}
-	status = "CASE WHEN a." + quoteIdent(keyCols[0]) + " IS NULL THEN 'só-em-B' WHEN b." + quoteIdent(keyCols[0]) + " IS NULL THEN 'só-em-A' ELSE " + status + " END AS status"
-	joins := make([]string, 0, len(keyCols))
-	for _, k := range keyCols {
-		joins = append(joins, "a."+quoteIdent(k)+" = b."+quoteIdent(k))
-	}
-	withClause := "WITH _a AS (" + qa + "), _b AS (" + qb + ") "
-	orderAux := ""
-	if len(keyCols) > 1 {
-		orderAux = ", 2"
-	}
-	body := "SELECT " + strings.Join(parts, ", ") + ", " + status + " " +
-		"FROM _a a FULL OUTER JOIN _b b ON " + strings.Join(joins, " AND ") + " " +
-		"ORDER BY 1" + orderAux + ", " + strconv.Itoa(len(keyCols)+1)
-	diff := withClause + body
-
-	doRedact := in.Redact == nil || *in.Redact
-	agg, err := s.store.runQuery(ctx,
-		withClause+"SELECT status, COUNT(*) AS qtd FROM ("+body+") GROUP BY status "+
-			"ORDER BY CASE status WHEN 'só-em-A' THEN 1 WHEN 'só-em-B' THEN 2 WHEN 'diferente' THEN 3 ELSE 4 END",
-		nil, doRedact)
-	if err != nil {
-		return nil, nil, err
-	}
-	detail, err := s.store.runQuery(ctx, diff, nil, doRedact)
-	if err != nil {
-		return nil, nil, err
-	}
-	var out strings.Builder
-	fmt.Fprintf(&out, "## Comparação (chave: %s)\n\n%s\n\n## Detalhe por chave\n\n%s", strings.Join(keyCols, ", "), agg, detail)
-	return textResult(out.String())
-}
 
 const liveMaxRows = 200
 
@@ -466,33 +316,6 @@ type liveQueryInput struct {
 	Args []string `json:"args,omitempty" jsonschema:"Bound parameters for the query (optional). Passed as parameters, never interpolated into the SQL."`
 }
 
-type liveExplainInput struct {
-	SQL string `json:"sql" jsonschema:"Read-only SQL query (SELECT or WITH) to explain. Do not use ';'."`
-}
-
-func (s *Server) liveExplainHandler(cfg liveDBConfig) func(context.Context, *mcp.CallToolRequest, liveExplainInput) (*mcp.CallToolResult, any, error) {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in liveExplainInput) (*mcp.CallToolResult, any, error) {
-		if strings.TrimSpace(in.SQL) == "" {
-			return nil, nil, fmt.Errorf("'sql' é obrigatório")
-		}
-		clean, err := sanitizeReadQuery(in.SQL)
-		if err != nil {
-			return nil, nil, err
-		}
-		if rePgPlaceholder.MatchString(clean) || strings.Contains(clean, "?") {
-			return nil, nil, fmt.Errorf("EXPLAIN não aceita placeholders; use valores concretos no SQL (a query não é executada, então literais são seguros)")
-		}
-		c, err := newLiveDB(cfg)
-		if err != nil {
-			return nil, nil, err
-		}
-		plan, err := c.explain(ctx, clean)
-		if err != nil {
-			return nil, nil, fmt.Errorf("executar EXPLAIN: %s", scrubInfra(err))
-		}
-		return textResult(plan)
-	}
-}
 
 type liveConnInput struct{}
 

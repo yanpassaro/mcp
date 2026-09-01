@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "labels": {
+    "PERSON": "PESSOA",
+    "CPF": "CPF",
+    "CNPJ": "CNPJ",
+    "ID": "DOCUMENTO",
+    "EMAIL": "EMAIL",
+    "PHONE": "TELEFONE",
+    "CEP": "CEP",
+    "ADDRESS": "ENDEREÇO",
+    "BANK": "CONTA",
+    "CARD": "CARTÃO",
+    "DATE": "DATA",
+    "SECRET": "SEGREDO",
+    "USER": "USUÁRIO",
+    "RG": "RG",
+    "URL": "URL",
+    "IP": "IP",
+    "MAC": "MAC",
+    "JWT": "JWT",
+    "HASH": "HASH",
+    "BTC": "BTC",
+    "CREDURL": "URL"
+  },
+  "columns": {
+    "PERSON": [
+      "nome", "nome completo", "nome da mae", "nome do pai", "nome social",
+      "nome completo do cliente", "nome responsavel", "pessoa", "pessoas",
+      "cliente", "consumidor", "responsavel", "responsavel legal", "contato",
+      "contato principal", "proprietario", "funcionario", "colaborador",
+      "atendente", "vendedor", "representante", "diretor", "gerente", "medico",
+      "paciente", "aluno", "professor", "candidato", "solicitante",
+      "beneficiario", "customer", "client", "full name", "first name",
+      "firstname", "last name", "lastname", "surname", "given name", "person",
+      "person name", "name of contact", "mothers name", "fathers name",
+      "contact name", "contact person", "responsible", "owner", "proprietor",
+      "employee", "staff", "buyer", "seller", "supplier", "vendor", "merchant",
+      "agent", "manager", "supervisor", "salesperson", "salesman", "consultant",
+      "attorney", "lawyer", "applicant", "tenant", "guest", "member", "partner",
+      "recipient", "author", "creator", "employer", "contractor", "assistant",
+      "coordinator", "founder", "president", "secretary", "advisor", "analyst",
+      "engineer", "developer", "delivery", "courier", "driver", "landlord",
+      "spouse", "relative", "guardian", "emergency contact", "next of kin",
+      "doctor", "patient", "student", "teacher", "candidate"
+    ],
+    "CPF": ["cpf"],
+    "CNPJ": ["cnpj"],
+    "ID": [
+      "rg", "cnh", "renavam", "nis", "pis", "pasep", "titulo de eleitor",
+      "passaporte", "inscricao estadual", "inscricao municipal", "identidade",
+      "passport", "ssn", "identity", "tax id", "taxid", "tax payer id",
+      "taxpayer id", "voter id", "national id", "id card", "id number",
+      "drivers license", "driver license", "license number", "license plate",
+      "plate", "doc number", "document number", "enrollment", "registration"
+    ],
+    "EMAIL": [
+      "email", "e-mail", "email principal", "email contato",
+      "email corporativo", "mail", "mail address", "email address",
+      "contact email", "official email"
+    ],
+    "PHONE": [
+      "telefone", "fone", "fone fixo", "telefone fixo", "telefone principal",
+      "celular", "celular principal", "whatsapp", "phone", "telephone",
+      "phone number", "contact number", "mobile", "mobile number", "cellphone",
+      "cell", "work phone", "home phone", "landline", "whatsapp number", "fax"
+    ],
+    "ADDRESS": [
+      "endereco", "endereco completo", "logradouro", "rua", "avenida", "bairro",
+      "distrito", "cidade", "estado", "uf", "pais", "cep", "codigo postal",
+      "localizacao", "address", "street", "avenue", "neighborhood", "district",
+      "city", "state", "country", "zip", "zipcode", "zip code", "postal code",
+      "postcode", "street address", "postal address", "home address",
+      "work address", "residence", "address line", "province", "region",
+      "municipality", "county", "quarter", "zone", "ward", "location",
+      "locality", "village"
+    ],
+    "BANK": [
+      "banco", "agencia", "conta", "conta corrente", "numero da conta",
+      "bank", "bank account", "agency", "branch", "account", "checking account",
+      "account number", "routing number", "sort code", "iban", "swift", "bic",
+      "wire"
+    ],
+    "CARD": [
+      "cvv", "validade", "cartao", "numero do cartao", "numero cartao",
+      "expiry", "card", "card number", "cardholder", "cardholder name",
+      "credit card", "creditcard", "debit card", "pan", "cvv2", "cvc",
+      "security code", "verification code"
+    ],
+    "DATE": [
+      "data de nascimento", "data nascimento", "nascimento",
+      "data de aniversario", "birthdate", "birth date", "birth day", "birthday",
+      "dob", "date of birth", "born"
+    ],
+    "SECRET": [
+      "senha", "chave", "token", "access token", "authorization", "auth",
+      "api key", "api-key", "secret", "bearer", "password", "passwd", "pwd",
+      "pass", "private key", "secret key", "client secret", "credential",
+      "credentials", "session", "session id", "session_id", "cookie", "csrf",
+      "otp", "2fa", "pin", "access key", "api token", "refresh token",
+      "recovery code"
+    ],
+    "USER": [
+      "usuario", "login", "user", "username", "user id", "userid",
+      "screen name", "handle", "account name"
+    ]
+  },
+  "contexts": {
+    "PERSON": [
+      "nome", "cliente", "responsavel", "contato", "paciente", "sr", "sra",
+      "srta", "dr", "dra", "senhor", "senhora", "dona", "dom", "prof", "eng",
+      "adv", "com", "para", "por", "name", "customer", "patient", "contact"
+    ],
+    "CPF": ["cpf", "documento", "doc", "inscricao", "document"],
+    "CNPJ": ["cnpj", "inscricao", "juridica", "document", "company"],
+    "ID": [
+      "rg", "identidade", "documento", "passaporte", "cnh", "id", "passport",
+      "document", "identity", "license"
+    ],
+    "EMAIL": ["email", "e-mail", "mail", "correio", "contact", "address"],
+    "PHONE": [
+      "telefone", "fone", "celular", "contato", "whatsapp", "phone", "mobile",
+      "tel"
+    ],
+    "CEP": ["cep", "codigo postal", "postal", "zip"],
+    "BANK": ["banco", "agencia", "conta", "bank", "account", "iban", "swift"],
+    "CARD": ["cartao", "cvv", "validade", "card", "credit", "expiry", "pan"],
+    "DATE": [
+      "nascimento", "nascido", "aniversario", "validade", "birth", "born", "dob"
+    ],
+    "ADDRESS": ["endereco", "rua", "logradouro", "address", "street", "local"],
+    "SECRET": [
+      "senha", "chave", "token", "secret", "password", "api key", "credential",
+      "session"
+    ],
+    "USER": ["usuario", "login", "user", "username", "account"]
+  },
+  "name": {
+    "first_names": [
+      "joao", "jose", "antonio", "francisco", "carlos", "paulo", "pedro",
+      "lucas", "gabriel", "matheus", "rafael", "marcos", "bruno", "thiago",
+      "felipe", "gustavo", "rodrigo", "fernando", "eduardo", "daniel",
+      "leonardo", "ricardo", "andre", "henrique", "guilherme", "diego",
+      "vinicius", "alexandre", "fabio", "sergio", "rogerio", "jorge", "marcio",
+      "anderson", "douglas", "miguel", "arthur", "bernardo", "enzo", "samuel",
+      "benjamin", "maria", "ana", "juliana", "mariana", "fernanda", "camila",
+      "larissa", "beatriz", "amanda", "patricia", "leticia", "vanessa",
+      "carolina", "gabriela", "aline", "bruna", "jessica", "natalia", "bianca",
+      "raquel", "renata", "sabrina", "luciana", "sandra", "claudia", "adriana",
+      "daniela", "priscila", "isadora", "helena", "alice", "sophia", "laura",
+      "valentina", "julia", "giovanna", "luana"
+    ],
+    "stopwords": ["de", "da", "do", "dos", "das", "e", "a", "o"],
+    "deny": [
+      "janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho",
+      "agosto", "setembro", "outubro", "novembro", "dezembro",
+      "segunda", "terca", "quarta", "quinta", "sexta", "sabado", "domingo",
+      "january", "february", "march", "april", "may", "june", "july", "august",
+      "september", "october", "november", "december",
+      "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+      "sunday",
+      "sao", "santa", "nossa", "senhor", "senhora", "dom", "vila", "bom",
+      "boa", "valor", "total", "status", "pedido", "venda", "compra", "produto",
+      "servico", "item", "codigo", "numero", "nota", "registro", "cadastro",
+      "usuario", "banco", "rua", "avenida", "travessa", "alameda", "estrada",
+      "rodovia", "praca", "beco", "largo", "viela", "condominio", "conjunto",
+      "residencial", "loteamento", "chacara", "sitio", "fazenda",
+      "street", "avenue", "road", "highway", "lane", "square", "building",
+      "floor", "suite", "apartment", "house", "bank", "company", "group",
+      "association", "university", "college", "school", "hospital", "clinic",
+      "institute", "center", "government", "ministry", "agency", "society",
+      "industry", "factory",
+      "javascript", "script", "typescript", "python", "java", "ruby", "php",
+      "golang", "kotlin", "swift", "scala", "rust", "html", "css", "sql",
+      "mysql", "postgresql", "mongodb", "redis", "docker", "kubernetes",
+      "linux", "windows", "android", "ios", "cloud", "aws", "azure", "gcp",
+      "react", "angular", "vue", "node", "api", "graphql", "git", "github",
+      "devops", "backend", "frontend", "fullstack", "database", "serverless",
+      "terraform", "software", "sistema", "dados", "web", "mobile", "stack"
+    ],
+    "geo": [
+      "acre", "alagoas", "amapa", "amazonas", "bahia", "ceara", "espirito santo",
+      "goias", "maranhao", "mato grosso", "mato grosso do sul", "minas gerais",
+      "para", "paraiba", "parana", "pernambuco", "piaui", "rio de janeiro",
+      "rio grande do norte", "rio grande do sul", "rondonia", "roraima",
+      "santa catarina", "sao paulo", "sergipe", "tocantins",
+      "distrito federal",
+      "aracaju", "belem", "belo horizonte", "boa vista", "brasilia",
+      "campina grande", "campinas", "campo grande", "cuiaba", "curitiba",
+      "florianopolis", "fortaleza", "goiania", "guarulhos", "joao pessoa",
+      "macapa", "maceio", "manaus", "natal", "niteroi", "palmas",
+      "paulo afonso", "porto alegre", "porto velho", "recife", "rio branco",
+      "salvador", "santos", "sao bernardo do campo", "sao caetano do sul",
+      "sao goncalo", "sao jose", "sao jose do rio preto", "sao jose dos campos",
+      "sao luis", "sao vicente", "sorocaba", "teresina", "vitoria",
+      "vitoria da conquista",
+      "africa do sul", "arabia saudita", "coreia do norte", "coreia do sul",
+      "costa do marfim", "emirados arabes", "estados unidos", "nova zelandia",
+      "reino unido", "brasil", "argentina", "portugal", "italia", "franca",
+      "espanha", "alemanha", "inglaterra", "canada", "mexico", "chile",
+      "uruguai", "paraguai", "china", "japao", "india", "russia", "australia",
+      "suica", "holanda", "belgica", "suecia", "noruega", "finlandia", "grecia",
+      "irlanda", "polonia", "ucrania", "turquia", "egito", "marrocos",
+      "porto seguro", "rio grande"
+    ],
+    "context": [
+      "sr", "sra", "srta", "dr", "dra", "senhor", "senhora", "dona", "dom",
+      "prof", "eng", "adv", "com", "para", "por"
+    ]
+  },
+  "address": {
+    "starts": [
+      "rua", "r", "av", "avenida", "travessa", "alameda", "estrada", "rodovia",
+      "praca", "beco", "largo", "viela", "condominio", "conjunto",
+      "residencial", "loteamento", "chacara", "sitio", "fazenda"
+    ],
+    "preps": ["em", "no", "na", "nos", "nas", "e", "a", "o", "com", "para", "por", "sobre"]
+  },
+  "org_suffix": ["ltda", "eireli", "epp"]
+}

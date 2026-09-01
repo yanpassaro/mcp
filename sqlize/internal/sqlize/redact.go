@@ -18,12 +18,11 @@ type match struct {
 }
 
 type patternRule struct {
-	entity string
-	re     *regexp.Regexp
-	score  float64
+	entity           string
+	re               *regexp.Regexp
+	score            float64
+	skipIfAlphaParen bool
 }
-
-var reDate = regexp.MustCompile(`(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})|(\d{4})[/.\-](\d{1,2})[/.\-](\d{1,2})`)
 
 var patternRules = []patternRule{
 	{entity: "CPF", re: regexp.MustCompile(`\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b`), score: 0.9},
@@ -41,7 +40,7 @@ var patternRules = []patternRule{
 	{entity: "BTC", re: regexp.MustCompile(`\b(?:bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}\b`), score: 1.0},
 	{entity: "URL", re: regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.\-]*:\/\/[^\s"'<>]+`), score: 1.0},
 	{entity: "URL", re: regexp.MustCompile(`(?i)\bwww\.[^\s"'<>]+`), score: 1.0},
-	{entity: "URL", re: regexp.MustCompile(`\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d{1,5})?(?:/[^\s"'<>]*)?`), score: 0.95},
+	{entity: "URL", re: regexp.MustCompile(`\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d{1,5})?(?:/[^\s"'<>]*)?`), score: 0.95, skipIfAlphaParen: true},
 }
 
 func validCPF(doc string) bool {
@@ -50,7 +49,7 @@ func validCPF(doc string) bool {
 		return false
 	}
 	allSame := true
-	for i := 1; i < len(d); i++ {
+	for i := range d {
 		if d[i] != d[0] {
 			allSame = false
 			break
@@ -60,7 +59,7 @@ func validCPF(doc string) bool {
 		return false
 	}
 	sum := 0
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		sum += int(d[i]-'0') * (10 - i)
 	}
 	r := 11 - sum%11
@@ -71,7 +70,7 @@ func validCPF(doc string) bool {
 		return false
 	}
 	sum = 0
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		sum += int(d[i]-'0') * (11 - i)
 	}
 	r = 11 - sum%11
@@ -87,7 +86,7 @@ func validCNPJ(doc string) bool {
 		return false
 	}
 	allSame := true
-	for i := 1; i < len(d); i++ {
+	for i := range d {
 		if d[i] != d[0] {
 			allSame = false
 			break
@@ -98,7 +97,7 @@ func validCNPJ(doc string) bool {
 	}
 	w1 := []int{5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2}
 	sum := 0
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		sum += int(d[i]-'0') * w1[i]
 	}
 	r := sum % 11
@@ -112,7 +111,7 @@ func validCNPJ(doc string) bool {
 	}
 	w2 := []int{6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2}
 	sum = 0
-	for i := 0; i < 13; i++ {
+	for i := range 13 {
 		sum += int(d[i]-'0') * w2[i]
 	}
 	r = sum % 11
@@ -144,126 +143,12 @@ func luhn(s string) bool {
 	return sum%10 == 0
 }
 
-var columnEntityMap = buildColumnEntity()
-
-func buildColumnEntity() map[string]string {
-	m := map[string]string{}
-	add := func(col, ent string) { m[normalizeWord(col)] = ent }
-
-	for _, c := range []string{
-		"nome", "nome completo", "nome da mae", "nome do pai", "nome completo do cliente",
-		"nome responsavel", "pessoa", "pessoas", "cliente", "consumidor",
-		"responsavel", "responsavel legal", "contato", "contato principal",
-		"proprietario", "funcionario", "colaborador", "atendente", "vendedor",
-		"representante", "diretor", "gerente", "medico", "paciente", "aluno",
-		"professor", "candidato", "solicitante", "beneficiario",
-		"customer", "client", "full name", "first name", "firstname", "last name",
-		"lastname", "surname", "given name", "person", "person name", "name of contact",
-		"mothers name", "fathers name", "contact name", "contact person",
-		"responsible", "owner", "proprietor", "employee", "staff", "buyer", "seller",
-		"supplier", "vendor", "merchant", "agent", "manager", "supervisor",
-		"salesperson", "salesman", "consultant", "attorney", "lawyer", "applicant",
-		"tenant", "guest", "member", "partner", "recipient", "author", "creator",
-		"employer", "contractor", "assistant", "coordinator", "founder", "president",
-		"secretary", "advisor", "analyst", "engineer", "developer", "delivery",
-		"courier", "driver", "landlord", "spouse", "relative", "guardian",
-		"emergency contact", "next of kin", "doctor", "patient", "student", "teacher",
-	} {
-		add(c, "PERSON")
-	}
-	for _, c := range []string{"cpf"} {
-		add(c, "CPF")
-	}
-	for _, c := range []string{"cnpj"} {
-		add(c, "CNPJ")
-	}
-	for _, c := range []string{
-		"rg", "cnh", "renavam", "nis", "pis", "pasep", "titulo de eleitor",
-		"passaporte", "inscricao estadual", "inscricao municipal", "identidade",
-		"passport", "ssn", "identity", "tax id", "taxid", "tax payer id",
-		"taxpayer id", "voter id", "national id", "id card", "id number",
-		"drivers license", "driver license", "license number", "license plate",
-		"plate", "doc number", "document number", "enrollment", "registration",
-	} {
-		add(c, "ID")
-	}
-	for _, c := range []string{
-		"email", "e-mail", "email principal", "email contato", "email corporativo",
-		"mail", "mail address", "email address", "contact email", "official email",
-	} {
-		add(c, "EMAIL")
-	}
-	for _, c := range []string{
-		"telefone", "fone", "fone fixo", "telefone fixo", "telefone principal",
-		"celular", "celular principal", "whatsapp",
-		"phone", "telephone", "phone number", "contact number", "mobile",
-		"mobile number", "cellphone", "cell", "work phone", "home phone",
-		"landline", "whatsapp number", "fax",
-	} {
-		add(c, "PHONE")
-	}
-	for _, c := range []string{
-		"endereco", "endereco completo", "logradouro", "rua", "avenida", "bairro",
-		"distrito", "cidade", "estado", "uf", "pais", "cep", "codigo postal",
-		"localizacao",
-		"address", "street", "avenue", "neighborhood", "district", "city", "state",
-		"country", "zip", "zipcode", "zip code", "postal code", "postcode",
-		"street address", "postal address", "home address", "work address",
-		"residence", "address line", "province", "region", "municipality",
-		"county", "quarter", "zone", "ward", "location", "locality", "village",
-	} {
-		add(c, "ADDRESS")
-	}
-	for _, c := range []string{
-		"banco", "agencia", "conta", "conta corrente", "numero da conta",
-		"bank", "bank account", "agency", "branch", "account", "checking account",
-		"account number", "routing number", "sort code", "iban", "swift", "bic", "wire",
-	} {
-		add(c, "BANK")
-	}
-	for _, c := range []string{
-		"cvv", "validade", "cartao", "numero do cartao", "numero cartao",
-		"expiry", "card", "card number", "cardholder", "cardholder name",
-		"credit card", "creditcard", "debit card", "pan", "cvv2", "cvc",
-		"security code", "verification code",
-	} {
-		add(c, "CARD")
-	}
-	for _, c := range []string{
-		"data de nascimento", "data nascimento", "nascimento", "data de aniversario",
-		"birthdate", "birth date", "birth day", "birthday", "dob", "date of birth", "born",
-	} {
-		add(c, "DATE")
-	}
-	for _, c := range []string{
-		"senha", "chave", "token", "access token", "authorization", "auth",
-		"api key", "api-key", "secret", "bearer",
-		"password", "passwd", "pwd", "pass", "private key", "secret key",
-		"client secret", "credential", "credentials", "session", "session id",
-		"session_id", "cookie", "csrf", "otp", "2fa", "pin", "access key",
-		"api token", "refresh token", "recovery code",
-	} {
-		add(c, "SECRET")
-	}
-	for _, c := range []string{
-		"usuario", "login",
-		"user", "username", "user id", "userid", "screen name", "handle", "account name",
-	} {
-		add(c, "USER")
-	}
-	return m
-}
-
 func columnEntity(name string) (string, bool) {
 	ent, ok := columnEntityMap[normalizeWord(name)]
 	return ent, ok
 }
 
 var reNameSpan = regexp.MustCompile(`\p{Lu}\p{Ll}*(?:(?:\s+(?:de|da|do|dos|das|e)\s+|\s+)\p{Lu}\p{Ll}*)+`)
-
-var nameStopwords = map[string]bool{
-	"de": true, "da": true, "do": true, "dos": true, "das": true, "e": true, "a": true, "o": true,
-}
 
 var reNameContext = regexp.MustCompile(`(?i)\b(?:com|para|por|sr\.?|sra\.?|srta\.?|dr\.?|dra\.?|senhor|senhora|dona|dom|prof\.?|eng\.?|adv\.?)\s+$`)
 
@@ -326,12 +211,10 @@ func wholeCellName(_ string, cell string) (match, bool) {
 	if len(tokens) == 0 || len(tokens) > 4 {
 		return match{}, false
 	}
-	hasPrep := false
 	known := 0
 	first := ""
 	for _, t := range tokens {
 		if nameStopwords[t] {
-			hasPrep = true
 			continue
 		}
 		if first == "" {
@@ -349,54 +232,10 @@ func wholeCellName(_ string, cell string) (match, bool) {
 			return match{}, false
 		}
 	}
-	score := 0.0
-	switch {
-	case known >= 1:
-		score = 0.9
-	case hasPrep && len(tokens) >= 3:
-		score = 0.85
-	case len(tokens) == 1:
-		score = 0.55
-	case len(tokens) >= 2:
-		score = 0.7
+	if known < 1 {
+		return match{}, false
 	}
-	return match{start: 0, end: len(cell), entity: "PERSON", score: score}, true
-}
-
-var geoDeny = map[string]bool{
-	"acre": true, "alagoas": true, "amapa": true, "amazonas": true,
-	"bahia": true, "ceara": true, "espirito santo": true, "goias": true,
-	"maranhao": true, "mato grosso": true, "mato grosso do sul": true,
-	"minas gerais": true, "para": true, "paraiba": true, "parana": true,
-	"pernambuco": true, "piaui": true, "rio de janeiro": true,
-	"rio grande do norte": true, "rio grande do sul": true, "rondonia": true,
-	"roraima": true, "santa catarina": true, "sao paulo": true,
-	"sergipe": true, "tocantins": true, "distrito federal": true,
-	"aracaju": true, "belem": true, "belo horizonte": true, "boa vista": true,
-	"brasilia": true, "campina grande": true, "campinas": true,
-	"campo grande": true, "cuiaba": true, "curitiba": true,
-	"florianopolis": true, "fortaleza": true, "goiania": true,
-	"guarulhos": true, "joao pessoa": true, "macapa": true, "maceio": true,
-	"manaus": true, "natal": true, "niteroi": true, "palmas": true,
-	"paulo afonso": true, "porto alegre": true, "porto velho": true,
-	"recife": true, "rio branco": true, "salvador": true, "santos": true,
-	"sao bernardo do campo": true, "sao caetano do sul": true,
-	"sao goncalo": true, "sao jose": true, "sao jose do rio preto": true,
-	"sao jose dos campos": true, "sao luis": true, "sao vicente": true,
-	"sorocaba": true, "teresina": true, "vitoria": true,
-	"vitoria da conquista": true,
-	"africa do sul": true, "arabia saudita": true, "coreia do norte": true,
-	"coreia do sul": true, "costa do marfim": true, "emirados arabes": true,
-	"estados unidos": true, "nova zelandia": true, "reino unido": true,
-	"brasil": true, "argentina": true, "portugal": true, "italia": true,
-	"franca": true, "espanha": true, "alemanha": true, "inglaterra": true,
-	"eua": true, "canada": true, "mexico": true, "chile": true,
-	"uruguai": true, "paraguai": true, "china": true, "japao": true,
-	"india": true, "russia": true, "australia": true, "suica": true,
-	"holanda": true, "belgica": true, "suecia": true, "noruega": true,
-	"finlandia": true, "grecia": true, "irlanda": true, "polonia": true,
-	"ucrania": true, "turquia": true, "egito": true, "marrocos": true,
-	"porto seguro": true, "rio grande": true,
+	return match{start: 0, end: len(cell), entity: "PERSON", score: 0.9}, true
 }
 
 func nameScore(span, prev string) float64 {
@@ -406,11 +245,9 @@ func nameScore(span, prev string) float64 {
 		return 0
 	}
 	known := 0
-	hasPrep := false
 	first := ""
 	for _, t := range tokens {
 		if nameStopwords[t] {
-			hasPrep = true
 			continue
 		}
 		if first == "" {
@@ -426,12 +263,8 @@ func nameScore(span, prev string) float64 {
 	switch {
 	case known >= 1:
 		return 0.9
-	case hasPrep && len(tokens) >= 3:
-		return 0.85
 	case nameContext(prev):
 		return 0.85
-	case len(tokens) >= 2:
-		return 0.7
 	default:
 		return 0
 	}
@@ -441,6 +274,9 @@ func analyzeCell(colName, cell string) []match {
 	var ms []match
 	for _, r := range patternRules {
 		for _, idx := range r.re.FindAllStringIndex(cell, -1) {
+			if r.skipIfAlphaParen && afterAlphaParen(cell, idx[1]) {
+				continue
+			}
 			text := cell[idx[0]:idx[1]]
 			score := r.score
 			switch r.entity {
@@ -468,6 +304,9 @@ func analyzeCell(colName, cell string) []match {
 					score = 1.0
 				}
 			}
+			if score < 0.85 && contextBoost(r.entity, cell, idx[0], idx[1]) {
+				score = 0.85
+			}
 			ms = append(ms, match{start: idx[0], end: idx[1], entity: r.entity, score: score})
 		}
 	}
@@ -477,12 +316,6 @@ func analyzeCell(colName, cell string) []match {
 }
 
 var reAddressSpan = regexp.MustCompile(`\b(?i:rua|r\.|av\.|avenida|travessa|alameda|estrada|rodovia|praca|praça|p[çc]a\.|beco|largo|viela|condominio|condomínio|conjunto|residencial|loteamento|chacara|chácara|sitio|sítio|fazenda)\s+[A-Za-z0-9á-úÁ-Ú.\-']+(?:\s+[A-Za-z0-9á-úÁ-Ú.\-']+){0,4}(?:[,\s]+\d{1,6}(?:[-\s/]\d{1,5})?)?(?:\s*,\s*[A-ZÀ-Ú]\p{Ll}+(?:\s+[A-ZÀ-Ú]\p{Ll}+)*)?`)
-
-var addressPreps = map[string]bool{
-	"em": true, "no": true, "na": true, "nos": true, "nas": true,
-	"e": true, "a": true, "o": true, "com": true, "para": true,
-	"por": true, "sobre": true,
-}
 
 func findAddressMatches(cell string) []match {
 	var out []match
@@ -527,45 +360,8 @@ func resolveSpans(spans []match) []match {
 	return out
 }
 
-var entityOps = map[string]func(string) string{
-	"PERSON":  maskByName,
-	"EMAIL":   maskEmail,
-	"CPF":     keepEdges,
-	"CNPJ":    keepEdges,
-	"ID":      keepEdges,
-	"PHONE":   keepEdges,
-	"CEP":     keepEdges,
-	"RG":      keepEdges,
-	"BANK":    keepEdges,
-	"CARD":    maskCard,
-	"DATE":    maskDate,
-	"IP":      maskFull,
-	"MAC":     maskFull,
-	"JWT":     maskFull,
-	"HASH":    maskFull,
-	"BTC":     maskFull,
-	"CREDURL": maskFull,
-	"URL":     maskFull,
-	"ADDRESS": maskByName,
-	"SECRET":  maskFull,
-}
-
-func maskSpan(entity, text string) string {
-	if op, ok := entityOps[entity]; ok {
-		return op(text)
-	}
-	return maskByName(text)
-}
-
-func maskByColumn(cell, entity string) string {
-	switch entity {
-	case "SECRET":
-		return maskFull(cell)
-	case "CPF", "CNPJ", "ID", "PHONE", "CEP", "BANK", "CARD", "DATE":
-		return keepEdges(cell)
-	default:
-		return maskByName(cell)
-	}
+func maskSpan(entity, _ string) string {
+	return labelFor(entity)
 }
 
 func applyColumnMask(colName, cell string, spans []match) string {
@@ -580,7 +376,7 @@ func applyColumnMask(colName, cell string, spans []match) string {
 	}
 	if len(usable) == 0 {
 		if ent, ok := columnEntity(colName); ok {
-			return maskByColumn(cell, ent)
+			return labelFor(ent)
 		}
 		return cell
 	}
@@ -619,26 +415,15 @@ func redactCell(colName, cell string) string {
 	return applyColumnMask(colName, cell, analyzeCell(colName, cell))
 }
 
-func keepEdges(s string) string {
-	d := digitsOnly(s)
-	if len(d) < 4 {
-		return s
+func afterAlphaParen(s string, end int) bool {
+	if end < 0 || end >= len(s) {
+		return false
 	}
-	stars := strings.Repeat("*", len(d)-4)
-	if sep := lastNonDigitSep(s); sep != "" {
-		return d[:2] + stars + sep + d[len(d)-2:]
+	c := s[end]
+	if c == '(' {
+		return true
 	}
-	return d[:2] + stars + d[len(d)-2:]
-}
-
-func lastNonDigitSep(s string) string {
-	for i := len(s) - 1; i >= 0; i-- {
-		c := s[i]
-		if (c < '0' || c > '9') && c != ' ' {
-			return string(c)
-		}
-	}
-	return ""
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
 func digitsOnly(s string) string {
@@ -650,71 +435,3 @@ func digitsOnly(s string) string {
 	}
 	return b.String()
 }
-
-func maskEmail(s string) string {
-	at := strings.Index(s, "@")
-	if at <= 0 {
-		return s
-	}
-	local, rest := s[:at], s[at+1:]
-	switch {
-	case len(local) == 0:
-		local = "**"
-	case len(local) == 1:
-		local = local[:1] + "**"
-	default:
-		local = local[:2] + "**"
-	}
-	dm := "***"
-	if dot := strings.LastIndex(rest, "."); dot > 0 && dot < len(rest)-1 {
-		dm = "***" + rest[dot:]
-	}
-	return local + "@" + dm
-}
-
-func maskCard(s string) string {
-	d := digitsOnly(s)
-	if len(d) < 12 {
-		return s
-	}
-	return d[:4] + strings.Repeat("*", len(d)-8) + d[len(d)-4:]
-}
-
-func maskDate(s string) string {
-	return reDate.ReplaceAllStringFunc(s, func(m string) string {
-		p := reDate.FindStringSubmatch(m)
-		if p == nil {
-			return m
-		}
-		if p[3] != "" {
-			return "**/**/" + p[3]
-		}
-		if p[6] != "" {
-			return p[4] + "/**/**"
-		}
-		return m
-	})
-}
-
-func maskByName(s string) string {
-	t := strings.TrimSpace(s)
-	if t == "" {
-		return s
-	}
-	r := []rune(t)
-	if hasLetter(t) {
-		return string(r[0]) + "***"
-	}
-	return "***"
-}
-
-func hasLetter(s string) bool {
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
-			return true
-		}
-	}
-	return false
-}
-
-func maskFull(string) string { return "***" }

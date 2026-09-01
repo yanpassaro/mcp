@@ -28,8 +28,7 @@ A lista completa está no README de cada servidor:
   `github_list_releases`, `github_list_wiki`/`github_fetch_wiki`,
   `github_get_insights`, `github_get_tree`, `github_fetch_file`
 - **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`,
-  `sqlize_export`, `sqlize_compare` + tools de bancos ao vivo
-  (`postgres_*`/`mysql_*`)
+  `sqlize_export` + tools de bancos ao vivo (`postgres_*`/`mysql_*`)
 - **fetch**: `fetch_request`, `cookie_list`, `cookie_clear`, `fetch_allowlist`,
   `fetch_history`
 - **anydoc**: `anydoc_convert_to_markdown`, `anydoc_export_to_pdf`,

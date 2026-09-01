@@ -810,7 +810,7 @@ func (s *Server) blame(ctx context.Context, _ *mcp.CallToolRequest, in blameInpu
 		used := make([]bool, len(lines))
 		for i, nl := range newLines {
 			idx := -1
-			for j := 0; j < len(lines); j++ {
+			for j := range lines {
 				if !used[j] && lines[j] == nl {
 					idx = j
 					break

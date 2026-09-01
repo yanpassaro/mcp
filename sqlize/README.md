@@ -19,9 +19,13 @@ sqlize/
     export.go                   # escrita de exportação
     livedb.go                   # bancos ao vivo (Postgres/MySQL) read-only
     redact.go                   # redator PII (detecção + mascaramento)
-    names_br.go                 # deny-list de nomes BR
+    redact_data.go              # carrega as listas do pii.json (//go:embed)
+    names_br.go                 # normalizações + reforços via env
     xml.go                      # parser XML heurístico
     server.go                   # ferramentas MCP (Register)
+  internal/data/                # dados embutidos (pacote que faz o //go:embed)
+    data.go                     # //go:embed do pii.json, expõe PII
+    pii.json                    # dados do redator (embutidos via //go:embed)
   go.mod
   README.md
 ```
@@ -101,21 +105,7 @@ defina `SQLIZE_STATE_DIR` no ambiente.)
 3. `sqlize_query` — consulta SQL (`SELECT`/`WITH`, sem `;`).
 4. `sqlize_export` — grava o resultado em `.json`, `.csv`, `.tsv`, `.xlsx`,
    `.sql` ou `.xml` (a extensão do `path` define o formato).
-5. `sqlize_compare` — compara duas tabelas/consultas do SQLite local por
-   coluna(s) chave (`key`, obrigatória): resumo por status (`só-em-A`,
-   `só-em-B`, `diferente`) + detalhe por chave. Fontes: `table_a`/`query_a` e
-   `table_b`/`query_b` (informe um de cada). Resultado mascarado por padrão
-   (`redact: false` desliga).
-6. `sqlize_profile` — perfil de uma tabela/query: por coluna, nulos/vazios,
-   distintos, min/max/média (quando numérico), % de linhas cujo valor seria
-   mascarado (indicador de PII) e valores mais frequentes.
-7. `sqlize_scan` — inventário PII por coluna: contagens por entidade (CPF, CNPJ,
-   e-mail, telefone, cartão, IP, nome...). **Nunca** expõe os valores, só
-   contagens — útil para descobrir onde há PII sem vazar nada.
-8. `sqlize_sync` — gera SQL (`INSERT`/`UPDATE`/`DELETE`) para deixar `table_b`
-   igual a `table_a` (ou ao resultado das queries) pela(s) coluna(s)-chave
-   `key`. Valores são mascarados por padrão; `redact: false` gera um script
-   executável (as chaves nunca são mascaradas).
+
 
 Reimportar um arquivo com o mesmo nome de tabela **recria** a tabela
 (atualizando os dados).
@@ -135,43 +125,56 @@ redator é inspirado na arquitetura do [Presidio](https://github.com/data-privac
 3. **Contexto de coluna (pt + en)**: colunas como `cpf`, `nome`, `email`,
    `senha` — ou `customer`, `phone`, `password`, `address` — recebem score
    1.0 e são sempre mascaradas, mesmo sem bater padrão.
-4. **Pessoas**: detecção **sem depender de lista de nomes**: seqüências de
+4. **Reforço por contexto ao redor** (o *context-aware enhancer* do Presidio):
+   um padrão ambíguo (ex.: `RG 12.345.678-9`, `cpf 123.456.789-00`, cartão
+   sem checksum) só é mascarado se uma **palavra de contexto** da entidade
+   aparecer numa janela curta ao redor (`rg`/`identidade`, `cpf`, `cartão`...)
+   — ou se a coluna confirmar.
+5. **Pessoas**: detecção **sem depender de lista de nomes**: seqüências de
    2+ palavras capitalizadas (`João da Silva`, `Tomasz Kowalski`), nomes
    únicos após honoríficos/preposições (`Sr. Pedro`, `falei com Maria`) e
    células inteiras no formato de nome ganham score por **forma + contexto**.
-   A deny-list embutida de nomes BR (`brFirstNames`) virou apenas um **booster**
-   (não é mais requisito), e o conjunto usado para **excluir** não-nomes é
-   fechado e pequeno: dias/meses, produtos, cargos, logradouros, órgãos,
-   geográficos (estados, capitais, países) e sufixos de razão social.
+   A lista de primeiros nomes é apenas um **booster** (optional), e o conjunto
+   usado para **excluir** não-nomes é pequeno: dias/meses, logradouros,
+   geográficos (estados, capitais, países) e termos **técnico/tecnológicos**
+   (JavaScript, SQL, Cloud, Linux, React, Docker, AWS...) — para não mascarar
+   habilidades de currículos/portfólios como se fossem pessoas. Tudo isso vive
+   em `data/pii.json` (fonte canônica, lida direto pelo `anydoc`); o sqlize
+   embute uma cópia em `internal/data/pii.json` via `//go:embed` (pacote
+      `internal/data`).
    Aumentáveis por arquivo: `SQLIZE_PII_NAMES` (nomes para reforçar, um por
    linha) e `SQLIZE_PII_WORDS` (palavras comuns do seu domínio para excluir,
    ex.: nomes de produtos internos) — ambos normalizados (lowercase, sem
    acento), com a mesma regra do contexto de coluna.
-5. **Limiar** (`score >= 0.5`) e **resolução de sobreposição** decidem o que
-   é mascarado; o operador de máscara é escolhido pela entidade.
+6. **Limiar** (`score >= 0.5`) e **resolução de sobreposição** decidem o que
+   é mascarado; a máscara é sempre o rótulo da entidade entre colchetes
+   (`[CPF]`, `[CARTÃO]`, `[PESSOA]`...).
 
-Exemplos de saída (máscara parcial, mantém pontas):
+Exemplos de saída (a máscara é o rótulo da entidade entre colchetes):
 
-- CPF válido `529.982.247-25` → `52*******-25`; CPF **inválido** fora de
-  coluna `cpf` → fica como está
-- e-mail `joao@exemplo.com` → `jo**@***.com` (só o início do usuário e a
-  extensão do domínio ficam visíveis)
-- telefone `(11) 98765-4321` → `11*******-21`
-- cartão (Luhn válido) `4111 1111 1111 1111` → `4111********1111`
+- CPF válido `529.982.247-25` → `[CPF]`; CPF **inválido** fora de coluna
+  `cpf` (sem contexto) → fica como está
+- e-mail `joao@exemplo.com` → `[EMAIL]`
+- telefone `(11) 98765-4321` → `[TELEFONE]`
+- cartão (Luhn válido) `4111 1111 1111 1111` → `[CARTÃO]`
 - datas **genéricas não** são mascaradas (ex.: `created_at`); colunas de data
-  pessoal (`nascimento`, `date of birth`...) continuam mascaradas pelo contexto
-  de coluna
+  pessoal (`nascimento`, `date of birth`...) → `[DATA]`
 - **qualquer URL** vira PII: `https://exemplo.com/pagina?x=1`, `www.site.com.br`
-  ou mesmo `exemplo.com.br` → `***`
-- **endereços** detectados pelo logradouro: `Rua das Flores, 123` → `R***`
-- `nome`/`customer` = `João da Silva` → `J***`; em texto livre, só o nome
-  `Joao da Silva` é mascarado dentro da frase
-- colunas de segredo (`senha`, `token`, `apikey`...) → `***` inteiro
-- entidades tokenizadas (IP, MAC, JWT, hash, BTC) → `***`
+  ou mesmo `exemplo.com.br` → `[URL]`
+- **endereços** detectados pelo logradouro: `Rua das Flores, 123` → `[ENDEREÇO]`
+- `nome`/`customer` = `João da Silva` → `[PESSOA]`
+- colunas de segredo (`senha`, `token`, `apikey`...) → `[SEGREDO]`
+- entidades tokenizadas (IP, MAC, JWT, hash, BTC) → `[IP]`, `[MAC]`, `[JWT]`, `[HASH]`, `[BTC]`
 
 Notas:
 
-- Padrões ambíguos (ex.: RG) só mascaram com coluna PII confirmando.
+- Nomes em texto livre só são mascarados com evidência positiva: nome em lista
+  de reforço (booster opcional) ou contexto imediatamente anterior
+  (honorífico/preposição: `com`, `para`, `Sr.`...), ou contexto de coluna.
+  Sem isso o texto fica como está — evita mascarar stacks de currículos
+  (`JavaScript SQL`, `React Native`, `Desenvolvimento de Software`).
+- Padrões ambíguos (ex.: RG, CPF/CNPJ/cartão com checksum inválido) só mascaram
+  com coluna PII confirmando ou palavra de contexto ao redor.
 - Para desativar o mascaramento nas tools do SQLite, informe `"redact": false`
   em `sqlize_query` ou `sqlize_export`. As tools de bancos ao vivo são
   **sempre** mascaradas (não há como desligar).
@@ -180,9 +183,7 @@ Notas:
 - `sqlize_structure` — estrutura dos dados (todas as tabelas ou uma específica).
 - `sqlize_query` — consulta SQL somente leitura (retorna Markdown, até 200 linhas).
 - `sqlize_export` — exporta consulta/tabela para arquivo.
-- `sqlize_profile` — perfil por coluna (nulos, distintos, min/max/média, PII, top valores).
-- `sqlize_scan` — inventário PII por coluna (contagens por entidade).
-- `sqlize_sync` — gera SQL para reconciliar duas tabelas/consultas.
+
 
 ## Bancos ao vivo (Postgres / MySQL)
 
@@ -201,7 +202,7 @@ O `{PREFIXO}` vira o alias da conexão nas tools. O prefixo `DB` (ou ausente:
 `POSTGRES_URL`/`MYSQL_URL`) é a conexão **padrão**, sem alias. Quando `_URL` e
 `_DSN` existem para o mesmo prefixo, o `_URL` vence.
 
-Cada banco registrado ganha 5 tools, nomeadas `{engine}[_{alias}]_...`:
+Cada banco registrado ganha 4 tools, nomeadas `{engine}[_{alias}]_...`:
 
 - `{engine}[_{alias}]_query` — executa `SELECT`/`WITH` dentro de uma transação
   `READ ONLY` (qualquer escrita é rejeitada pelo banco). **LIMIT forçado de 500
@@ -212,10 +213,7 @@ Cada banco registrado ganha 5 tools, nomeadas `{engine}[_{alias}]_...`:
 - `{engine}[_{alias}]_tables` — lista as tabelas do banco.
 - `{engine}[_{alias}]_schema` — descreve as colunas de uma tabela
   (`schema.table` ou só `table`).
-- `{engine}[_{alias}]_explain` — plano de execução **sem executar a query**
-  (`EXPLAIN`; `EXPLAIN (FORMAT TEXT)` no Postgres). Como nada roda, literais
-  são permitidos — mas placeholders não (EXPLAIN não tem parâmetros). Útil para
-  depurar performance com segurança.
+
 
 Exemplos: `DB_POSTGRES_DSN` → `postgres_query`, `postgres_export`,
 `postgres_tables`, `postgres_schema`; `PRD_MYSQL_URL` → `mysql_prd_query`,
