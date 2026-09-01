@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,8 +13,6 @@ import (
 )
 
 const maxDiffBytes = 200 * 1024
-
-var convRe = regexp.MustCompile(`^(\w+)(?:\([^)]*\))?:\s*(.+)$`)
 
 func clean(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
@@ -241,9 +238,14 @@ type contributorRow struct {
 	Count int
 }
 
-func formatContributors(rows []contributorRow, total int) string {
+func formatContributors(rows []contributorRow, total int, excludeMerges bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "## 🏆 Maiores contribuidores — %s commits\n\n", formatThousands(total))
+	title := fmt.Sprintf("## 🏆 Maiores contribuidores — %s commits", formatThousands(total))
+	if excludeMerges {
+		title += " (sem merges)"
+	}
+	b.WriteString(title)
+	b.WriteString("\n\n")
 	if len(rows) == 0 {
 		b.WriteString("_Sem contribuidores._\n")
 		return b.String()
@@ -271,6 +273,128 @@ func formatContributors(rows []contributorRow, total int) string {
 		}
 		fmt.Fprintf(&b, "%s **%s** — %s %s\n", prefix, clean(r.Name), formatThousands(r.Count), commitWord)
 		fmt.Fprintf(&b, "   `%s` %d%%\n\n", bar, pct)
+	}
+	return b.String()
+}
+
+var monthLabels = [12]string{"jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"}
+
+
+
+// formatContributionHeatmap desenha o grid estilo GitHub. A janela de 3 meses
+// é o limite; o grid começa na semana do primeiro commit do período (start),
+// evitando fileiras de células vazias em projetos jovens.
+func formatContributionHeatmap(counts map[string]int, start, now time.Time, weeks, total int, since time.Time) string {
+	const dayPad = 4 // etiquetas seg..dom + espaço
+	width := dayPad + weeks
+	var b strings.Builder
+	b.WriteString("### 📈 Contribuições (3 meses)\n\n```text\n")
+
+	// Linha de cabeçalho com os meses (3 letras), sobre as colunas em que começam.
+	header := make([]rune, width)
+	for i := range header {
+		header[i] = ' '
+	}
+	prevMonth := start.AddDate(0, -1, 0)
+	for w := 0; w < weeks; w++ {
+		weekStart := start.AddDate(0, 0, w*7)
+		if weekStart.Month() != prevMonth.Month() || weekStart.Year() != prevMonth.Year() {
+			label := monthLabels[int(weekStart.Month())-1]
+			for i, r := range label {
+				if dayPad+w+i < width {
+					header[dayPad+w+i] = r
+				}
+			}
+			prevMonth = weekStart
+		}
+	}
+	b.WriteString(string(header))
+	b.WriteString("\n")
+
+	dayNames := [7]string{"seg", "ter", "qua", "qui", "sex", "sáb", "dom"}
+	for d := 0; d < 7; d++ {
+		line := []rune(dayNames[d] + " ")
+		for w := 0; w < weeks; w++ {
+			day := start.AddDate(0, 0, w*7+d)
+			n := 0
+			if !day.After(now) {
+				n = counts[day.Format("2006-01-02")]
+			}
+			line = append(line, heatChar(n))
+		}
+		b.WriteString(string(line))
+		b.WriteString("\n")
+	}
+	b.WriteString("```\n\n")
+	commitWord := "commits"
+	if total == 1 {
+		commitWord = "commit"
+	}
+	fmt.Fprintf(&b, "_Total no período: %s %s · desde %s · legenda: · 0 · ░ 1–2 · ▒ 3–5 · ▓ 6–9 · █ 10+_",
+		formatThousands(total), commitWord, since.Format("02/01/06"))
+	return b.String()
+}
+
+func heatChar(n int) rune {
+	switch {
+	case n <= 0:
+		return '·'
+	case n <= 2:
+		return '░'
+	case n <= 5:
+		return '▒'
+	case n <= 9:
+		return '▓'
+	default:
+		return '█'
+	}
+}
+
+type langRow struct {
+	Name  string
+	Lines int
+}
+
+func formatLanguages(counts map[string]int, total int) string {
+	var b strings.Builder
+	if total == 0 {
+		b.WriteString("### 🗂️ Linguagens\n\n_Sem arquivos de código detectados._\n")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "### 🗂️ Linguagens — %s linhas\n\n", formatThousands(total))
+	rows := make([]langRow, 0, len(counts))
+	for name, n := range counts {
+		rows = append(rows, langRow{Name: name, Lines: n})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Lines != rows[j].Lines {
+			return rows[i].Lines > rows[j].Lines
+		}
+		return rows[i].Name < rows[j].Name
+	})
+	const top = 8
+	shown := rows
+	if len(rows) > top {
+		shown = rows[:top]
+		rest := 0
+		for _, r := range rows[top:] {
+			rest += r.Lines
+		}
+		shown = append(shown, langRow{Name: "Outras", Lines: rest})
+	}
+	max := shown[0].Lines
+	if max <= 0 {
+		max = 1
+	}
+	const barWidth = 10
+	for _, r := range shown {
+		filled := int(float64(r.Lines) / float64(max) * barWidth)
+		if r.Lines > 0 && filled < 1 {
+			filled = 1
+		}
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+		pct := int(float64(r.Lines)/float64(total)*100 + 0.5)
+		fmt.Fprintf(&b, "**%s** `%s` %d%% (%s linhas)\n", r.Name, bar, pct, formatThousands(r.Lines))
 	}
 	return b.String()
 }

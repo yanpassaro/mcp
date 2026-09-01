@@ -52,7 +52,7 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "git_contributors",
-		Description: "Top contributors GitHub-style: commits per author (grouped by e-mail) with proportional bar and podium. 'limit' sets how many appear (default 5, up to 20).",
+		Description: "Top contributors GitHub-style: commits per author (grouped by e-mail) with proportional bar, podium, a 3-month contribution heatmap (GitHub-style) and a language/line breakdown (share per language). 'exclude_merges' (default false) skips merge commits; 'limit' sets how many appear (default 5, up to 20).",
 	}, s.contributors)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -497,6 +497,14 @@ func (s *Server) contributors(ctx context.Context, _ *mcp.CallToolRequest, in co
 	counts := map[string]int{}
 	names := map[string]string{}
 	total := 0
+	now := time.Now()
+	y, m, d := now.Date()
+	today0 := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+	windowStart := today0.AddDate(0, -3, 0)
+	heatStart := windowStart.AddDate(0, 0, -((int(windowStart.Weekday()) + 6) % 7))
+	dayCounts := map[string]int{}
+	heatTotal := 0
+	var firstInWindow time.Time
 	for {
 		c, e := iter.Next()
 		if e == io.EOF {
@@ -505,7 +513,18 @@ func (s *Server) contributors(ctx context.Context, _ *mcp.CallToolRequest, in co
 		if e != nil {
 			return nil, nil, e
 		}
+		if in.ExcludeMerges && len(c.ParentHashes) > 1 {
+			continue
+		}
 		total++
+		when := c.Author.When.In(now.Location())
+		if !when.Before(heatStart) {
+			dayCounts[when.Format("2006-01-02")]++
+			heatTotal++
+			if firstInWindow.IsZero() || when.Before(firstInWindow) {
+				firstInWindow = when
+			}
+		}
 		key := strings.ToLower(strings.TrimSpace(c.Author.Email))
 		if key == "" {
 			key = strings.ToLower(strings.TrimSpace(c.Author.Name))
@@ -540,7 +559,17 @@ func (s *Server) contributors(ctx context.Context, _ *mcp.CallToolRequest, in co
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
-	return textResult(formatContributors(rows, total))
+	result := formatContributors(rows, total, in.ExcludeMerges)
+	if heatTotal > 0 {
+		fs := firstInWindow.In(now.Location())
+		gridStart := time.Date(fs.Year(), fs.Month(), fs.Day(), 0, 0, 0, 0, fs.Location()).AddDate(0, 0, -((int(fs.Weekday())+6)%7))
+		gridWeeks := int(today0.Sub(gridStart).Hours()/24/7) + 1
+		result += "\n\n" + formatContributionHeatmap(dayCounts, gridStart, now, gridWeeks, heatTotal, fs)
+	}
+	if langs, langTotal, lerr := repoLanguages(repo); lerr == nil {
+		result += "\n\n" + formatLanguages(langs, langTotal)
+	}
+	return textResult(result)
 }
 
 func (s *Server) branches(ctx context.Context, _ *mcp.CallToolRequest, in branchesInput) (*mcp.CallToolResult, any, error) {
@@ -1175,8 +1204,9 @@ type diffInput struct {
 }
 
 type contributorsInput struct {
-	Repo  string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-	Limit int    `json:"limit,omitempty" jsonschema:"How many contributors to show (default 5, up to 20)."`
+	Repo          string `json:"repo" jsonschema:"Path to the Git repository (required)."`
+	Limit         int    `json:"limit,omitempty" jsonschema:"How many contributors to show (default 5, up to 20)."`
+	ExcludeMerges bool   `json:"exclude_merges,omitempty" jsonschema:"Exclude merge commits from the counts. Default false (merges included)."`
 }
 
 type branchesInput struct {

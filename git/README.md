@@ -14,7 +14,7 @@ padrão `cmd/` + `internal/`.
 | `git_log` | Histórico de commits (tabela Markdown) com filtros de autor, path, `since`/`until` e `stat` |
 | `git_show` | Detalhes de um commit (autor, data, mensagem, arquivos e diff contra o pai) |
 | `git_diff` | Diff flexível: working tree vs HEAD, index vs HEAD (`staged`) ou duas refs (`base`+`head`) |
-| `git_contributors` | Top contribuidores no estilo GitHub (com barrinha e pódio) |
+| `git_contributors` | Top contribuidores no estilo GitHub + heatmap de contribuições (3 meses, estilo GitHub) + linguagens (linhas e %); barrinha/pódio; flag `exclude_merges` (default false) ignora merge commits |
 | `git_branch_list` | Lista branches (com `all=true` inclui remotas) |
 | `git_branch_compare` | Compara duas refs: ahead/behind, arquivos alterados e commits de diferença |
 | `git_remote_list` | Lista os remotes configurados |
