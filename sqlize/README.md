@@ -106,6 +106,16 @@ defina `SQLIZE_STATE_DIR` no ambiente.)
    `só-em-B`, `diferente`) + detalhe por chave. Fontes: `table_a`/`query_a` e
    `table_b`/`query_b` (informe um de cada). Resultado mascarado por padrão
    (`redact: false` desliga).
+6. `sqlize_profile` — perfil de uma tabela/query: por coluna, nulos/vazios,
+   distintos, min/max/média (quando numérico), % de linhas cujo valor seria
+   mascarado (indicador de PII) e valores mais frequentes.
+7. `sqlize_scan` — inventário PII por coluna: contagens por entidade (CPF, CNPJ,
+   e-mail, telefone, cartão, IP, nome...). **Nunca** expõe os valores, só
+   contagens — útil para descobrir onde há PII sem vazar nada.
+8. `sqlize_sync` — gera SQL (`INSERT`/`UPDATE`/`DELETE`) para deixar `table_b`
+   igual a `table_a` (ou ao resultado das queries) pela(s) coluna(s)-chave
+   `key`. Valores são mascarados por padrão; `redact: false` gera um script
+   executável (as chaves nunca são mascaradas).
 
 Reimportar um arquivo com o mesmo nome de tabela **recria** a tabela
 (atualizando os dados).
@@ -170,6 +180,9 @@ Notas:
 - `sqlize_structure` — estrutura dos dados (todas as tabelas ou uma específica).
 - `sqlize_query` — consulta SQL somente leitura (retorna Markdown, até 200 linhas).
 - `sqlize_export` — exporta consulta/tabela para arquivo.
+- `sqlize_profile` — perfil por coluna (nulos, distintos, min/max/média, PII, top valores).
+- `sqlize_scan` — inventário PII por coluna (contagens por entidade).
+- `sqlize_sync` — gera SQL para reconciliar duas tabelas/consultas.
 
 ## Bancos ao vivo (Postgres / MySQL)
 
@@ -188,12 +201,14 @@ O `{PREFIXO}` vira o alias da conexão nas tools. O prefixo `DB` (ou ausente:
 `POSTGRES_URL`/`MYSQL_URL`) é a conexão **padrão**, sem alias. Quando `_URL` e
 `_DSN` existem para o mesmo prefixo, o `_URL` vence.
 
-Cada banco registrado ganha 4 tools, nomeadas `{engine}[_{alias}]_...`:
+Cada banco registrado ganha 5 tools, nomeadas `{engine}[_{alias}]_...`:
 
 - `{engine}[_{alias}]_query` — executa `SELECT`/`WITH` dentro de uma transação
   `READ ONLY` (qualquer escrita é rejeitada pelo banco). **LIMIT forçado de 500
   linhas** (anexado se ausente, ou reduzido a 500 se maior). Parâmetros
   opcionais em `args` são passados como *bound parameters* (nunca interpolados).
+- `{engine}[_{alias}]_export` — grava o **resultado completo** de uma
+  `SELECT`/`WITH` em arquivo, sempre mascarado (ver seção abaixo).
 - `{engine}[_{alias}]_tables` — lista as tabelas do banco.
 - `{engine}[_{alias}]_schema` — descreve as colunas de uma tabela
   (`schema.table` ou só `table`).
@@ -202,26 +217,28 @@ Cada banco registrado ganha 4 tools, nomeadas `{engine}[_{alias}]_...`:
   são permitidos — mas placeholders não (EXPLAIN não tem parâmetros). Útil para
   depurar performance com segurança.
 
-Exemplos: `DB_POSTGRES_DSN` → `postgres_query`, `postgres_tables`,
-`postgres_schema`; `PRD_MYSQL_URL` → `mysql_prd_query`, `mysql_prd_tables`,
-`mysql_prd_schema`; `LOCAL_POSTGRES_URL` → `postgres_local_query` ...
+Exemplos: `DB_POSTGRES_DSN` → `postgres_query`, `postgres_export`,
+`postgres_tables`, `postgres_schema`; `PRD_MYSQL_URL` → `mysql_prd_query`,
+`mysql_prd_export`, `mysql_prd_tables`, `mysql_prd_schema`;
+`LOCAL_POSTGRES_URL` → `postgres_local_query` ...
 
 Toda a saída dessas tools é **sempre mascarada** (CPF, CNPJ, e-mail, telefone,
 cartão, datas, IP e colunas consideradas PII por nome).
 
-### `export_to` e `all` (tools de consulta)
+### `export` e `all` (exportação ao vivo)
 
-As tools `{engine}[_{alias}]_query` aceitam dois campos opcionais:
+A tool `{engine}[_{alias}]_export` grava o **resultado completo** de uma
+`SELECT`/`WITH` em um arquivo, **sempre mascarado**. A extensão do `export_to`
+define o formato: `.csv`, `.html`, `.xlsx` (excel), `.tsv`, `.json`, `.xml` e
+`.sql` (script com `CREATE TABLE` + `INSERT`s; o campo `target_table` escolhe o
+nome da tabela no script, padrão `exported`).
 
-- **`export_to`** — caminho de um arquivo onde o **resultado completo** é
-gravado em vez de devolver a tabela Markdown. A extensão define o formato:
-  `.csv`, `.html`, `.xlsx` (excel), `.tsv`, `.json`, `.xml` e `.sql` (script
-  com `CREATE TABLE` + `INSERT`s; o campo `target_table` escolhe o nome da
-  tabela no script, padrão `exported`). O arquivo é sempre mascarado (mesma
-  regra das tools ao vivo).
-- **`all`** (booleano) — libera o limite forçado de 500 linhas na consulta.
-  **Só pode ser usado quando `export_to` também é informado**; caso contrário a
-  chamada é rejeitada. A consulta continua read-only e sem escrita.
+O campo `all` (booleano) libera o limite forçado de 500 linhas na exportação,
+**só quando usado junto com `export_to`**; caso contrário a chamada é rejeitada.
+A consulta continua read-only e sem escrita.
+
+A tool `{engine}[_{alias}]_query` passou a ser apenas de consulta (retorna a
+tabela Markdown limitada a 500 linhas); para exportar, use a tool de exportação.
 
 ### Modo estrito (anti-injeção)
 

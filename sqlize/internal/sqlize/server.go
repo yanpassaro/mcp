@@ -3,6 +3,7 @@ package sqlize
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -51,13 +52,32 @@ func (s *Server) Register(server *mcp.Server) {
 		Description: "Compare two tables or two SELECT queries in the local SQLite database by a key column. Shows a summary per status (only in A / only in B / differing rows) plus the details per key. 'key' is mandatory (comma separated for composite keys); provide one of table_a/query_a and one of table_b/query_b. Results are masked except 'redact': false.",
 	}, s.compareTool)
 
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "sqlize_profile",
+		Description: "Profile a table or a SELECT/WITH query in the local SQLite database: per column, computes non-null/distinct counts, numeric min/max/avg, the share of rows whose value would be masked (a PII indicator) and the most frequent values. Sources: 'table' or 'query' (inform one). Sample values are masked by default ('redact': false disables).",
+	}, s.profileTool)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "sqlize_scan",
+		Description: "Scan a table or a SELECT/WITH query in the local SQLite database and report a PII inventory per column: counts of detected entities (CPF, CNPJ, e-mail, phone, card, IP, PERSON, etc.). Never exposes the sensitive values themselves - only counts. Sources: 'table' or 'query' (inform one).",
+	}, s.scanTool)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "sqlize_sync",
+		Description: "Generate SQL (INSERT / UPDATE / DELETE) to make table_b look like table_a (or the result of a query), keyed by 'key' column(s). 'key' is mandatory (comma separated for composite keys); provide one of table_a/query_a and one of table_b/query_b. Value literals are masked by default ('redact': false to get an executable script).",
+	}, s.syncTool)
+
 	for _, cfg := range discoverLiveDBs() {
 		prefix := cfg.ToolPrefix()
 		env := cfg.EnvVar
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        prefix + "_query",
-			Description: fmt.Sprintf("Run a read-only SQL query (SELECT or WITH) against the live %s database configured in %s. Executed inside a READ ONLY transaction; writes are impossible. By default a hard LIMIT of 500 rows is enforced. Results are ALWAYS masked (CPF, CNPJ, e-mail, phone, card, IP, plus PII column names; generic dates are NOT masked). Pass dynamic values via 'args' as bound parameters (%s); string and numeric/boolean literals inside WHERE are rejected (use placeholders + 'args'; IS NULL / column-to-column comparisons are fine; format/constant strings outside WHERE are allowed). Only built-in functions from an allowlist (COUNT, SUM, TO_CHAR, COALESCE, DATE_TRUNC, ...) can be called; user-defined, extension or dangerous functions (pg_sleep, dblink, LOAD_FILE, ...) are rejected. 'export_to' writes the full result to a file (.csv, .html, .xlsx, .tsv, .json, .xml, .sql) and 'all' bypasses the 500-row limit, but only together with 'export_to'. For .sql exports 'target_table' sets the name used in the script (defaults to 'exported').", cfg.Engine, env, livePlaceholders(cfg.Engine)),
+			Description: fmt.Sprintf("Run a read-only SQL query (SELECT or WITH) against the live %s database configured in %s. Executed inside a READ ONLY transaction; writes are impossible. By default a hard LIMIT of 500 rows is enforced. Results are ALWAYS masked (CPF, CNPJ, e-mail, phone, card, IP, plus PII column names; generic dates are NOT masked). Pass dynamic values via 'args' as bound parameters (%s); string and numeric/boolean literals inside WHERE are rejected (use placeholders + 'args'; IS NULL / column-to-column comparisons are fine; format/constant strings outside WHERE are allowed). Only built-in functions from an allowlist (COUNT, SUM, TO_CHAR, COALESCE, DATE_TRUNC, ...) can be called; user-defined, extension or dangerous functions (pg_sleep, dblink, LOAD_FILE, ...) are rejected. To write the full result to a file use %s_export.", cfg.Engine, env, livePlaceholders(cfg.Engine), prefix),
 		}, s.liveQueryHandler(cfg))
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        prefix + "_export",
+			Description: fmt.Sprintf("Run a read-only SQL query (SELECT or WITH) against the live %s database (%s) and write the FULL result to a file, always masked. The file extension defines the format: .csv, .html, .xlsx, .tsv, .json, .xml, .sql. Executed in a READ ONLY transaction; writes are impossible. 'all' bypasses the 500-row hard limit (only allowed together with 'export_to'). For .sql exports 'target_table' sets the table name used in the script (defaults to 'exported'). Uses the same security rules as %s_query (args as bound parameters, WHERE literals rejected, function allowlist).", cfg.Engine, env, prefix),
+		}, s.liveExportHandler(cfg))
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        prefix + "_tables",
 			Description: fmt.Sprintf("List tables of the live %s database (%s). Output is always redacted.", cfg.Engine, env),
@@ -277,14 +297,7 @@ func (s *Server) compareTool(ctx context.Context, _ *mcp.CallToolRequest, in com
 	keySet := map[string]bool{}
 	for _, k := range keyCols {
 		keySet[k] = true
-		found := false
-		for _, c := range colsA {
-			if c == k {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(colsA, k) {
 			return nil, nil, fmt.Errorf("coluna chave %q não existe nas fontes (disponíveis: %s)", k, strings.Join(colsA, ", "))
 		}
 	}
@@ -340,27 +353,17 @@ func (s *Server) compareTool(ctx context.Context, _ *mcp.CallToolRequest, in com
 
 const liveMaxRows = 200
 
-func (s *Server) renderLiveQuery(ctx context.Context, cfg liveDBConfig, q string, args []string, exportTo, targetTable string, all bool) (string, error) {
+func (s *Server) renderLiveQuery(ctx context.Context, cfg liveDBConfig, q string, args []string) (string, error) {
 	if strings.TrimSpace(q) == "" {
 		return "", fmt.Errorf("'sql' é obrigatório")
-	}
-	if all && strings.TrimSpace(exportTo) == "" {
-		return "", fmt.Errorf("'all' só pode ser usado junto com 'export_to'")
 	}
 	c, err := newLiveDB(cfg)
 	if err != nil {
 		return "", err
 	}
-	cols, rows, err := c.query(ctx, q, args, true, all)
+	cols, rows, err := c.query(ctx, q, args, true, false)
 	if err != nil {
 		return "", err
-	}
-	if strings.TrimSpace(exportTo) != "" {
-		target := strings.TrimSpace(targetTable)
-		if target == "" {
-			target = "exported"
-		}
-		return exportLiveFile(exportTo, cols, rows, target)
 	}
 	return renderRedactedTable(cols, rows, liveMaxRows), nil
 }
@@ -383,7 +386,43 @@ func renderRedactedTable(cols []string, rows [][]string, max int) string {
 
 func (s *Server) liveQueryHandler(cfg liveDBConfig) func(context.Context, *mcp.CallToolRequest, liveQueryInput) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in liveQueryInput) (*mcp.CallToolResult, any, error) {
-		res, err := s.renderLiveQuery(ctx, cfg, in.SQL, in.Args, strings.TrimSpace(in.ExportTo), in.TargetTable, in.All)
+		res, err := s.renderLiveQuery(ctx, cfg, in.SQL, in.Args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(res)
+	}
+}
+
+type liveExportInput struct {
+	Query       string   `json:"query" jsonschema:"Read-only SQL query (SELECT or WITH). Do not use ';'. Executed in a READ ONLY transaction; writes are rejected."`
+	Args        []string `json:"args,omitempty" jsonschema:"Bound parameters for the query (optional). Passed as parameters, never interpolated into the SQL."`
+	ExportTo    string   `json:"export_to" jsonschema:"Output path to write the full result to a file. The file extension defines the format: .csv, .html, .xlsx, .tsv, .json, .xml, .sql. The result is always masked."`
+	All         bool     `json:"all,omitempty" jsonschema:"Return all rows, bypassing the 500-row hard limit. Only allowed together with 'export_to'."`
+	TargetTable string   `json:"target_table,omitempty" jsonschema:"Table name used in the exported SQL script (only relevant for .sql exports; defaults to 'exported')."`
+}
+
+func (s *Server) liveExportHandler(cfg liveDBConfig) func(context.Context, *mcp.CallToolRequest, liveExportInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in liveExportInput) (*mcp.CallToolResult, any, error) {
+		if strings.TrimSpace(in.ExportTo) == "" {
+			return nil, nil, fmt.Errorf("'export_to' é obrigatório")
+		}
+		if strings.TrimSpace(in.Query) == "" {
+			return nil, nil, fmt.Errorf("'query' é obrigatório")
+		}
+		c, err := newLiveDB(cfg)
+		if err != nil {
+			return nil, nil, err
+		}
+		cols, rows, err := c.query(ctx, in.Query, in.Args, true, in.All)
+		if err != nil {
+			return nil, nil, err
+		}
+		target := strings.TrimSpace(in.TargetTable)
+		if target == "" {
+			target = "exported"
+		}
+		res, err := exportLiveFile(in.ExportTo, cols, rows, target)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -423,11 +462,8 @@ func (s *Server) liveSchemaHandler(cfg liveDBConfig) func(context.Context, *mcp.
 }
 
 type liveQueryInput struct {
-	SQL         string   `json:"sql" jsonschema:"Read-only SQL query (SELECT or WITH). Do not use ';'. Executed in a READ ONLY transaction; writes are rejected."`
-	Args        []string `json:"args,omitempty" jsonschema:"Bound parameters for the query (optional). Passed as parameters, never interpolated into the SQL."`
-	ExportTo    string   `json:"export_to,omitempty" jsonschema:"Output path to write the full result to a file instead of the Markdown table. The file extension defines the format: .csv, .html, .xlsx, .tsv, .json, .xml, .sql. The result is always masked."`
-	All         bool     `json:"all,omitempty" jsonschema:"Return all rows, bypassing the 500-row hard limit. Only allowed together with 'export_to'."`
-	TargetTable string   `json:"target_table,omitempty" jsonschema:"Table name used in the exported SQL script (only relevant for .sql exports; defaults to 'exported')."`
+	SQL  string   `json:"sql" jsonschema:"Read-only SQL query (SELECT or WITH). Do not use ';'. Executed in a READ ONLY transaction; writes are rejected."`
+	Args []string `json:"args,omitempty" jsonschema:"Bound parameters for the query (optional). Passed as parameters, never interpolated into the SQL."`
 }
 
 type liveExplainInput struct {
