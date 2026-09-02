@@ -49,7 +49,7 @@ function attrMap(tag: string): Map<string, string> {
 interface Pt { x: number; y: number; }
 
 
-function flattenPathD(d: string): { contours: Pt[][]; close: boolean[] } {
+function flattenPathD(d: string): { contours: Pt[][]; closed: boolean[] } {
   const tokens = d.match(/[MLQZmlqz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) ?? [];
   const contours: Pt[][] = [];
   const closed: boolean[] = [];
@@ -294,8 +294,8 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
   };
 
   const fillQuad = (ax: number, ay: number, bx: number, by: number, cx2: number, cy2: number, dx2: number, dy2: number, c: RGBA) => {
-    let ymin = Math.min(ay, by, cy2, dy2);
-    let ymax = Math.max(ay, by, cy2, dy2);
+    const ymin = Math.min(ay, by, cy2, dy2);
+    const ymax = Math.max(ay, by, cy2, dy2);
     const ys = Math.max(0, Math.floor(ymin));
     const ye = Math.min(H - 1, Math.ceil(ymax) - 1);
     const edges: [Pt, Pt][] = [

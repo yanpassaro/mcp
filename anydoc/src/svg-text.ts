@@ -357,10 +357,10 @@ export async function loadGlyphShaper(): Promise<GlyphShaper | null> {
         ttf = new Ttf(bytes);
         break;
       } catch {
-
+        continue;
       }
     } catch {
-
+      continue;
     }
   }
   if (!ttf) return null;
