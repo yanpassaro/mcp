@@ -23,16 +23,14 @@ Todos os servidores falam o protocolo MCP por **stdio** e gravam os logs em
 A lista completa está no README de cada servidor:
 
 - **git**: `git_repo_info`, `git_status`, `git_log`, `git_show`, `git_diff`,
-  `git_blame`, `git_tree`, `git_read_file`, `git_find_files`, `git_contributors`
-- **github**: `github_search_code`, `github_search_issues`, `github_search_commits`,
-  `github_list_releases`, `github_list_wiki`/`github_fetch_wiki`,
-  `github_get_insights`, `github_get_tree`, `github_fetch_file`
+  `git_refs` (branch/remote/tag), `git_blame`, `git_tree`, `git_read_file`,
+  `git_find_commits`
+- **github**: `github_search` (com `type`), `github_get_tree`, `github_read_file`,
+  `github_repo_info`, `github_get_item` (issue/pr com `type`)
 - **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`,
   `sqlize_export` + tools de bancos ao vivo (`postgres_*`/`mysql_*`)
-- **fetch**: `fetch_request`, `cookie_list`, `cookie_clear`, `fetch_allowlist`,
-  `fetch_history`
-- **anydoc**: `anydoc_convert_to_markdown`, `anydoc_export_to_pdf`,
-  `anydoc_export_to_docx`, `anydoc_export_to_xlsx`
+- **fetch**: `fetch_request`, `fetch_cookie`, `fetch_history`
+- **anydoc**: `anydoc_import`, `anydoc_export`
 
 ## Layout padrão
 

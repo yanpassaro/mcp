@@ -1,25 +1,16 @@
-// Rasterizador SVG mínimo para os diagramas gerados pelo diagram.ts.
-//
-// Não usa resvg nem qualquer dependência externa: o SVG que produzimos só
-// contém um subconjunto pequeno e determinístico (rect/círculo/elipse/
-// polígono/linha/path com M·L·Q·Z, gradiente linear vertical e opacity), que
-// este módulo interpreta com preenchimento scanline (regra even-odd), contorno
-// via quads+junções redondas e antialiasing por supersampling 4x + biratamento
-// 2x. O PNG é codificado com zlib (fflate, já usado pelo projeto) + CRC32.
+
 import { zlibSync } from "@fflate";
 
 export interface RasterImage {
-  width: number; // dimensões do PNG (2x o design)
+  width: number;
   height: number;
-  rgba: Uint8Array; // 24-bit RGB (PNG color type 2)
+  rgba: Uint8Array;
 }
 
-const SS = 4; // supersampling (buffer de trabalho)
-const DS = 2; // downsampling → PNG = design * 2
+const SS = 4;
+const DS = 2;
 
-// ---------------------------------------------------------------------------
-// Parse do SVG
-// ---------------------------------------------------------------------------
+
 interface RGBA { r: number; g: number; b: number; a: number; }
 
 function hexColor(s: string): RGBA | null {
@@ -30,10 +21,9 @@ function hexColor(s: string): RGBA | null {
 }
 
 interface Stop { t: number; c: RGBA; }
-interface Grad { a: Stop[]; b: Stop[]; } // a=topo, b=base (gradiente vertical)
+interface Grad { a: Stop[]; b: Stop[]; }
 
-// Desenho de uma forma retangular (rect/rrect) como OPIMIZAÇÃO — os casos mais
-// comuns (painel, caixas) não precisam de scanline de polígono por linha.
+
 interface RectInstr {
   kind: "rect";
   x: number; y: number; w: number; h: number; rx: number;
@@ -58,7 +48,7 @@ function attrMap(tag: string): Map<string, string> {
 
 interface Pt { x: number; y: number; }
 
-// Achata path SVG (M/L/Q/Z) em contornos de segmentos retos.
+
 function flattenPathD(d: string): { contours: Pt[][]; close: boolean[] } {
   const tokens = d.match(/[MLQZmlqz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) ?? [];
   const contours: Pt[][] = [];
@@ -93,8 +83,7 @@ function flattenPathD(d: string): { contours: Pt[][]; close: boolean[] } {
         const ey = num();
         const x0 = open.length ? open[open.length - 1].x : x;
         const y0 = open.length ? open[open.length - 1].y : y;
-        // Número de segmentos adaptativo ao comprimento da curva (~0.4px):
-        // suficiente para curvas de glifo ficarem lisas em qualquer escala.
+
         const L = Math.hypot(qx - x0, qy - y0) + Math.hypot(ex - qx, ey - qy);
         const n = Math.max(6, Math.min(48, Math.ceil(L / 60)));
         for (let s = 1; s <= n; s++) {
@@ -117,7 +106,7 @@ function flattenPathD(d: string): { contours: Pt[][]; close: boolean[] } {
       }
       continue;
     }
-    // Número solto (notação compacta sem comando) — ignora, não geramos assim.
+
     i++;
   }
   if (open.length) {
@@ -144,7 +133,7 @@ function applyTransform(pts: Pt[], tf: { a: number; b: number; c: number; d: num
   return out;
 }
 
-// Amostra uma curva de cor entre dois stops.
+
 function gradAt(g: Grad, t: number): RGBA {
   t = Math.max(0, Math.min(1, t));
   const stops = g.a.length ? g.a : [];
@@ -166,19 +155,15 @@ function gradAt(g: Grad, t: number): RGBA {
   return stops[stops.length - 1].c;
 }
 
-// ---------------------------------------------------------------------------
-// Rasterização scanline (even-odd + supersampling)
-// ---------------------------------------------------------------------------
+
 export function renderSvg(svg: string, designW: number, designH: number): RasterImage | null {
   const W = Math.round(designW * SS);
   const H = Math.round(designH * SS);
   if (W <= 0 || H <= 0) return null;
-  // Fundo = cor do painel (primeiro <rect fill="#..">): assim a margem fora do
-  // painel fica contínua (sem filete preto nas bordas do PNG) e os cantos
-  // arredondados “recortam” sobre o mesmo tom.
+
   const panelHex = /<rect[^>]*fill="#([0-9a-fA-F]{6})"/.exec(svg)?.[1] ?? "1A1D23";
   const panelBg = hexColor("#" + panelHex) ?? { r: 26, g: 29, b: 35, a: 255 };
-  const buf = new Uint8Array(W * H * 3); // RGB opaco
+  const buf = new Uint8Array(W * H * 3);
   for (let i = 0; i < buf.length; i += 3) {
     buf[i] = panelBg.r;
     buf[i + 1] = panelBg.g;
@@ -194,9 +179,7 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
     buf[o + 2] = c.b * a + buf[o + 2] * (1 - a);
   };
 
-  // Preenchimento even-odd com TODOS os contornos do elemento juntos: os furos
-  // (caso de letras como a/e/o — contorno externo + buraco) ficam vazios porque
-  // os cruzamentos são casados em sequência (1-2, 3-4...).
+
   const fillScanlines = (contours: Pt[][], colorFn: (y: number) => RGBA) => {
     let ymin = Infinity;
     let ymax = -Infinity;
@@ -253,8 +236,7 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
       let left = x0;
       let right = x1 - 1;
       if (rx > 0) {
-        // Cantos arredondados: distância ao centro do arco (v = yy - cy) define
-        // o quanto a faixa encolhe; aplica para os quatro cantos.
+
         for (const cy of [y0 + rx, y1 - rx]) {
           const v = yy - cy;
           if (Math.abs(v) <= rx) {
@@ -266,14 +248,13 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
       }
       left = Math.max(0, Math.ceil(left));
       right = Math.min(W - 1, Math.floor(right));
-      // Opacidade do retângulo também vale (o preenchimento pode ser suave,
-      // como o selo "DIAGRAMA" com 13% de tinta).
+
       const alpha = { ...c, a: Math.round(c.a * ri.opacity) };
       for (let x = left; x <= right; x++) setPx(x, y, alpha);
     }
   };
 
-  // Preenche uma forma (flat ou gradiente vertical), todos os contornos juntos.
+
   const fillShape = (ptsArr: Pt[][], color: RGBA | Grad, opacity: number, anchorY: number, anchorH: number) => {
     const c0: RGBA | null = isFlat(color) ? color : null;
     fillScanlines(ptsArr, (yy) => {
@@ -285,7 +266,7 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
   const strokeContour = (pts: Pt[], color: RGBA, opacity: number, width: number, closed: boolean) => {
     const r = width / 2;
     const cc = { ...color, a: Math.round(color.a * opacity) };
-    // caps/junções redondos: círculos em cada vértice
+
     for (const p of pts) {
       const y0p = Math.max(0, Math.floor(p.y - r));
       const y1p = Math.min(H - 1, Math.ceil(p.y + r) - 1);
@@ -297,7 +278,7 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
         for (let x = x0p; x <= x1p; x++) setPx(x, y, cc);
       }
     }
-    // segmentos como quads espessos (contorno fechado inclui o lado de volta)
+
     const last = pts.length - 1;
     for (let k = 0; k < last + (closed ? 1 : 0); k++) {
       const p = pts[k];
@@ -342,7 +323,7 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
     }
   };
 
-  // ---- Parse: converte o SVG em instruções na ordem do documento ----------
+
   const instrs: Instr[] = [];
   const grads = new Map<string, Grad>();
   let curGrad: { id: string; a: Stop[]; b: Stop[] } | null = null;
@@ -462,8 +443,7 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
       const a = attrMap(body);
       const tf = parseTransform(a.get("transform"));
       const fl = flattenPathD(a.get("d") ?? "");
-      // Converte para o espaço de trabalho (SS) — as formas já vêm * SS aqui,
-      // então os paths (arestas/triângulos/texto) precisam do mesmo fator.
+
       const contours = fl.contours.map((c) =>
         applyTransform(c, tf).map((p) => ({ x: p.x * SS, y: p.y * SS })),
       );
@@ -480,7 +460,7 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
       });
       continue;
     }
-    // <text> só existe no fallback sem shaper — o caminho PNG sempre usa paths.
+
   }
 
   function pushShape(a: Map<string, string>, contours: Pt[][], g: Map<string, Grad>): boolean {
@@ -499,7 +479,7 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
     return true;
   }
 
-  // ---- Render: painter's algorithm ----------------------------------------
+
   for (const op of instrs) {
     if (op.kind === "rect") {
       fillRect(op);
@@ -520,7 +500,7 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
       if (op.stroke && op.strokeWidth > 0) strokeContour(op.contours[0], op.stroke, op.opacity, op.strokeWidth, true);
       continue;
     }
-    // path
+
     if (op.fill) {
       const flatC = isFlat(op.fill) ? op.fill : null;
       if (flatC) {
@@ -536,7 +516,7 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
     }
   }
 
-  // ---- Downsample 2x2 → PNG RGB ---------------------------------------------
+
   const pw = Math.round(designW * DS);
   const ph = Math.round(designH * DS);
   const px = new Uint8Array(pw * ph * 3);
@@ -564,11 +544,10 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
   return { width: pw, height: ph, rgba: px };
 }
 
-// Perímetro de um retângulo arredondado: arestas retas + arcos dos cantos,
-// encadeados em um contorno fechado (para traçado).
+
 function roundedRectOutline(x: number, y: number, w: number, h: number, rx: number): Pt[] {
   const r = Math.min(rx, w / 2, h / 2);
-  const n = 28; // arcos suaves — sem facetamento visível no contorno
+  const n = 28;
   const pts: Pt[] = [];
   const arc = (cx: number, cy: number, a0: number) => {
     for (let k = 0; k <= n; k++) {
@@ -581,13 +560,13 @@ function roundedRectOutline(x: number, y: number, w: number, h: number, rx: numb
     return pts;
   }
   pts.push({ x: x + r, y }, { x: x + w - r, y });
-  arc(x + w - r, y + r, -Math.PI / 2); // topo → direita
+  arc(x + w - r, y + r, -Math.PI / 2);
   pts.push({ x: x + w, y: y + h - r });
-  arc(x + w - r, y + h - r, 0); // direita → baixo
+  arc(x + w - r, y + h - r, 0);
   pts.push({ x: x + r, y: y + h });
-  arc(x + r, y + h - r, Math.PI / 2); // baixo → esquerda
+  arc(x + r, y + h - r, Math.PI / 2);
   pts.push({ x, y: y + r });
-  arc(x + r, y + r, Math.PI); // esquerda → topo
+  arc(x + r, y + r, Math.PI);
   return pts;
 }
 
@@ -607,9 +586,7 @@ function boundsH(pts: Pt[]): number {
   return Math.max(0, maxY(pts) - minY(pts));
 }
 
-// ---------------------------------------------------------------------------
-// Encoder PNG (24-bit RGB)
-// ---------------------------------------------------------------------------
+
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -643,7 +620,7 @@ export function encodePng(img: RasterImage): Uint8Array {
   const raw = new Uint8Array(height * (1 + width * 3));
   for (let y = 0; y < height; y++) {
     const rowStart = y * (1 + width * 3);
-    raw[rowStart] = 0; // filtro None
+    raw[rowStart] = 0;
     raw.set(rgba.subarray(y * width * 3, (y + 1) * width * 3), rowStart + 1);
   }
   const idat = zlibSync(raw, { level: 9 });
@@ -652,8 +629,8 @@ export function encodePng(img: RasterImage): Uint8Array {
   const d = new DataView(ihdr.buffer);
   d.setUint32(0, width);
   d.setUint32(4, height);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // color type RGB
+  ihdr[8] = 8;
+  ihdr[9] = 2;
   ihdr[10] = 0;
   ihdr[11] = 0;
   ihdr[12] = 0;
@@ -675,7 +652,7 @@ export function encodePng(img: RasterImage): Uint8Array {
   return out;
 }
 
-/** Conveniência: SVG → PNG em uma chamada (mesma convenção de diagram-png). */
+
 export function svgToPng(svg: string, designW: number, designH: number): Uint8Array | null {
   const img = renderSvg(svg, designW, designH);
   if (!img) return null;

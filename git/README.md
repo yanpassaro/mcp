@@ -9,25 +9,16 @@ padrão `cmd/` + `internal/`.
 
 | Tool | Descrição |
 | --- | --- |
-| `git_repo_info` | Info do repositório: raiz, HEAD (branch/SHA), total de commits, branches, tags e remotes |
+| `git_repo_info` | Info do repositório: raiz, HEAD (branch/SHA), total de commits, branches, tags, top 5 contribuidores e linguagens (share, sem linhas) |
 | `git_status` | Estado da working tree: modificados, adicionados, removidos, não rastreados e conflitos |
 | `git_log` | Histórico de commits (tabela Markdown) com filtros de autor, path, `since`/`until` e `stat` |
 | `git_show` | Detalhes de um commit (autor, data, mensagem, arquivos e diff contra o pai) |
 | `git_diff` | Diff flexível: working tree vs HEAD, index vs HEAD (`staged`) ou duas refs (`base`+`head`) |
-| `git_contributors` | Top contribuidores no estilo GitHub + heatmap de contribuições (3 meses, estilo GitHub) + linguagens (linhas e %); barrinha/pódio; flag `exclude_merges` (default false) ignora merge commits |
-| `git_branch_list` | Lista branches (com `all=true` inclui remotas) |
-| `git_branch_compare` | Compara duas refs: ahead/behind, arquivos alterados e commits de diferença |
-| `git_remote_list` | Lista os remotes configurados |
-| `git_tag_list` | Lista tags com SHA e data |
+| `git_refs` | Lista refs do repositório pelo `type`: `branch` (com `all=true` inclui remotas), `remote` (nome + URLs) ou `tag` (SHA + data) |
 | `git_blame` | Blame linha a linha (SHA + autor) de um arquivo |
-| `git_file_history` | Histórico de um arquivo (`git log -- <path>`) |
-| `git_tree` | Lista arquivos rastreados em uma ref |
+| `git_tree` | Lista arquivos rastreados em uma ref; `path` filtra por prefixo e `pattern` por glob (`**/*.go`) ou substring (`*test*`) |
 | `git_read_file` | Lê o conteúdo de um arquivo (working tree ou em uma ref) |
-| `git_find_files` | Busca arquivos por glob (`*`) ou substring |
 | `git_find_commits` | Busca commits por texto na mensagem |
-| `git_check_ignore` | Informa se um path está ignorado (`.gitignore`) |
-| `git_stash_list` | Lista os stashes |
-| `git_submodule_status` | Estado dos submodules |
 
 ## Build
 

@@ -3,8 +3,9 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
-	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -51,39 +52,14 @@ func (s *Server) Register(server *mcp.Server) {
 	}, s.diff)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_contributors",
-		Description: "Top contributors GitHub-style: commits per author (grouped by e-mail) with proportional bar, podium, a 3-month contribution heatmap (GitHub-style) and a language/line breakdown (share per language). 'exclude_merges' (default false) skips merge commits; 'limit' sets how many appear (default 5, up to 20).",
-	}, s.contributors)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_branch_list",
-		Description: "List branches; with all=true includes remotes. Marks the current branch and shows the HEAD of each.",
-	}, s.branches)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_branch_compare",
-		Description: "Compare two refs (base and head; defaults: HEAD vs auto base origin/main/main/master): ahead/behind, changed files (+/−) and the list of differing commits.",
-	}, s.branchCompare)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_remote_list",
-		Description: "List configured remotes (name and URLs).",
-	}, s.remotes)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_tag_list",
-		Description: "List tags with the target commit SHA and date (newest first).",
-	}, s.tags)
+		Name:        "git_refs",
+		Description: "List refs of a repository: branches (with all=true includes remotes), remotes (name + URLs) or tags (SHA + date). 'type' selects which: branch, remote or tag.",
+	}, s.refs)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "git_blame",
 		Description: "Line-by-line blame (SHA + author) of a file, rebuilt from history. 'path' is required; 'maxLines' caps the size.",
 	}, s.blame)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_file_history",
-		Description: "File history (git log -- <path>) as a Markdown table. 'path' is required.",
-	}, s.fileHistory)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "git_tree",
@@ -96,29 +72,9 @@ func (s *Server) Register(server *mcp.Server) {
 	}, s.readFile)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_find_files",
-		Description: "Find files by pattern (glob with '*' or substring) at the given ref (default HEAD).",
-	}, s.findFiles)
-
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "git_find_commits",
 		Description: "Find commits by message text ('query', case-insensitive) with optional author and file filters. Markdown table.",
 	}, s.findCommits)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_check_ignore",
-		Description: "Check whether a 'path' is ignored by .gitignore. Returns ignored / not ignored / nonexistent.",
-	}, s.checkIgnore)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_stash_list",
-		Description: "List stashes (SHA, branch and message).",
-	}, s.stashList)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_submodule_status",
-		Description: "Submodule state: path, name, URL, expected vs actual hash and whether dirty.",
-	}, s.submoduleStatus)
 }
 
 func (s *Server) repoInfo(ctx context.Context, _ *mcp.CallToolRequest, in repoInfoInput) (*mcp.CallToolResult, any, error) {
@@ -141,10 +97,15 @@ func (s *Server) repoInfo(ctx context.Context, _ *mcp.CallToolRequest, in repoIn
 	if tIter, e := repo.Tags(); e == nil {
 		info.TagCount = countIter(tIter)
 	}
-	if rs, e := repo.Remotes(); e == nil {
-		info.RemoteCount = len(rs)
-	}
 	info.CommitCount = countCommitsAll(repo)
+	if cs, total, e := topContributors(repo, 5); e == nil {
+		info.Contributors = cs
+		info.ContribTotal = total
+	}
+	if langs, total, e := repoLanguages(repo); e == nil {
+		info.Languages = langs
+		info.LangTotal = total
+	}
 	return textResult(formatRepoInfo(info))
 }
 
@@ -472,18 +433,7 @@ func (s *Server) diffStaged(repo *git.Repository, path string, context int, stat
 	return textResult(formatWorkingDiff("Staged (index) vs HEAD", diffs, added, deleted))
 }
 
-func (s *Server) contributors(ctx context.Context, _ *mcp.CallToolRequest, in contributorsInput) (*mcp.CallToolResult, any, error) {
-	repo, err := s.client.Open(in.Repo)
-	if err != nil {
-		return nil, nil, err
-	}
-	limit := in.Limit
-	if limit <= 0 {
-		limit = 5
-	}
-	if limit > 20 {
-		limit = 20
-	}
+func topContributors(repo *git.Repository, limit int) ([]contributorRow, int, error) {
 	opts := &git.LogOptions{Order: git.LogOrderCommitterTime}
 	if head, err := repo.Head(); err == nil {
 		opts.From = head.Hash()
@@ -492,39 +442,20 @@ func (s *Server) contributors(ctx context.Context, _ *mcp.CallToolRequest, in co
 	}
 	iter, err := repo.Log(opts)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, err
 	}
 	counts := map[string]int{}
 	names := map[string]string{}
 	total := 0
-	now := time.Now()
-	y, m, d := now.Date()
-	today0 := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
-	windowStart := today0.AddDate(0, -3, 0)
-	heatStart := windowStart.AddDate(0, 0, -((int(windowStart.Weekday()) + 6) % 7))
-	dayCounts := map[string]int{}
-	heatTotal := 0
-	var firstInWindow time.Time
 	for {
 		c, e := iter.Next()
 		if e == io.EOF {
 			break
 		}
 		if e != nil {
-			return nil, nil, e
-		}
-		if in.ExcludeMerges && len(c.ParentHashes) > 1 {
-			continue
+			return nil, 0, e
 		}
 		total++
-		when := c.Author.When.In(now.Location())
-		if !when.Before(heatStart) {
-			dayCounts[when.Format("2006-01-02")]++
-			heatTotal++
-			if firstInWindow.IsZero() || when.Before(firstInWindow) {
-				firstInWindow = when
-			}
-		}
 		key := strings.ToLower(strings.TrimSpace(c.Author.Email))
 		if key == "" {
 			key = strings.ToLower(strings.TrimSpace(c.Author.Name))
@@ -538,9 +469,6 @@ func (s *Server) contributors(ctx context.Context, _ *mcp.CallToolRequest, in co
 				names[key] = name
 			}
 		}
-	}
-	if total == 0 {
-		return textResult("## 🏆 Maiores contribuidores\n\n_Sem commits encontrados._\n")
 	}
 	rows := make([]contributorRow, 0, len(counts))
 	for key, n := range counts {
@@ -559,201 +487,93 @@ func (s *Server) contributors(ctx context.Context, _ *mcp.CallToolRequest, in co
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
-	result := formatContributors(rows, total, in.ExcludeMerges)
-	if heatTotal > 0 {
-		fs := firstInWindow.In(now.Location())
-		gridStart := time.Date(fs.Year(), fs.Month(), fs.Day(), 0, 0, 0, 0, fs.Location()).AddDate(0, 0, -((int(fs.Weekday())+6)%7))
-		gridWeeks := int(today0.Sub(gridStart).Hours()/24/7) + 1
-		result += "\n\n" + formatContributionHeatmap(dayCounts, gridStart, now, gridWeeks, heatTotal, fs)
-	}
-	if langs, langTotal, lerr := repoLanguages(repo); lerr == nil {
-		result += "\n\n" + formatLanguages(langs, langTotal)
-	}
-	return textResult(result)
+	return rows, total, nil
 }
 
-func (s *Server) branches(ctx context.Context, _ *mcp.CallToolRequest, in branchesInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) refs(ctx context.Context, _ *mcp.CallToolRequest, in refsInput) (*mcp.CallToolResult, any, error) {
 	repo, err := s.client.Open(in.Repo)
 	if err != nil {
 		return nil, nil, err
 	}
-	current := ""
-	if head, err := repo.Head(); err == nil {
-		current = head.Name().String()
-	}
-	var rows []branchRow
-	iter, err := repo.Branches()
-	if err != nil {
-		return nil, nil, err
-	}
-	for {
-		ref, e := iter.Next()
-		if e == io.EOF {
-			break
+	switch strings.ToLower(strings.TrimSpace(in.Type)) {
+	case "branch", "branches":
+		current := ""
+		if head, err := repo.Head(); err == nil {
+			current = head.Name().String()
 		}
-		if e != nil {
-			return nil, nil, e
-		}
-		rows = append(rows, branchRow{Name: ref.Name().Short(), Head: shortSHA(ref.Hash()), Current: ref.Name().String() == current})
-	}
-	if in.All {
-		riter, err := repo.References()
+		var rows []branchRow
+		iter, err := repo.Branches()
 		if err != nil {
 			return nil, nil, err
 		}
 		for {
-			ref, e := riter.Next()
+			ref, e := iter.Next()
 			if e == io.EOF {
 				break
 			}
 			if e != nil {
 				return nil, nil, e
 			}
-			if !ref.Name().IsRemote() {
-				continue
-			}
 			rows = append(rows, branchRow{Name: ref.Name().Short(), Head: shortSHA(ref.Hash()), Current: ref.Name().String() == current})
 		}
-	}
-	return textResult(formatBranches(rows))
-}
-
-func (s *Server) branchCompare(ctx context.Context, _ *mcp.CallToolRequest, in branchCompareInput) (*mcp.CallToolResult, any, error) {
-	repo, err := s.client.Open(in.Repo)
-	if err != nil {
-		return nil, nil, err
-	}
-	baseName := strings.TrimSpace(in.Base)
-	base, err := gitmcp.ResolveCommit(repo, baseName)
-	if err != nil {
-		if baseName != "" {
-			return nil, nil, err
+		if in.All {
+			riter, err := repo.References()
+			if err != nil {
+				return nil, nil, err
+			}
+			for {
+				ref, e := riter.Next()
+				if e == io.EOF {
+					break
+				}
+				if e != nil {
+					return nil, nil, e
+				}
+				if !ref.Name().IsRemote() {
+					continue
+				}
+				rows = append(rows, branchRow{Name: ref.Name().Short(), Head: shortSHA(ref.Hash()), Current: ref.Name().String() == current})
+			}
 		}
-		base, err = gitmcp.ResolveDefaultBase(repo)
+		return textResult(formatBranches(rows))
+	case "remote", "remotes":
+		rs, err := repo.Remotes()
 		if err != nil {
 			return nil, nil, err
 		}
-		baseName = "<base padrão>"
-	}
-	headName := strings.TrimSpace(in.Head)
-	if headName == "" {
-		headName = "HEAD"
-	}
-	head, err := gitmcp.ResolveCommit(repo, headName)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	headSet := map[string]bool{}
-	ahead := 0
-	iter, err := repo.Log(&git.LogOptions{From: head.Hash, Order: git.LogOrderCommitterTime})
-	if err != nil {
-		return nil, nil, err
-	}
-	for {
-		c, e := iter.Next()
-		if e == io.EOF {
-			break
+		var rows []remoteRow
+		for _, r := range rs {
+			rows = append(rows, remoteRow{Name: r.Config().Name, URLs: strings.Join(r.Config().URLs, ", ")})
 		}
-		if e != nil {
-			return nil, nil, e
-		}
-		if c.Hash == base.Hash {
-			break
-		}
-		headSet[c.Hash.String()] = true
-		ahead++
-	}
-	behind := 0
-	biter, err := repo.Log(&git.LogOptions{From: base.Hash, Order: git.LogOrderCommitterTime})
-	if err != nil {
-		return nil, nil, err
-	}
-	for {
-		c, e := biter.Next()
-		if e == io.EOF {
-			break
-		}
-		if e != nil {
-			return nil, nil, e
-		}
-		if c.Hash == head.Hash {
-			break
-		}
-		if !headSet[c.Hash.String()] {
-			behind++
-		}
-	}
-	patch, err := base.Patch(head)
-	if err != nil {
-		return nil, nil, err
-	}
-	var commits []*object.Commit
-	citer, err := repo.Log(&git.LogOptions{From: head.Hash, Order: git.LogOrderCommitterTime})
-	if err != nil {
-		return nil, nil, err
-	}
-	for {
-		c, e := citer.Next()
-		if e == io.EOF {
-			break
-		}
-		if e != nil {
-			return nil, nil, e
-		}
-		if c.Hash == base.Hash {
-			break
-		}
-		commits = append(commits, c)
-	}
-	return textResult(formatBranchCompare(baseName, headName, ahead, behind, patch.Stats(), commits))
-}
-
-func (s *Server) remotes(ctx context.Context, _ *mcp.CallToolRequest, in remotesInput) (*mcp.CallToolResult, any, error) {
-	repo, err := s.client.Open(in.Repo)
-	if err != nil {
-		return nil, nil, err
-	}
-	rs, err := repo.Remotes()
-	if err != nil {
-		return nil, nil, err
-	}
-	var rows []remoteRow
-	for _, r := range rs {
-		rows = append(rows, remoteRow{Name: r.Config().Name, URLs: strings.Join(r.Config().URLs, ", ")})
-	}
-	return textResult(formatRemotes(rows))
-}
-
-func (s *Server) tags(ctx context.Context, _ *mcp.CallToolRequest, in tagsInput) (*mcp.CallToolResult, any, error) {
-	repo, err := s.client.Open(in.Repo)
-	if err != nil {
-		return nil, nil, err
-	}
-	iter, err := repo.Tags()
-	if err != nil {
-		return nil, nil, err
-	}
-	var rows []tagRow
-	for {
-		ref, e := iter.Next()
-		if e == io.EOF {
-			break
-		}
-		if e != nil {
+		return textResult(formatRemotes(rows))
+	case "tag", "tags":
+		iter, err := repo.Tags()
+		if err != nil {
 			return nil, nil, err
 		}
-		ch := ref.Hash()
-		if t, e2 := repo.TagObject(ref.Hash()); e2 == nil {
-			ch = t.Target
+		var rows []tagRow
+		for {
+			ref, e := iter.Next()
+			if e == io.EOF {
+				break
+			}
+			if e != nil {
+				return nil, nil, err
+			}
+			ch := ref.Hash()
+			if t, e2 := repo.TagObject(ref.Hash()); e2 == nil {
+				ch = t.Target
+			}
+			date := ""
+			if c, e3 := repo.CommitObject(ch); e3 == nil {
+				date = c.Author.When.Format("2006-01-02")
+			}
+			rows = append(rows, tagRow{Name: ref.Name().Short(), SHA: shortSHA(ch), Date: date})
 		}
-		date := ""
-		if c, e3 := repo.CommitObject(ch); e3 == nil {
-			date = c.Author.When.Format("2006-01-02")
-		}
-		rows = append(rows, tagRow{Name: ref.Name().Short(), SHA: shortSHA(ch), Date: date})
+		return textResult(formatTags(rows))
+	default:
+		return nil, nil, fmt.Errorf("'type' inválido: use branch, remote ou tag")
 	}
-	return textResult(formatTags(rows))
 }
 
 func (s *Server) blame(ctx context.Context, _ *mcp.CallToolRequest, in blameInput) (*mcp.CallToolResult, any, error) {
@@ -829,45 +649,6 @@ func (s *Server) blame(ctx context.Context, _ *mcp.CallToolRequest, in blameInpu
 	return textResult(formatBlame(lines, authors, in.MaxLines))
 }
 
-func (s *Server) fileHistory(ctx context.Context, _ *mcp.CallToolRequest, in fileHistoryInput) (*mcp.CallToolResult, any, error) {
-	if strings.TrimSpace(in.Path) == "" {
-		return nil, nil, errors.New("'path' é obrigatório para o histórico de arquivo")
-	}
-	repo, err := s.client.Open(in.Repo)
-	if err != nil {
-		return nil, nil, err
-	}
-	max := in.MaxCount
-	if max <= 0 {
-		max = 20
-	}
-	p := in.Path
-	opts := &git.LogOptions{Order: git.LogOrderCommitterTime, FileName: &p}
-	if head, err := repo.Head(); err == nil {
-		opts.From = head.Hash()
-	} else {
-		opts.All = true
-	}
-	iter, err := repo.Log(opts)
-	if err != nil {
-		return nil, nil, err
-	}
-	var commits []*object.Commit
-	for {
-		c, e := iter.Next()
-		if e == io.EOF {
-			break
-		}
-		if e != nil {
-			return nil, nil, e
-		}
-		commits = append(commits, c)
-		if len(commits) >= max {
-			break
-		}
-	}
-	return textResult(formatLog(commits))
-}
 
 func (s *Server) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput) (*mcp.CallToolResult, any, error) {
 	repo, err := s.client.Open(in.Repo)
@@ -893,7 +674,7 @@ func (s *Server) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 			if e != nil {
 				break
 			}
-			if in.Path == "" || strings.HasPrefix(f.Name, in.Path) {
+			if (in.Path == "" || strings.HasPrefix(f.Name, in.Path)) && (in.Pattern == "" || matchPath(in.Pattern, f.Name)) {
 				paths = append(paths, f.Name)
 			}
 		}
@@ -925,39 +706,6 @@ func (s *Server) readFile(ctx context.Context, _ *mcp.CallToolRequest, in readFi
 	return textResult(formatReadFile(path, "working tree", content))
 }
 
-func (s *Server) findFiles(ctx context.Context, _ *mcp.CallToolRequest, in findFilesInput) (*mcp.CallToolResult, any, error) {
-	repo, err := s.client.Open(in.Repo)
-	if err != nil {
-		return nil, nil, err
-	}
-	ref := strings.TrimSpace(in.Ref)
-	if ref == "" {
-		ref = "HEAD"
-	}
-	pattern := strings.TrimSpace(in.Pattern)
-	t, err := gitmcp.TreeAtRef(repo, ref)
-	if err != nil {
-		return nil, nil, err
-	}
-	iter := t.Files()
-	var paths []string
-	if iter != nil {
-		for {
-			f, e := iter.Next()
-			if e == io.EOF {
-				break
-			}
-			if e != nil {
-				break
-			}
-			if pattern == "" || matchPath(pattern, f.Name) {
-				paths = append(paths, f.Name)
-			}
-		}
-	}
-	sort.Strings(paths)
-	return textResult(formatFindFiles(pattern, paths))
-}
 
 func (s *Server) findCommits(ctx context.Context, _ *mcp.CallToolRequest, in findCommitsInput) (*mcp.CallToolResult, any, error) {
 	repo, err := s.client.Open(in.Repo)
@@ -1013,95 +761,6 @@ func (s *Server) findCommits(ctx context.Context, _ *mcp.CallToolRequest, in fin
 	return textResult(formatLog(commits))
 }
 
-func (s *Server) checkIgnore(ctx context.Context, _ *mcp.CallToolRequest, in checkIgnoreInput) (*mcp.CallToolResult, any, error) {
-	repo, err := s.client.Open(in.Repo)
-	if err != nil {
-		return nil, nil, err
-	}
-	path := strings.TrimSpace(in.Path)
-	if path == "" {
-		return nil, nil, errors.New("'path' é obrigatório")
-	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		return nil, nil, err
-	}
-	if _, err := wt.Filesystem().Stat(path); err != nil {
-		return textResult(formatCheckIgnore(path, false, "inexistente (não pode estar ignorado)"))
-	}
-	st, err := wt.Status()
-	if err != nil {
-		return nil, nil, err
-	}
-	if _, ok := st[path]; ok {
-		return textResult(formatCheckIgnore(path, false, ""))
-	}
-	return textResult(formatCheckIgnore(path, true, ""))
-}
-
-func (s *Server) stashList(ctx context.Context, _ *mcp.CallToolRequest, in stashListInput) (*mcp.CallToolResult, any, error) {
-	repo, err := s.client.Open(in.Repo)
-	if err != nil {
-		return nil, nil, err
-	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		return nil, nil, err
-	}
-	f, err := wt.Filesystem().Open("logs/refs/stash")
-	if err != nil {
-		return textResult(formatStash(nil))
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, nil, err
-	}
-	rows := make([]stashRow, 0)
-	for line := range strings.SplitSeq(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		fields := strings.SplitN(line, " ", 3)
-		if len(fields) < 3 {
-			continue
-		}
-		msg := fields[2]
-		if i := strings.IndexByte(msg, '\t'); i >= 0 {
-			msg = msg[i+1:]
-		}
-		rows = append(rows, stashRow{SHA: shortSHA(plumbing.NewHash(fields[1])), Message: msg})
-	}
-	return textResult(formatStash(rows))
-}
-
-func (s *Server) submoduleStatus(ctx context.Context, _ *mcp.CallToolRequest, in submoduleInput) (*mcp.CallToolResult, any, error) {
-	repo, err := s.client.Open(in.Repo)
-	if err != nil {
-		return nil, nil, err
-	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		return nil, nil, err
-	}
-	mods, err := wt.Submodules()
-	if err != nil {
-		return nil, nil, err
-	}
-	var rows []submoduleRow
-	for _, m := range mods {
-		cfg := m.Config()
-		expected := ""
-		if st, e := m.Status(); e == nil {
-			if st.Expected != plumbing.ZeroHash {
-				expected = shortSHA(st.Expected)
-			}
-		}
-		rows = append(rows, submoduleRow{Path: cfg.Path, Name: cfg.Name, URL: cfg.URL, Expected: expected, Branch: cfg.Branch})
-	}
-	return textResult(formatSubmodules(rows))
-}
 
 func fileContentAt(repo *git.Repository, c *object.Commit, path string) (string, error) {
 	f, err := c.File(path)
@@ -1161,13 +820,43 @@ func countCommitsAll(repo *git.Repository) int {
 	return n
 }
 
+
 func matchPath(pattern, name string) bool {
-	if strings.Contains(pattern, "*") {
-		if ok, _ := filepath.Match(pattern, name); ok {
-			return true
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return true
+	}
+	if !strings.ContainsAny(pattern, "*?") {
+		return strings.Contains(name, pattern)
+	}
+	re, err := globRegexp(pattern)
+	if err != nil {
+		return strings.Contains(name, pattern)
+	}
+	return re.MatchString(name)
+}
+
+func globRegexp(pattern string) (*regexp.Regexp, error) {
+	var b strings.Builder
+	b.WriteString("^")
+	runes := []rune(pattern)
+	for i := 0; i < len(runes); i++ {
+		switch runes[i] {
+		case '*':
+			if i+1 < len(runes) && runes[i+1] == '*' {
+				b.WriteString("(?:.*/)?")
+				i++
+			} else {
+				b.WriteString("[^/]*")
+			}
+		case '?':
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(runes[i])))
 		}
 	}
-	return strings.Contains(name, pattern)
+	b.WriteString("$")
+	return regexp.Compile(b.String())
 }
 
 type repoInfoInput struct {
@@ -1203,29 +892,11 @@ type diffInput struct {
 	Context int    `json:"context,omitempty" jsonschema:"Lines of context around changes (default 0 = only +/- lines; 3 = classic diff)."`
 }
 
-type contributorsInput struct {
-	Repo          string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-	Limit         int    `json:"limit,omitempty" jsonschema:"How many contributors to show (default 5, up to 20)."`
-	ExcludeMerges bool   `json:"exclude_merges,omitempty" jsonschema:"Exclude merge commits from the counts. Default false (merges included)."`
-}
 
-type branchesInput struct {
+type refsInput struct {
 	Repo string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-	All  bool   `json:"all,omitempty" jsonschema:"If true, includes remote branches."`
-}
-
-type branchCompareInput struct {
-	Repo string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-	Base string `json:"base,omitempty" jsonschema:"Base ref to compare (default origin/main/main/master)."`
-	Head string `json:"head,omitempty" jsonschema:"Final ref (default HEAD)."`
-}
-
-type remotesInput struct {
-	Repo string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-}
-
-type tagsInput struct {
-	Repo string `json:"repo" jsonschema:"Path to the Git repository (required)."`
+	Type string `json:"type" jsonschema:"Type of refs to list: branch, remote or tag (required)."`
+	All  bool   `json:"all,omitempty" jsonschema:"For branch only: if true, includes remote branches."`
 }
 
 type blameInput struct {
@@ -1234,16 +905,12 @@ type blameInput struct {
 	MaxLines int    `json:"maxLines,omitempty" jsonschema:"Maximum number of lines shown (default 500)."`
 }
 
-type fileHistoryInput struct {
-	Repo     string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-	Path     string `json:"path" jsonschema:"Path of the file (required)."`
-	MaxCount int    `json:"maxCount,omitempty" jsonschema:"Maximum number of commits (default 20)."`
-}
 
 type treeInput struct {
-	Repo string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-	Ref  string `json:"ref,omitempty" jsonschema:"Ref/tag/SHA (default HEAD)."`
-	Path string `json:"path,omitempty" jsonschema:"Path prefix filter (optional)."`
+	Repo    string `json:"repo" jsonschema:"Path to the Git repository (required)."`
+	Ref     string `json:"ref,omitempty" jsonschema:"Ref/tag/SHA (default HEAD)."`
+	Path    string `json:"path,omitempty" jsonschema:"Path prefix filter (optional)."`
+	Pattern string `json:"pattern,omitempty" jsonschema:"Glob (with * and **) or substring to filter tracked files (e.g. '**/*.go', '*test*')."`
 }
 
 type readFileInput struct {
@@ -1252,11 +919,6 @@ type readFileInput struct {
 	Ref  string `json:"ref,omitempty" jsonschema:"Optional ref (branch/tag/SHA) to read the file at that revision; if empty, reads the working tree."`
 }
 
-type findFilesInput struct {
-	Repo    string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-	Pattern string `json:"pattern,omitempty" jsonschema:"Glob pattern (e.g. '*.go') or substring to search files."`
-	Ref     string `json:"ref,omitempty" jsonschema:"Ref/tag/SHA (default HEAD)."`
-}
 
 type findCommitsInput struct {
 	Repo     string `json:"repo" jsonschema:"Path to the Git repository (required)."`
@@ -1266,18 +928,6 @@ type findCommitsInput struct {
 	MaxCount int    `json:"maxCount,omitempty" jsonschema:"Maximum number of commits (default 30)."`
 }
 
-type checkIgnoreInput struct {
-	Repo string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-	Path string `json:"path" jsonschema:"Path to check whether it is ignored."`
-}
-
-type stashListInput struct {
-	Repo string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-}
-
-type submoduleInput struct {
-	Repo string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-}
 
 func textResult(text string) (*mcp.CallToolResult, any, error) {
 	return &mcp.CallToolResult{

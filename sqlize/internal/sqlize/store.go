@@ -24,6 +24,18 @@ type columnInfo struct {
 	Type string
 }
 
+type fkInfo struct {
+	Column    string
+	RefTable  string
+	RefColumn string
+}
+
+type indexInfo struct {
+	Name    string
+	Unique  bool
+	Columns []string
+}
+
 type store struct {
 	db        *sql.DB
 	path      string
@@ -294,6 +306,62 @@ func (s *store) tableColumns(ctx context.Context, schema, name string) ([]column
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func (s *store) tableForeignKeys(ctx context.Context, schema, name string) ([]fkInfo, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT "from", "table" AS ref_table, "to" AS ref_column FROM pragma_foreign_key_list(?, ?) ORDER BY id, seq`, name, schema)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []fkInfo
+	for rows.Next() {
+		var f fkInfo
+		if err := rows.Scan(&f.Column, &f.RefTable, &f.RefColumn); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+func (s *store) tableIndexes(ctx context.Context, schema, name string) ([]indexInfo, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, "unique" FROM pragma_index_list(?, ?) ORDER BY name`, name, schema)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var idx []indexInfo
+	for rows.Next() {
+		var ix indexInfo
+		if err := rows.Scan(&ix.Name, &ix.Unique); err != nil {
+			return nil, err
+		}
+		idx = append(idx, ix)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range idx {
+		crows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_index_info(?) ORDER BY seqno`, idx[i].Name)
+		if err != nil {
+			return nil, err
+		}
+		for crows.Next() {
+			var c string
+			if err := crows.Scan(&c); err != nil {
+				crows.Close()
+				return nil, err
+			}
+			idx[i].Columns = append(idx[i].Columns, c)
+		}
+		if err := crows.Err(); err != nil {
+			crows.Close()
+			return nil, err
+		}
+		crows.Close()
+	}
+	return idx, nil
 }
 
 func (s *store) attachDB(ctx context.Context, path string) (string, error) {

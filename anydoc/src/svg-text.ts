@@ -1,15 +1,10 @@
-// Transforma texto em paths SVG usando os contornos TrueType de uma fonte do
-// sistema. Motivação: a build wasm do @resvg/resvg não registra fontes por
-// NENHUMA API (nem loadFont, nem fontFiles, nem @font-face) — mas rasteriza
-// paths perfeitamente. Então nós mesmos convertemos cada caractere em curvas
-// quadráticas (formato TrueType) e o resvg desenha o texto como geometria.
-// Vantagem extra: nítido em qualquer escala e sem dependência de runtime.
+
 
 export interface GlyphTextOpts {
   text: string;
-  x: number; // âncora (ver anchor)
-  y: number; // baseline
-  size: number; // px
+  x: number;
+  y: number;
+  size: number;
   anchor: "start" | "middle" | "end";
   color: string;
 }
@@ -41,9 +36,9 @@ class Ttf {
   readonly dv: DataView;
   readonly unitsPerEm: number;
   readonly numGlyphs: number;
-  readonly glyphOffsets: number[]; // numGlyphs + 1, RELATIVOS à tabela glyf
-  readonly glyfOff: number; // offset absoluto da tabela glyf
-  readonly advances: number[]; // por gid (repete o último advance além de numberOfHMetrics)
+  readonly glyphOffsets: number[];
+  readonly glyfOff: number;
+  readonly advances: number[];
   readonly charGlyph = new Map<number, number>();
   private pathCache = new Map<number, string>();
 
@@ -61,7 +56,7 @@ class Ttf {
     this.numGlyphs = this.dv.getUint16(maxp.off + 4);
     this.glyfOff = glyf.off;
 
-    // loca → offsets (relativos à glyf)
+
     const short = this.dv.getInt16(head.off + 50) === 0;
     this.glyphOffsets = new Array(this.numGlyphs + 1);
     for (let g = 0; g <= this.numGlyphs; g++) {
@@ -70,7 +65,7 @@ class Ttf {
         : this.dv.getUint32(loca.off + g * 4);
     }
 
-    // hmtx → advances
+
     const numMetrics = this.dv.getUint16(hhea.off + 34);
     const lastAdv = numMetrics ? this.dv.getUint16(hmtx.off + (numMetrics - 1) * 4) : 0;
     this.advances = new Array(this.numGlyphs);
@@ -80,7 +75,7 @@ class Ttf {
         : lastAdv;
     }
 
-    // cmap — subtable Unicode (3,1) ou (0,*) com formato 4 (ou 12)
+
     const cmap = findTable(bytes, "cmap");
     if (cmap) this.parseCmap(cmap.off, cmap.len);
   }
@@ -88,7 +83,7 @@ class Ttf {
   private parseCmap(off: number, _len: number): void {
     const dv = this.dv;
     const count = dv.getUint16(off + 2);
-    // Prefere (3,1); depois (0,4)/(0,6)/(0,3); formatos 4 ou 12.
+
     const recs: { pid: number; eid: number; sub: number }[] = [];
     for (let i = 0; i < count; i++) {
       recs.push({
@@ -156,8 +151,7 @@ class Ttf {
     if (gid <= 0 || gid >= this.numGlyphs) return "";
     const cached = this.pathCache.get(gid);
     if (cached !== undefined) return cached;
-    // Conjunto vazio: o próprio gid é adicionado dentro de contoursOf, e a
-    // recursão (compostos) só bloqueia ciclos (referência a ancestral).
+
     const contours = this.contoursOf(gid, new Set());
     let d = "";
     if (contours) for (const c of contours) d += contourToPath(c);
@@ -169,9 +163,7 @@ class Ttf {
     return gid > 0 && gid < this.numGlyphs ? this.advances[gid] : 0;
   }
 
-  // Contornos do glifo em unidades de fonte (y para cima), desempacotando
-  // COMPOSTOS: glifos acentuados (ã, ú, ç...) referenciam outros glifos com
-  // translação/escala — aplicamos a transformação aqui, em coordenadas.
+
   private contoursOf(gid: number, visiting: Set<number>): GlyphPoint[][] | null {
     if (gid <= 0 || gid >= this.numGlyphs || visiting.has(gid)) return null;
     visiting.add(gid);
@@ -181,7 +173,7 @@ class Ttf {
       if (end - start < 10) return null;
       const numContours = this.dv.getInt16(start);
       if (numContours >= 0) {
-        // Glifo simples: contornos com pontos on/off-curve.
+
         const endPts: number[] = [];
         let p = start + 10;
         for (let c = 0; c < numContours; c++) {
@@ -240,7 +232,7 @@ class Ttf {
         return out;
       }
 
-      // Glifo composto: componentes com transforms (y-fonte, direto).
+
       const parts = this.compositeParts(start, end);
       const out: GlyphPoint[][] = [];
       for (const part of parts) {
@@ -260,7 +252,7 @@ class Ttf {
     }
   }
 
-  // Lê os componentes de um glifo composto (flags, gid, args e matriz 2x2).
+
   private compositeParts(
     start: number,
     end: number,
@@ -302,8 +294,7 @@ class Ttf {
         d = dv.getUint16(p + 6) / 16384;
         p += 8;
       }
-      // ARGS_ARE_XY_VALUES: translate (y-fonte). Ponto-a-ponto (raro) vira
-      // translação aproximada pelos argumentos.
+
       const dx = arg1;
       const dy = arg2;
       parts.push({
@@ -312,7 +303,7 @@ class Ttf {
         dx: (flags & 0x0002) ? dx : 0,
         dy: (flags & 0x0002) ? dy : 0,
       });
-      if (!(flags & 0x0020)) break; // MORE_COMPONENTS ausente
+      if (!(flags & 0x0020)) break;
     }
     return parts;
   }
@@ -320,12 +311,12 @@ class Ttf {
 
 interface GlyphPoint { x: number; y: number; on: boolean; }
 
-// Converte um contorno de pontos TrueType em comandos quadráticos (M/L/Q).
+
 function contourToPath(pts: { x: number; y: number; on: boolean }[]): string {
   const n = pts.length;
   if (n < 2) return "";
   let s = pts.findIndex((p) => p.on);
-  if (s < 0) s = 0; // todos off-curve (degenerado)
+  if (s < 0) s = 0;
   const rot: { x: number; y: number; on: boolean }[] = [];
   for (let k = 0; k < n; k++) rot.push(pts[(s + k) % n]);
 
@@ -364,12 +355,12 @@ export async function loadGlyphShaper(): Promise<GlyphShaper | null> {
       const bytes = await Deno.readFile(p);
       try {
         ttf = new Ttf(bytes);
-        break; // TrueType com glyf — perfeito
+        break;
       } catch {
-        // CFF/OTF ou corrompida — tenta a próxima
+
       }
     } catch {
-      // arquivo não existe — próxima
+
     }
   }
   if (!ttf) return null;

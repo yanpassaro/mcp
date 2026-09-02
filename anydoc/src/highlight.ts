@@ -499,17 +499,11 @@ const LANGS: Record<string, Set<string>> = {
   ]),
 };
 
-// ---------------------------------------------------------------------------
-// Data formats get dedicated per-line highlighters (JSON, YAML, TOML, XML).
-// They are kept out of LANGS/COMMON because their grammar is not keyword
-// driven: colors come from the role each token plays (key, value, tag...).
-// ---------------------------------------------------------------------------
 
-// Palette (One Dark, consistent with the generic highlighter):
-//   comment 338B1A · string 98C379 · number D19A66 · keyword C678DD
-//   key E5C07B · tag/attr 61AFEF · punctuation 7F848E
 
-// ---- JSON ----
+
+
+
 const JSON_RE =
   /("(?:[^"\\]|\\.)*")(\s*:)|("(?:[^"\\]|\\.)*")|(\b(?:true|false|null)\b)|([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)|([{}\[\],:])/g;
 
@@ -520,7 +514,7 @@ function highlightJson(line: string): Run[] {
   while ((m = JSON_RE.exec(line)) !== null) {
     if (m.index > last) out.push({ text: line.slice(last, m.index) });
     if (m[1] !== undefined) {
-      // "key" + ":"
+
       out.push({ text: m[1], color: "E5C07B" });
       out.push({ text: m[2], color: "7F848E" });
     } else if (m[3] !== undefined) {
@@ -538,12 +532,12 @@ function highlightJson(line: string): Run[] {
   return out.length ? out : [{ text: line }];
 }
 
-// ---- YAML / YML ----
+
 const YAML_VALUE_RE =
   /("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')|(&[A-Za-z0-9_-]+)|(\*[A-Za-z0-9_-]+)|(!{1,2}[A-Za-z0-9_./-]+)|(\b(?:[Tt]rue|[Ff]alse|[Yy]es|[Nn]o|[Oo]n|[Oo]ff|[Nn]ull|[Nn]one|~)\b)|(\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})?)?)|([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)|(\|[+-]?\d*)|(>[+-]?\d*)/g;
 
 function highlightYaml(line: string): Run[] {
-  // Trailing comment first (outside quotes), so "#" never leaks into tokens.
+
   let cut = -1;
   let inS = false, inD = false;
   for (let i = 0; i < line.length; i++) {
@@ -564,7 +558,7 @@ function highlightYaml(line: string): Run[] {
   push(ws);
   let rest = code.slice(ws.length);
 
-  // "- item" → bullet
+
   const dash = /^(-)(\s+)/.exec(rest);
   if (dash) {
     push("-", "C678DD");
@@ -572,7 +566,7 @@ function highlightYaml(line: string): Run[] {
     rest = rest.slice(dash[0].length);
   }
 
-  // leading anchor / alias ("&a", "*a")
+
   const ref = /^([&*][A-Za-z0-9_-]+)(\s*)/.exec(rest);
   if (ref) {
     push(ref[1], "61AFEF");
@@ -580,7 +574,7 @@ function highlightYaml(line: string): Run[] {
     rest = rest.slice(ref[0].length);
   }
 
-  // "key: value"
+
   const key = /^([A-Za-z_][A-Za-z0-9_.-]*|"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')(\s*)(:)(?=\s|$)/.exec(rest);
   if (key) {
     push(key[1], "E5C07B");
@@ -589,7 +583,7 @@ function highlightYaml(line: string): Run[] {
     rest = rest.slice(key[0].length);
   }
 
-  // Remaining value tokens
+
   YAML_VALUE_RE.lastIndex = 0;
   let last = 0;
   let m: RegExpExecArray | null;
@@ -607,7 +601,7 @@ function highlightYaml(line: string): Run[] {
   return out.length ? out : [{ text: line }];
 }
 
-// ---- TOML ----
+
 const TOML_RE =
   /(\[\[[^\[\]]*\]\]|\[[^\[\]]*\])|([A-Za-z0-9_.-]+)(\s*)(=)|("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')|(\b(?:true|false)\b)|(\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})?)?)|([+-]?(?:\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+)?|0x[0-9A-Fa-f_]+|0o[0-7_]+|0b[01_]+))|(^|\s)(#.*)/g;
 
@@ -618,7 +612,7 @@ function highlightToml(line: string): Run[] {
   while ((m = TOML_RE.exec(line)) !== null) {
     if (m.index > last) out.push({ text: line.slice(last, m.index) });
     if (m[1] !== undefined) {
-      // [section] / [[array-of-tables]]
+
       out.push({ text: m[1], color: "61AFEF" });
     } else if (m[2] !== undefined) {
       out.push({ text: m[2], color: "E5C07B" });
@@ -631,7 +625,7 @@ function highlightToml(line: string): Run[] {
     } else if (m[7] !== undefined || m[8] !== undefined) {
       out.push({ text: m[0], color: "D19A66" });
     } else {
-      // comment: group 9 is the leading whitespace (possibly empty)
+
       if (m[9]) out.push({ text: m[9] });
       out.push({ text: m[10], color: "338B1A" });
     }
@@ -641,7 +635,7 @@ function highlightToml(line: string): Run[] {
   return out.length ? out : [{ text: line }];
 }
 
-// ---- XML ----
+
 const XML_RE =
   /(<!--[\s\S]*?-->)|(<!\[CDATA\[[\s\S]*?\]\]>)|(<\?[\s\S]*?\?>)|(<![A-Za-z][^>]*>)|(<\/?[A-Za-z][A-Za-z0-9:_-]*)|([A-Za-z_:][A-Za-z0-9_:.-]*)(\s*=\s*)("(?:[^"\\]|\\.)*"|'[^']*')|(>|\/>)/g;
 
@@ -656,7 +650,7 @@ function highlightXml(line: string): Run[] {
     } else if (m[2] !== undefined || m[3] !== undefined || m[4] !== undefined) {
       out.push({ text: m[0], color: "61AFEF" });
     } else if (m[5] !== undefined) {
-      // <tag / </tag
+
       out.push({ text: m[5], color: "61AFEF" });
     } else if (m[6] !== undefined) {
       out.push({ text: m[6], color: "E5C07B" });
@@ -671,13 +665,11 @@ function highlightXml(line: string): Run[] {
   return out.length ? out : [{ text: line }];
 }
 
-// ---- NGINX / CRON ----
-// Tokens compartilhados pelos argumentos de diretivas nginx e pelos comandos
-// das linhas de cron: comentário, variável, string, número, pontuação de bloco.
+
 const SEGMENT_RE =
   /(#[^\n]*)|(\$[A-Za-z0-9_]+)|("[^"]*"|'[^']*')|([+-]?(?:\d+(?:\.\d+)?(?:[a-z%]+)?))|([{};=])/g;
 
-// Extrai cor de comentários/variáveis/strings/valores de um trecho livre.
+
 function segmentRuns(text: string): Run[] {
   const out: Run[] = [];
   let last = 0;
@@ -696,7 +688,7 @@ function segmentRuns(text: string): Run[] {
   return out;
 }
 
-// Diretivas nginx que abrem um bloco { } — pintadas de azul, como "tags".
+
 const NGINX_BLOCKS = new Set([
   "location", "server", "http", "events", "upstream", "if", "map",
   "geo", "stream", "mail", "types", "split_clients",
@@ -712,7 +704,7 @@ function highlightNginx(line: string): Run[] {
     push(rest, "338B1A");
     return out;
   }
-  // Diretiva = primeiro termo seguido de espaço ou `{` (ex.: "location = ...")
+
   const dw = /^([a-zA-Z_][a-zA-Z0-9_-]*)(?=[ \t{])/.exec(rest);
   if (dw) {
     push(dw[1], NGINX_BLOCKS.has(dw[1]) ? "61AFEF" : "C678DD");
@@ -722,9 +714,7 @@ function highlightNginx(line: string): Run[] {
   return out.length ? out : [{ text: line }];
 }
 
-// Campo de horário de cron: aceita apenas combinações permitidas do crontab
-// (*, listas, intervalos, passos, ? e nomes de mês/dia), para não confundir o
-// comando com os 5 campos.
+
 const CRON_FIELD_RE =
   /^(?:\*|\?|@[A-Za-z]+|\d+|\d+-\d+|\*\/\d+|\d+-\d+\/\d+|\d+(?:,\d+)+|[A-Za-z]{3}(?:-[A-Za-z]{3})?)$/;
 
@@ -738,7 +728,7 @@ function highlightCron(line: string): Run[] {
     push(rest, "338B1A");
     return out;
   }
-  // Macros (@daily, @reboot, @hourly...)
+
   const mac = /^(@[A-Za-z]+)(\s+)(.*)$/.exec(rest);
   if (mac) {
     push(mac[1], "C678DD");
@@ -746,7 +736,7 @@ function highlightCron(line: string): Run[] {
     out.push(...segmentRuns(mac[3]));
     return out;
   }
-  // 5 campos de horário + comando
+
   const fm =
     /^(\S+)(\s+)(\S+)(\s+)(\S+)(\s+)(\S+)(\s+)(\S+)(\s+)(.*)$/.exec(rest);
   if (fm && [1, 3, 5, 7, 9].every((i) => CRON_FIELD_RE.test(fm[i]))) {
@@ -757,7 +747,7 @@ function highlightCron(line: string): Run[] {
     out.push(...segmentRuns(fm[11]));
     return out;
   }
-  // Linha sem agenda (ex.: continuação do comando)
+
   out.push(...segmentRuns(rest));
   return out.length ? out : [{ text: line }];
 }
@@ -782,18 +772,18 @@ function keywordsFor(lang?: string): Set<string> {
 
 function buildRegex(lang?: string): RegExp {
   const l = (lang ?? "").toLowerCase();
-  // Support more comment styles
+
   const commentPatterns: string[] = [];
   if (["python", "py", "bash", "sh", "shell", "zsh", "yaml", "yml", "ruby", "rb", "toml", "ini", "dockerfile", "make", "powershell", "ps1"].some((p) => l === p || l.startsWith(p))) {
-    commentPatterns.push("#[^\\n]*"); // hash comments
+    commentPatterns.push("#[^\\n]*");
   }
   if (["javascript", "js", "typescript", "ts", "jsx", "tsx", "c", "cpp", "csharp", "cs", "java", "go", "rust", "php", "swift", "kotlin", "scala", "dart", "zig", "css", "scss", "less"].some((p) => l === p || l.startsWith(p))) {
-    commentPatterns.push("//[^\\n]*"); // double-slash comments
+    commentPatterns.push("//[^\\n]*");
   }
   if (["sql", "mariadb", "mysql", "postgresql", "postgres", "sqlite"].some((p) => l === p || l.startsWith(p))) {
-    commentPatterns.push("--[^\\n]*"); // sql comments
+    commentPatterns.push("--[^\\n]*");
   }
-  // Default to // if no specific pattern matched
+
   if (commentPatterns.length === 0) commentPatterns.push("//[^\\n]*");
   const comment = commentPatterns.join("|");
   const src = [
@@ -808,7 +798,7 @@ function buildRegex(lang?: string): RegExp {
 }
 
 export function highlight(line: string, lang?: string): Run[] {
-  // .env files: highlight only the variable name
+
   const l = (lang ?? "").toLowerCase();
   if (l === "env") {
     if (line.trimStart().startsWith("#")) return [{ text: line, color: "338B1A" }];
@@ -816,7 +806,7 @@ export function highlight(line: string, lang?: string): Run[] {
     if (v) return [{ text: v[1], color: "E5C07B" }, { text: v[2] }];
     return [{ text: line }];
   }
-  // Other config files: no highlighting
+
   if (["ini", "properties", "cfg", "conf"].some((p) => l === p || l.endsWith("." + p))) {
     return [{ text: line }];
   }
@@ -829,9 +819,6 @@ export function highlight(line: string, lang?: string): Run[] {
   let m: RegExpExecArray | null;
 
   while ((m = re.exec(line)) !== null) {
-    if (m.index === 0 && last > 0) {
-      // handled below
-    }
     if (m.index > last) out.push({ text: line.slice(last, m.index) });
 
     const g = m.groups;

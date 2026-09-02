@@ -34,9 +34,7 @@ export async function loadImages(blocks: DocumentBlock[]): Promise<Map<string, U
   return map;
 }
 
-// Pré-renderiza os diagramas mermaid como PNG (índice do bloco → imagem).
-// Se o resvg/não estiver disponível, o bloco fica de fora do mapa e o fluxo
-// usa o fallback ASCII — nada quebra.
+
 export async function loadMermaidImages(blocks: DocumentBlock[]): Promise<Map<number, MermaidPng>> {
   const map = new Map<number, MermaidPng>();
   let i = 0;

@@ -394,36 +394,51 @@ func (c *liveDB) tables(ctx context.Context) (string, error) {
 	return b.String(), nil
 }
 
-func (c *liveDB) schema(ctx context.Context, table string) (string, error) {
+func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
+	if strings.TrimSpace(table) == "" {
+		return c.tables(ctx)
+	}
 	schema := ""
 	if i := strings.Index(table, "."); i >= 0 {
 		schema = table[:i]
 		table = table[i+1:]
 	}
-	var q string
-	switch c.driver {
-	case "pgx":
-		q = "SELECT column_name, data_type FROM information_schema.columns " +
-			"WHERE table_name = $1 AND table_schema = COALESCE(NULLIF($2,''), 'public') ORDER BY ordinal_position"
-	case "mysql":
-		q = "SELECT column_name, data_type FROM information_schema.columns " +
-			"WHERE table_name = ? AND table_schema = COALESCE(NULLIF(?,''), DATABASE()) ORDER BY ordinal_position"
-	}
-	args := []string{table}
+	var colsQ, fkQ, idxQ string
+	var args []string
 	if c.driver == "pgx" {
-		args = append(args, schema)
+		schemaExpr := "COALESCE(NULLIF($2,''), 'public')"
+		colsQ = "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = $1 AND table_schema = " + schemaExpr + " ORDER BY ordinal_position"
+		fkQ = "SELECT att.attname AS col, fns.nspname AS ref_schema, ft.relname AS ref_table, fatt.attname AS ref_col " +
+			"FROM pg_constraint con " +
+			"JOIN pg_class rel ON rel.oid = con.conrelid " +
+			"JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace " +
+			"JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey) " +
+			"JOIN pg_class ft ON ft.oid = con.confrelid " +
+			"JOIN pg_namespace fns ON fns.oid = ft.relnamespace " +
+			"JOIN pg_attribute fatt ON fatt.attrelid = con.confrelid AND fatt.attnum = ANY(con.confkey) " +
+			"WHERE con.contype = 'f' AND rel.relname = $1 AND nsp.nspname = " + schemaExpr + " ORDER BY con.conname, att.attnum"
+		idxQ = "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = " + schemaExpr + " AND tablename = $1 ORDER BY indexname"
+		args = []string{table, schema}
 	} else {
-		args = append(args, schema)
+		schemaExpr := "COALESCE(NULLIF(?,''), DATABASE())"
+		colsQ = "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ? AND table_schema = " + schemaExpr + " ORDER BY ordinal_position"
+		fkQ = "SELECT column_name AS col, referenced_table_schema AS ref_schema, referenced_table_name AS ref_table, referenced_column_name AS ref_col " +
+			"FROM information_schema.key_column_usage WHERE table_name = ? AND table_schema = " + schemaExpr + " AND referenced_table_name IS NOT NULL " +
+			"ORDER BY constraint_name, ordinal_position"
+		idxQ = "SELECT index_name, GROUP_CONCAT(column_name ORDER BY seq_in_index) AS cols, MIN(non_unique) AS non_unique " +
+			"FROM information_schema.statistics WHERE table_name = ? AND table_schema = " + schemaExpr + " GROUP BY index_name ORDER BY index_name"
+		args = []string{table, schema}
 	}
-	cols, rows, err := c.query(ctx, q, args, false, false)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "### %s\n", table)
+	cols, rows, err := c.query(ctx, colsQ, args, false, false)
 	if err != nil {
 		return "", err
 	}
 	if len(rows) == 0 {
-		return fmt.Sprintf("Tabela %q não encontrada (use postgres_tables para listar).", table), nil
+		return fmt.Sprintf("Tabela %q não encontrada.", table), nil
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "### %s\n", table)
 	for _, r := range RedactRows(cols, rows) {
 		name, typ := "", ""
 		if len(r) > 0 {
@@ -432,7 +447,66 @@ func (c *liveDB) schema(ctx context.Context, table string) (string, error) {
 		if len(r) > 1 {
 			typ = r[1]
 		}
-		fmt.Fprintf(&b, "- %s: %s\n", name, typ)
+		fmt.Fprintf(&b, "- %s: %s\n", short(name), short(typ))
+	}
+
+	if cols, rows, err := c.query(ctx, fkQ, args, false, false); err == nil && len(rows) > 0 {
+		b.WriteString("\nFks:\n")
+		seen := map[string]bool{}
+		for _, r := range RedactRows(cols, rows) {
+			if len(r) == 0 {
+				continue
+			}
+			col, refSC, refT, refC := r[0], "", "", ""
+			if len(r) > 1 {
+				refSC = r[1]
+			}
+			if len(r) > 2 {
+				refT = r[2]
+			}
+			if len(r) > 3 {
+				refC = r[3]
+			}
+			key := col + "|" + refSC + "|" + refT + "|" + refC
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			ref := refC
+			if refT != "" {
+				ref = refT + "." + refC
+			}
+			if refSC != "" && ref != "" {
+				ref = refSC + "." + ref
+			}
+			fmt.Fprintf(&b, "- %s → %s\n", short(col), short(ref))
+		}
+	}
+
+	if cols, rows, err := c.query(ctx, idxQ, args, false, false); err == nil && len(rows) > 0 {
+		b.WriteString("\nÍndices:\n")
+		for _, r := range RedactRows(cols, rows) {
+			if len(r) == 0 {
+				continue
+			}
+			name := r[0]
+			if c.driver == "pgx" {
+				fmt.Fprintf(&b, "- %s\n", short(name))
+				if len(r) > 1 && r[1] != "" {
+					fmt.Fprintf(&b, "  `%s`\n", short(r[1]))
+				}
+			} else {
+				colsStr := ""
+				uniq := ""
+				if len(r) > 1 {
+					colsStr = short(r[1])
+				}
+				if len(r) > 2 && r[2] == "0" {
+					uniq = " (único)"
+				}
+				fmt.Fprintf(&b, "- %s%s: %s\n", short(name), uniq, colsStr)
+			}
+		}
 	}
 	return b.String(), nil
 }

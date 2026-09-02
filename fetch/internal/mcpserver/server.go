@@ -36,19 +36,9 @@ func (s *Server) Register(server *mcp.Server) {
 	}, s.requestTool)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "cookie_list",
-		Description: "List the cookies saved for the current fetch session (domain, name, value, path, expiry and flags). Cookies are saved from Set-Cookie responses and persisted between restarts.",
-	}, s.cookieListTool)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "cookie_clear",
-		Description: "Clear saved cookies: everything (no args), all cookies of one domain, or a single cookie (domain + name). Returns how many were removed.",
-	}, s.cookieClearTool)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "fetch_allowlist",
-		Description: "List the hosts allowed by FETCH_ALLOW_HOST for fetch_request.",
-	}, s.allowlistTool)
+		Name:        "fetch_cookie",
+		Description: "Manage session cookies: 'action'='list' shows the saved cookies (domain, name, value, path, expiry, flags); 'action'='clear' removes them (all, per domain, or a single cookie by domain+name) and returns how many were removed.",
+	}, s.cookieTool)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "fetch_history",
@@ -56,7 +46,6 @@ func (s *Server) Register(server *mcp.Server) {
 	}, s.historyTool)
 }
 
-type emptyInput struct{}
 
 type requestInput struct {
 	Method           string            `json:"method,omitempty" jsonschema:"HTTP method: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS (default GET)."`
@@ -74,6 +63,7 @@ type requestInput struct {
 	Summary         bool  `json:"summary,omitempty" jsonschema:"If true, return a short summary with status, timing, content-type, size and curl only."`
 	HTMLRaw         bool  `json:"htmlRaw,omitempty" jsonschema:"If true, HTML responses are shown as raw markup instead of extracted text."`
 	HTMLMaxChars    int   `json:"htmlMaxChars,omitempty" jsonschema:"Max characters of extracted HTML text (default 1200). Only applies when the response is HTML and htmlRaw is false."`
+	BodyMaxChars    int   `json:"bodyMaxChars,omitempty" jsonschema:"Max characters of the response body shown (default 1200). Larger bodies are truncated."`
 }
 
 func (s *Server) requestTool(ctx context.Context, _ *mcp.CallToolRequest, in requestInput) (*mcp.CallToolResult, any, error) {
@@ -99,10 +89,14 @@ func (s *Server) requestTool(ctx context.Context, _ *mcp.CallToolRequest, in req
 		return nil, nil, err
 	}
 	var md string
+	bodyMaxChars := in.BodyMaxChars
+	if bodyMaxChars <= 0 {
+		bodyMaxChars = defaultBodyMaxChars
+	}
 	if in.Summary {
 		md = formatSummary(resp)
 	} else {
-		md = formatResponse(resp, s.client.MaxBody(), in.HTMLRaw, in.HTMLMaxChars)
+		md = formatResponse(resp, s.client.MaxBody(), in.HTMLRaw, in.HTMLMaxChars, bodyMaxChars)
 	}
 	if md != "" {
 		s.log.Println(md)
@@ -110,23 +104,14 @@ func (s *Server) requestTool(ctx context.Context, _ *mcp.CallToolRequest, in req
 	return textResult(md)
 }
 
-func (s *Server) cookieListTool(ctx context.Context, _ *mcp.CallToolRequest, _ emptyInput) (*mcp.CallToolResult, any, error) {
-	return textResult(formatCookies(s.client.Cookies()))
-}
-
-func (s *Server) cookieClearTool(ctx context.Context, _ *mcp.CallToolRequest, in cookieClearInput) (*mcp.CallToolResult, any, error) {
-	n := s.client.ClearCookies(in.Domain, in.Name)
-	return textResult(clearMessage(n, in.Domain, in.Name))
-}
-
-func (s *Server) allowlistTool(ctx context.Context, _ *mcp.CallToolRequest, _ emptyInput) (*mcp.CallToolResult, any, error) {
-	hosts := s.client.AllowHosts()
-	var b strings.Builder
-	fmt.Fprintf(&b, "## Allowed hosts (%d)\n\n", len(hosts))
-	for _, h := range hosts {
-		fmt.Fprintf(&b, "- `%s`\n", h)
+func (s *Server) cookieTool(ctx context.Context, _ *mcp.CallToolRequest, in cookieInput) (*mcp.CallToolResult, any, error) {
+	switch strings.ToLower(strings.TrimSpace(in.Action)) {
+	case "clear":
+		n := s.client.ClearCookies(in.Domain, in.Name)
+		return textResult(clearMessage(n, in.Domain, in.Name))
+	default:
+		return textResult(formatCookies(s.client.Cookies()))
 	}
-	return textResult(b.String())
 }
 
 type historyInput struct {
@@ -189,9 +174,10 @@ func (s *Server) historyTool(ctx context.Context, _ *mcp.CallToolRequest, in his
 	return textResult(strings.TrimSpace(b.String()))
 }
 
-type cookieClearInput struct {
-	Domain string `json:"domain,omitempty" jsonschema:"Domain to clear (e.g. localhost). Empty clears all domains."`
-	Name   string `json:"name,omitempty" jsonschema:"Cookie name to clear. Empty clears the whole domain (or everything when domain is also empty)."`
+type cookieInput struct {
+	Action string `json:"action,omitempty" jsonschema:"list (default) or clear."`
+	Domain string `json:"domain,omitempty" jsonschema:"For clear: domain to clear (e.g. localhost). Empty clears all domains."`
+	Name   string `json:"name,omitempty" jsonschema:"For clear: cookie name. Empty clears the whole domain (or everything when domain is also empty)."`
 }
 
 func textResult(text string) (*mcp.CallToolResult, any, error) {

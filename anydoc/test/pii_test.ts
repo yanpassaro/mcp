@@ -1,4 +1,4 @@
-// Testes do redator PII do AnyDoc (port do sqlize). Rode com: deno test
+
 import {
   maskFull,
   redactPII,
@@ -47,15 +47,15 @@ Deno.test("cartão com Luhn válido", () => {
 });
 
 Deno.test("nomes compostos em texto livre", () => {
-  check("nome em frase", redactPII("Falei com Joao da Silva as 14h"), "Falei com J*** as 14h");
-  check("nome simples", redactPII("nome: Maria Eduarda"), "nome: M***");
-  check("nome primeiro termo", redactPII("O Joao Silva saiu"), "O J*** saiu");
+  check("nome em frase", redactPII("Falei com Joao da Silva as 14h"), "Falei com [NOME] as 14h");
+  check("nome simples", redactPII("nome: Maria Eduarda"), "nome: [NOME]");
+  check("nome primeiro termo", redactPII("O Joao Silva saiu"), "O [NOME] saiu");
 });
 
 Deno.test("nomes independentes da lista fixa", () => {
-  check("nome fora da lista", redactPII("Falei com Tomasz Kowalski ontem"), "Falei com T*** ontem");
-  check("nome unico com contexto", redactPII("Falei com Maria ontem"), "Falei com M*** ontem");
-  check("sobrenome de cidade", redactPII("Falei com Joao Santos ontem"), "Falei com J*** ontem");
+  check("nome fora da lista", redactPII("Falei com Tomasz Kowalski ontem"), "Falei com [NOME] ontem");
+  check("nome unico com contexto", redactPII("Falei com Maria ontem"), "Falei com [NOME] ontem");
+  check("sobrenome de cidade", redactPII("Falei com Joao Santos ontem"), "Falei com [NOME] ontem");
 });
 
 Deno.test("não-nomes continuam intactos", () => {
@@ -83,8 +83,8 @@ Deno.test("código fonte não é mascarado", () => {
 });
 
 Deno.test("endereços por logradouro", () => {
-  check("rua", redactPII("Moro na Rua das Flores, 123 em SP"), "Moro na R*** em SP");
-  check("avenida com bairro", redactPII("Av. Paulista 1000, Bela Vista"), "A***");
+  check("rua", redactPII("Moro na Rua das Flores, 123 em SP"), "Moro na [ENDEREÇO] em SP");
+  check("avenida com bairro", redactPII("Av. Paulista 1000, Bela Vista"), "[ENDEREÇO]");
 });
 
 Deno.test("telefone com parênteses", () => {
@@ -100,7 +100,7 @@ Deno.test("colunas de tabela markdown", () => {
   const want = [
     "| nome | cpf | email |",
     "|------|-----|-------|",
-    "| M*** | 52*******-25 | jo**@***.com |",
+    "| [NOME] | 52*******-25 | jo**@***.com |",
   ].join("\n");
   check("tabela", redactPII(md), want);
 });

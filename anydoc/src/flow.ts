@@ -27,18 +27,11 @@ interface RunOpts {
   letterSpacing?: number;
   spacingBefore?: number;
   spacingAfter?: number;
-  // Mantém o parágrafo colado ao próximo (w:keepNext) — evita órfãos.
   keepNext?: boolean;
-  // Começa o parágrafo em uma página nova (w:pageBreakBefore).
   pageBreakBefore?: boolean;
   code?: boolean;
   verticalAlign?: "superscript" | "subscript" | "baseline";
-  // Internal link target (a bookmark name in this document, §17.16.22
-  // w:hyperlink @w:anchor). When set, reamkit wraps the run in
-  // <w:hyperlink w:anchor="…"> and the DOCX->PDF converter keeps the jump.
   anchor?: string;
-  // External link target (§17.16.22). Only http/https/mailto are ever set;
-  // sanitizeHref rejects everything else for safety.
   href?: string;
 }
 
@@ -67,10 +60,7 @@ export interface DocumentBlock {
   headerColor?: string;
   striped?: boolean;
   borders?: boolean;
-  // Left indent in levels (used by the auto-generated table of contents to
-  // reflect heading depth). Multiplied by 14pt when emitted.
   indent?: number;
-  // Heading depth (1 = H1 … 6 = H6). Used to style headings hierarchically.
   level?: number;
   runs?: Array<{
     text?: string;
@@ -104,11 +94,10 @@ function hex(color?: string): string | undefined {
   return /^[0-9a-fA-F]{6}$/.test(h) ? h.toUpperCase() : undefined;
 }
 
-// slug() is defined in ./markdown.ts and imported above.
+
 
 function cleanText(s: string): string {
-  // Remove apenas caracteres de controle (preservando tab/nova linha); emojis e
-  // símbolos passam intactos para o DOCX/PDF.
+
   return s.replace(
     /[\p{Cc}]/gu,
     (ch) => (ch === "\t" || ch === "\n" || ch === "\r" ? ch : ""),
@@ -116,24 +105,17 @@ function cleanText(s: string): string {
 }
 
 const ZWSP = "\u200B";
-// Characters where it is natural to allow a line break inside a long token
-// (URLs, file paths, identifiers). Inserting a break after them lets the
-// renderer wrap the line without changing how the text looks.
+
 const BREAK_AFTER = /[\/\-_.:@?&=+#,%~]/;
 
-// Wrapping mode. Soft wrapping inserts zero-width spaces, which Word/LibreOffice
-// honor nicely (invisible break). Hard wrapping inserts real line breaks, which
-// also work in the DOCX->PDF converter that ignores zero-width spaces.
+
 let HARD_WRAP = false;
 
-// Insert break opportunities into long unbreakable tokens so they wrap instead
-// of overflowing the page. Short words and normal sentences (spaces) are
-// untouched.
+
 function allowWrapping(text: string, threshold = 48, hardEvery = 20): string {
   if (!text) return text;
 
-  // Soft mode: invisible zero-width spaces at every delimiter. Word/LibreOffice
-  // only break where needed, so this stays clean and doesn't change the look.
+
   if (!HARD_WRAP) {
     let out = "";
     let tokenLen = 0;
@@ -161,9 +143,7 @@ function allowWrapping(text: string, threshold = 48, hardEvery = 20): string {
     return out;
   }
 
-  // Hard mode: real line breaks (for the DOCX->PDF converter). Only break once a
-  // segment is long enough (MIN_SEG), at the nearest delimiter, so the line
-  // isn't shredded into tiny pieces; force a break past MAX_SEG to fit the page.
+
   const MIN_SEG = 55;
   const MAX_SEG = 70;
   let out = "";
@@ -221,9 +201,7 @@ function makeRun(text: string, opts: RunOpts = {}) {
         ? { letterSpacingPt: pt(opts.letterSpacing) }
         : {}),
     },
-    // Internal/external hyperlink. These are first-class Run fields in
-    // reamkit's document model (not a separate body element), so a clickable
-    // link is just a run that carries anchor/href alongside its text.
+
     ...(opts.anchor !== undefined ? { anchor: opts.anchor } : {}),
     ...(opts.href !== undefined ? { href: opts.href } : {}),
   };
@@ -253,9 +231,7 @@ function run(
   };
 }
 
-// Only these URL schemes become clickable external links. Anything else is
-// rendered as plain text (mirrors reamkit's own sanitizeHref allowlist, so an
-// untrusted `javascript:`/`data:` target can never become a clickable link).
+
 const ALLOWED_LINK_SCHEMES = new Set(["http", "https", "mailto"]);
 function sanitizeHref(href: string): string | undefined {
   const url = href.trim();
@@ -279,8 +255,6 @@ function paragraphWithRuns(
     indent?: number;
     keepNext?: boolean;
     pageBreakBefore?: boolean;
-    // Cor do `code` inline. O vermelho padrão fica ilegível sobre fundo
-    // escuro, então o card de dica passa um tom claro aqui.
     codeColor?: string;
   } = {},
 ): BodyElement[] {
@@ -290,11 +264,7 @@ function paragraphWithRuns(
     if (r.link && r.url) {
       const url = r.url;
       if (url.startsWith("#")) {
-        // Internal link: the run's `anchor` points at a heading's bookmark
-        // (§17.16.22 w:hyperlink @w:anchor). reamkit groups runs that share
-        // the same anchor into <w:hyperlink w:anchor="…">, so this is exactly
-        // the structure a clickable in-document link needs — no separate body
-        // element (which reamkit does not model and would drop silently).
+
         out.push(
           makeRun(r.text ?? "", {
             underline: true,
@@ -313,7 +283,7 @@ function paragraphWithRuns(
             }),
           );
         } else {
-          // Disallowed scheme: keep the words, surface the raw target, no jump.
+
           out.push(makeRun(r.text ?? "", { color: opts.color }));
           out.push(makeRun(` (${url})`, { color: "6B7280", size: 9 }));
         }
@@ -397,9 +367,7 @@ function tableBlock(
     return Math.max(w, 1);
   }
   const charToPt = 5.6;
-  // Largura desejada (conteúdo mais largo) e largura mínima (maior palavra
-  // indivisível). O header entra nas duas: o título nunca pode ser espremido
-  // a ponto de quebrar, que era o caso de "Frequência"/"Rotina" colidindo.
+
   const CELL_PADDING = 12;
   function longestWordWidth(cell: string): number {
     let w = 0;
@@ -417,12 +385,9 @@ function tableBlock(
     }
     return Math.max(maxLen, 1) * charToPt + CELL_PADDING;
   });
-  // Piso por coluna: o header inteiro em uma linha (títulos são curtos) ou a
-  // maior palavra do corpo, o que for maior.
+
   const minWidths = columns.map((_, ci) => {
-    // A maior PALAVRA do header também entra no piso: títulos como
-    // "DEFAULTCHARACTERSET_NAME" são indivisíveis, e considerar só as palavras
-    // do corpo fazia a coluna encolher abaixo do título e os headers colidirem.
+
     let floor = longestWordWidth(columns[ci] ?? "");
     for (const row of rows) {
       const w = longestWordWidth(row[ci] ?? "");
@@ -434,8 +399,7 @@ function tableBlock(
   let widths = desired.slice();
   let widthSum = widths.reduce((a, b) => a + b, 0);
   if (widthSum > PAGE_CONTENT_WIDTH) {
-    // Encolhe só a folga acima do piso, proporcionalmente: colunas de texto
-    // longo cedem espaço, colunas estreitas mantêm o header legível.
+
     const minSum = minWidths.reduce((a, b) => a + b, 0);
     if (minSum >= PAGE_CONTENT_WIDTH) {
       const k = PAGE_CONTENT_WIDTH / minSum;
@@ -482,15 +446,6 @@ function tableBlock(
           ? zebraBackground
           : undefined;
         return {
-          // Sem isHeader e sem keepNext encadeado.
-          //
-          // isHeader repetia o cabeçalho na quebra; combinado ao keepNext em
-          // toda linha não-final (que prende a tabela ao parágrafo seguinte e
-          // empurra o conjunto inteiro), o resultado era o cabeçalho impresso
-          // no pé de uma página e repetido na outra — o "header fantasma".
-          //
-          // keepNext só no cabeçalho: ele nunca fica sozinho no rodapé, mas a
-          // tabela deixa de ser um bloco indivisível e quebra naturalmente.
           properties: {
             ...(isHeader ? { keepNext: true } : {}),
             cantSplit: true,
@@ -509,18 +464,7 @@ function tableBlock(
   };
 }
 
-// Split a long code line into segments that each fit within `maxCols` columns.
-// Prefers a break at a space, then at a natural delimiter (BREAK_AFTER), then
-// hard-cuts, so long unbreakable tokens (URLs, file paths, package names) still
-// wrap into real lines instead of being shredded or clipped by the PDF layout
-// engine. Each segment becomes its own paragraph, which the renderer always
-// starts on a fresh line — unlike a bare `\n` inside a run, whose break depends
-// on the output format.
-// Shell/common operators that make natural break points: when a long command
-// line must wrap, prefer a break just before one of these (e.g. `docker … &&`
-// then `docker compose …`) so each wrapped fragment stays a coherent command
-// rather than splitting mid-word. Longest forms first so `>>` wins over `>`,
-// `2>>` over `2>`, `&&` over `&`, etc.
+
 const SHELL_OPS =
   /<<<|2>>|2>|>>|&>|>&|\|&|\[\[|\]\]|<<&&\|\||<|>|\||;|&|==|!=|=|\$\(|\$\{|\$@|\$\*|\$\#|\$\?|\$\$|\$!|\[|\]|`/g;
 
@@ -539,8 +483,7 @@ function splitLongLine(line: string, maxCols: number): string[] {
   const out: string[] = [];
   let rest = line;
   while (rest.length > maxCols) {
-    // Prefer a break right before a shell operator, then a space, then any
-    // delimiter, then a hard cut — so the rendered line never overflows.
+
     let cut = lastOperatorIndex(rest, maxCols);
     if (cut <= 0) cut = rest.lastIndexOf(" ", maxCols);
     if (cut <= 0) cut = lastDelimiterIndex(rest, maxCols);
@@ -559,10 +502,7 @@ function lastDelimiterIndex(s: string, max: number): number {
   return -1;
 }
 
-// Per-language identity: each code block gets its own accent color, used in
-// the language badge, the header tint and the left edge. This is what keeps
-// JSON / YAML / TOML / XML (and the common languages) visually distinct while
-// still feeling like one family.
+
 const LANG_META: Record<string, { label: string; accent: string }> = {
   json: { label: "JSON", accent: "E5C07B" },
   yaml: { label: "YAML", accent: "E06C75" },
@@ -617,7 +557,7 @@ function langMeta(lang?: string): { label: string; accent: string } {
     { label: (lang ?? "code").toUpperCase(), accent: "8B949E" };
 }
 
-// Blend a hex color toward black; factor 1 keeps the color, 0 makes it black.
+
 function shadeHex(color: string, factor: number): string {
   const h = color.replace(/^#/, "");
   if (!/^[0-9a-fA-F]{6}$/.test(h)) return color;
@@ -629,13 +569,11 @@ function shadeHex(color: string, factor: number): string {
   ));
 }
 
-// Casca visual de um bloco de código/diagrama: badge do idioma em cima (com a
-// cor de identidade), fundo escuro e a borda esquerda grossa na mesma cor.
+
 function codeBlockShell(
   meta: { label: string; accent: string },
   content: BodyElement[],
-  // Quando um blockquote vem logo abaixo, o bloco não fecha com espaçador: o
-  // quote encosta na casca e os dois leem como uma única peça.
+
   attachedBelow = false,
 ): BodyElement[] {
   const bg = "1A1D23";
@@ -674,8 +612,7 @@ function codeBlockShell(
       kind: "table",
       table: {
         properties: {
-          // Mesma estratégia das demais tabelas: largura da grid respeitada,
-          // sem o renderizador redistribuir altura para preencher a página.
+
           layout: "fixed",
           borders: {
             top: border,
@@ -687,9 +624,7 @@ function codeBlockShell(
         grid: [pt(PAGE_CONTENT_WIDTH)],
         rows: [
           {
-            // Badge em linha própria com shading de CÉLULA (pinta a faixa
-            // inteira; shading de parágrafo cobria só o texto). Sem isHeader,
-            // que era o responsável por repetir a faixa na quebra.
+
             properties: { cantSplit: true },
             cells: [{
               properties: {
@@ -715,8 +650,7 @@ function codeBlockShell(
   ];
 }
 
-// Diagrama mermaid embutido como imagem centralizada, limitada à largura da
-// página (dimensões de design → pt; o PNG rasterizado em 2x fica nítido).
+
 function mermaidImageBlock(
   png: MermaidImageData,
   resources: ResourceStore,
@@ -727,7 +661,7 @@ function mermaidImageBlock(
   let wPt = Math.max(MIN_W, Math.min(MAX_W, png.width));
   let hPt = (wPt * png.height) / Math.max(png.width, 1);
   if (hPt > MAX_H) {
-    // Diagrama alto: reduz a largura para caber na página sem cortar.
+
     const k = MAX_H / hPt;
     wPt *= k;
     hPt = MAX_H;
@@ -757,20 +691,18 @@ function renderCodeBlock(
   const MAX_CODE_COLS = 88;
   const content: BodyElement[] = [];
 
-  // Mermaid: converte o diagrama em arte de caixas/setas (simples e robusta);
-  // se a sintaxe for complexa demais, cai no rendering comum de código.
+
   const lang = (b.language ?? "").toLowerCase();
   if (lang === "mermaid") {
     const diagram = renderMermaidDiagram(String(b.text ?? ""));
     if (diagram) {
       const n = diagram.lines.length;
       for (let k = 0; k < n; k++) {
-        // O layout enfileirado já entrega os runs por linha (caixas ciano,
-        // fios âmbar, rótulos em neve); a árvore textual cai no colorDiagram.
+
         const runs = diagram.runs?.[k] ?? colorDiagram(diagram.lines[k]);
         content.push(...paragraphWithRuns(
           [{ text: " " }, ...runs],
-          // Rótulos em neve para ler bem sobre o fundo escuro.
+
           {
             fontFamily: "Courier New",
             size: 8.5,
@@ -786,17 +718,13 @@ function renderCodeBlock(
 
   const code = String(b.text ?? "");
   const lines = code.length === 0 ? [""] : code.split("\n");
-  // One solid paragraph per source line: the inline comment stays glued to its
-  // code (the highlighter dims it), empty lines are preserved, and wrapped
-  // continuations are indented so the block reads as a single unit.
+
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li];
     const subs = splitLongLine(line, MAX_CODE_COLS);
     for (let k = 0; k < subs.length; k++) {
       const isLast = k === subs.length - 1;
-      // Sem keepNext: o badge já viaja na mesma linha de tabela que o código,
-      // e keepNext em todas as linhas fazia o bloco longo ser tratado como
-      // indivisível, migrando inteiro e deixando a casca vazia para trás.
+
       content.push(...paragraphWithRuns(
         [{ text: isLast ? " " : "  " }, ...highlight(subs[k], b.language)],
         {
@@ -813,13 +741,11 @@ function renderCodeBlock(
 }
 
 export interface FlowDocOptions {
-  /** Use real line breaks instead of zero-width spaces (needed for PDF). */
+
   hardWrap?: boolean;
 }
 
-// Escala tipográfica dos títulos. H1 carrega a cor de marca (a mesma da barra
-// do blockquote) e abre capítulo em página nova; os demais níveis escurecem e
-// encolhem até se aproximarem do texto corrido.
+
 function headingProps(
   level: number,
 ): {
@@ -840,7 +766,7 @@ function headingProps(
   }
 }
 
-/** Imagem PNG pronta de um diagrama (dimensões de design em px). */
+
 export interface MermaidImageData {
   bytes: Uint8Array;
   width: number;
@@ -894,8 +820,7 @@ export function jsonToFlowDoc(
         bold: level <= 3,
         align: b.align,
         bookmarks: [slug(String(b.text ?? ""))],
-        // Só um H1 de verdade (e que não seja a primeira coisa do documento)
-        // abre capítulo em página nova.
+
         pageBreakBefore: level === 1 && body.length > 0,
       }));
     } else if (kind === "paragraph") {
@@ -919,9 +844,7 @@ export function jsonToFlowDoc(
       }
     } else if (kind === "list") {
       for (const item of b.items ?? []) {
-        // Task list (`- [ ]` / `- [x]`): vira uma caixinha de verdade em vez do
-        // literal "[ ]" colado no bullet. Marcado ganha ☑ em verde e o texto
-        // esmaecido; pendente fica ☐ na cor do texto.
+
         const task = /^\[([ xX])\]\s+(.*)$/.exec(item);
         if (task) {
           const done = task[1].toLowerCase() === "x";
@@ -991,8 +914,7 @@ export function jsonToFlowDoc(
       }
     } else if (kind === "codeblock") {
       const lang = String(b.language ?? "").toLowerCase();
-      // Mermaid renderizado como imagem PNG (resvg) quando disponível — visual
-      // de diagrama de verdade; sem PNG, cai no ASCII dentro da casca de código.
+
       if (lang === "mermaid") {
         const png = mermaidImages?.get(bi);
         if (png) {
@@ -1003,14 +925,10 @@ export function jsonToFlowDoc(
       const nextIsQuote = String(blocks[bi + 1]?.kind ?? "") === "blockquote";
       body.push(...renderCodeBlock(b, nextIsQuote));
     } else if (kind === "blockquote") {
-      // Quote logo após um bloco de código vira a "legenda" dele: encosta na
-      // casca, herda a cor da linguagem na barra e usa um cinza mais escuro,
-      // de modo que os dois formem visualmente a mesma seção.
+
       const prev = blocks[bi - 1];
       const afterCode = String(prev?.kind ?? "") === "codeblock";
-      // Card de dica do JetBrains: fundo verde-escuro e texto claro. A barra
-      // lateral herda a cor da linguagem do bloco acima (BASH âmbar, XML
-      // ciano...), amarrando visualmente o comentário ao seu código.
+
       const accent = afterCode ? langMeta(prev?.language).accent : undefined;
       const bg = afterCode ? "1F2D22" : "F5F5F7";
       const bar = afterCode ? (accent ?? "3E5C42") : "D85131";
@@ -1019,17 +937,14 @@ export function jsonToFlowDoc(
       const content: BodyElement[] = [];
       const lines = (b.items ?? []).length ? (b.items ?? []) : [""];
       lines.forEach((line, idx) => {
-        // Ícone só na primeira linha. Usa ☼ (263C) e não 💡 (1F4A1): o
-        // conversor de PDF só embute glifos do plano básico.
+
         const icon = afterCode && idx === 0
           ? [{ text: "\u263C  ", color: accent ?? "E8C547", size: 11 }]
           : [];
         content.push(...paragraphWithRuns(
           [...icon, ...parseInline(line || " ")],
           {
-            // 9.5pt: menor que o texto corrido (10.5) para ficar claro que é
-            // uma nota do bloco, mas ainda confortável para vários parágrafos
-            // de prosa — 8.5pt (corpo do código) apertava demais.
+
             size: afterCode ? 9.5 : 10.5,
             color: textColor,
             spacingBefore: 0,
@@ -1038,17 +953,15 @@ export function jsonToFlowDoc(
           },
         ));
       });
-      // Card escuro: contorno fino esverdeado nos três lados + barra esquerda
-      // grossa na cor da linguagem do bloco acima.
+
       const border = afterCode
         ? { style: "single" as const, width: pt(0.75), colorHex: "3E5C42" }
         : { style: "single" as const, width: pt(2), colorHex: bar };
-      // Mesma espessura da borda de destaque do bloco de código (accentBorder,
-      // 2pt): as duas barras formam uma linha contínua na lateral.
+
       const leftBar = afterCode
         ? { style: "single" as const, width: pt(2), colorHex: bar }
         : border;
-      // Acoplado ao código: sem espaçador acima, encostando na casca.
+
       if (!afterCode) {
         body.push(run("", { spacingBefore: 0, spacingAfter: 0, size: 1 }));
       }

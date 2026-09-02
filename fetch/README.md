@@ -11,10 +11,8 @@ reenviados automaticamente. Módulo independente (`module ntdsk.com/mcp/fetch`).
 
 | Tool | Descrição |
 | --- | --- |
-| `fetch_request` | Envia um HTTP request (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) para um host permitido: método, URL, headers opcionais, corpo (JSON/XML/texto), timeout, `noCookies`, `followRedirects` e `noBody`. Retorna timing (DNS/conexão/TLS/primeiro byte), status, lista leve de headers (data em hora local; `Set-Cookie` resumido ao **nome** dos cookies), corpo pretty-printed e o `curl` equivalente. Respostas binárias são resumidas (não despejam bytes). |
-| `cookie_list` | Lista os cookies salvos (domínio, nome, valor, path, expiração, flags). |
-| `cookie_clear` | Limpa cookies: tudo, um domínio, ou um cookie específico (`domain` + `name`). |
-| `fetch_allowlist` | Lista os hosts liberados por `FETCH_ALLOW_HOST`. |
+| `fetch_request` | Envia um HTTP request (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) para um host permitido: método, URL, headers opcionais, corpo (JSON/XML/texto), timeout, `noCookies`, `followRedirects` e `noBody`. Retorna timing (DNS/conexão/TLS/primeiro byte), status, lista leve de headers (data em hora local; `Set-Cookie` resumido ao **nome** dos cookies), corpo pretty-printed e o `curl` equivalente. Respostas binárias são resumidas (não despejam bytes); o corpo exibido é truncado em 1200 caracteres por padrão (`bodyMaxChars` ajusta). |
+| `fetch_cookie` | Gerencia cookies: `action=list` lista os salvos (domínio, nome, valor, path, expiração, flags); `action=clear` limpa (tudo, um domínio, ou um cookie via `domain`+`name`) e retorna quantos foram removidos. |
 | `fetch_history` | Devolve as últimas N requisições (padrão 20, máx 200) gravadas no log da sessão — reaproveitáveis para reproduzir chamadas sem redigitar. |
 
 ## Recursos
@@ -55,7 +53,7 @@ FETCH_ALLOW_HOST=localhost,golang.org,.example.com
   mesmo domínio (respeitando `Path`, `Secure` e expiração).
 - Persistidos em `~/.local/share/mcp/fetch/cookies.json` (sobrevivem ao
   restart; defina `FETCH_COOKIE_FILE` para outro local).
-- Gerencie com `cookie_list` e `cookie_clear`.
+- Gerencie com `fetch_cookie` (`action=list` / `action=clear`).
 
 ## Variáveis de ambiente
 

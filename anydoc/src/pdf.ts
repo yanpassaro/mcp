@@ -5,23 +5,17 @@ import { loadImages, loadMermaidImages } from "./images.ts";
 import type { ParsedMarkdown } from "./markdown.ts";
 import type { CreatedDocument } from "./types.ts";
 
-// O conversor DOCX→PDF do reamkit embute apenas fontes com um subconjunto de
-// glifos: símbolos como ✔(2714), ✗(2717), ♥(2665), ★(2605), ⚠(26A0) passam,
-// mas vários emojis não (ex.: ✅ 2705 e todo o plano astral 1F000+). Por isso o
-// caminho PDF normaliza: remove marcadores de apresentação/ligação (FE0F, 200D)
-// e tons de pele, e troca os emojis mais comuns por glifos equivalentes que a
-// fonte aguenta. O DOCX não passa por isso — Word/Google Docs renderizam emoji
-// colorido de verdade.
+
 const EMOJI_TO_GLYPH: Record<string, string> = {
-  "✅": "✔", // 2705 → 2714
-  "❌": "✗", // 274C → 2717
-  "❤": "♥", // 2764 → 2665
+  "✅": "✔",
+  "❌": "✗",
+  "❤": "♥",
   "❤️": "♥",
   "💜": "♥",
   "💙": "♥",
-  "⭐": "★", // 2B50 → 2605
-  "🌟": "★", // 1F31F → 2605
-  "✨": "★", // 2728 → 2605
+  "⭐": "★",
+  "🌟": "★",
+  "✨": "★",
 };
 
 const PDF_FORMAT_RE = /[\uFE0E\uFE0F\u200D\u{1F3FB}-\u{1F3FF}]/gu;
@@ -35,8 +29,7 @@ function pdfSafeText(text: string | undefined): string {
   return s;
 }
 
-// Aplica a normalização de emoji apenas nos blocos de texto. Blocos de código
-// ficam intocados (conteúdo verbatim), imagens/mermaid também.
+
 function pdfSafeBlocks(blocks: DocumentBlock[]): DocumentBlock[] {
   const safe = (s?: string) => (s === undefined ? undefined : pdfSafeText(s));
   return blocks.map((b) => {

@@ -101,7 +101,8 @@ defina `SQLIZE_STATE_DIR` no ambiente.)
    - `.sql` → instruções executadas no banco.
    - `.sqlite`, `.db` → banco anexado como esquema (ex.: `db0`); suas tabelas
      ficam consultáveis diretamente pelo nome.
-2. `sqlize_structure` — lista tabelas/colunas; com `table`, detalha uma tabela.
+2. `sqlize_structure` — lista tabelas/colunas; com `table`, detalha a tabela
+   (colunas + foreign keys + índices).
 3. `sqlize_query` — consulta SQL (`SELECT`/`WITH`, sem `;`).
 4. `sqlize_export` — grava o resultado em `.json`, `.csv`, `.tsv`, `.xlsx`,
    `.sql` ou `.xml` (a extensão do `path` define o formato).
@@ -202,7 +203,7 @@ O `{PREFIXO}` vira o alias da conexão nas tools. O prefixo `DB` (ou ausente:
 `POSTGRES_URL`/`MYSQL_URL`) é a conexão **padrão**, sem alias. Quando `_URL` e
 `_DSN` existem para o mesmo prefixo, o `_URL` vence.
 
-Cada banco registrado ganha 4 tools, nomeadas `{engine}[_{alias}]_...`:
+Cada banco registrado ganha 3 tools, nomeadas `{engine}[_{alias}]_...`:
 
 - `{engine}[_{alias}]_query` — executa `SELECT`/`WITH` dentro de uma transação
   `READ ONLY` (qualquer escrita é rejeitada pelo banco). **LIMIT forçado de 500
@@ -210,15 +211,14 @@ Cada banco registrado ganha 4 tools, nomeadas `{engine}[_{alias}]_...`:
   opcionais em `args` são passados como *bound parameters* (nunca interpolados).
 - `{engine}[_{alias}]_export` — grava o **resultado completo** de uma
   `SELECT`/`WITH` em arquivo, sempre mascarado (ver seção abaixo).
-- `{engine}[_{alias}]_tables` — lista as tabelas do banco.
-- `{engine}[_{alias}]_schema` — descreve as colunas de uma tabela
-  (`schema.table` ou só `table`).
+- `{engine}[_{alias}]_structure` — estrutura do banco. Sem `table`, lista as
+  tabelas; com `table` (`schema.table` ou só `table`), mostra as **colunas**, as
+  **foreign keys** (coluna → tabela.coluna) e os **índices**.
 
 
 Exemplos: `DB_POSTGRES_DSN` → `postgres_query`, `postgres_export`,
-`postgres_tables`, `postgres_schema`; `PRD_MYSQL_URL` → `mysql_prd_query`,
-`mysql_prd_export`, `mysql_prd_tables`, `mysql_prd_schema`;
-`LOCAL_POSTGRES_URL` → `postgres_local_query` ...
+`postgres_structure`; `PRD_MYSQL_URL` → `mysql_prd_query`, `mysql_prd_export`,
+`mysql_prd_structure`; `LOCAL_POSTGRES_URL` → `postgres_local_query` ...
 
 Toda a saída dessas tools é **sempre mascarada** (CPF, CNPJ, e-mail, telefone,
 cartão, datas, IP e colunas consideradas PII por nome).
@@ -278,3 +278,5 @@ Requer os drivers `github.com/jackc/pgx/v5` e `github.com/go-sql-driver/mysql`
 - A importação de XML é heurística: identifica elementos repetidos como linhas e
   usa atributos + elementos folha como colunas.
 - O Excel suportado é `.xlsx`/`.xlsm` (não `.xls` legado).
+- Nenhum resultado volta com binário: células com conteúdo binário são substituídas
+  por `[binário]`. Valores de texto com mais de 200 caracteres são truncados com `…`.

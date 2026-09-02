@@ -9,10 +9,8 @@ no `Taskfile`).
 
 | Tool | Descrição |
 | --- | --- |
-| `anydoc_convert_to_markdown` | Lê um documento e salva como Markdown ao lado do original (mesmo nome, `.md`); não sobrescreve `.md` existente (usa sufixo `-extraido`) e devolve o caminho absoluto |
-| `anydoc_export_to_pdf` | Exporta um `.md` como PDF na mesma pasta |
-| `anydoc_export_to_docx` | Exporta um `.md` como Word (`.docx`) na mesma pasta |
-| `anydoc_export_to_xlsx` | Exporta um `.md` como planilha Excel (`.xlsx`) na mesma pasta |
+| `anydoc_import` | Lê um documento e salva como Markdown ao lado do original (mesmo nome, `.md`); não sobrescreve `.md` existente (usa sufixo `-extraido`) e devolve o caminho absoluto |
+| `anydoc_export` | Exporta um arquivo para `pdf`/`docx`/`xlsx` na mesma pasta (via Markdown). Fonte: `.md`, ou CSV/TSV/JSON/XML/HTML de tabela/XLS (e docs suportados) — CSV/TSV/JSON/XML/HTML/XLS viram XLSX; docx/pdf viram PDF/DOCX/XLSX. Devolve o caminho absoluto |
 
 Formatos de conversão: Word (`.doc`/`.docx`/`.docm`), PowerPoint, Excel,
 OpenDocument (`.odt`/`.ods`/`.odp`), RTF, EPUB, CSV e PDF. No Excel, o preview

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -32,7 +33,7 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_structure",
-		Description: "Show the structure of the imported data. Without 'table', lists every table and its columns (sqlite or individual table). With 'table', shows that table's columns.",
+		Description: "Show the structure of the imported data. Without 'table', lists every table and its columns. With 'table', shows the columns plus foreign keys and indexes of that table.",
 	}, s.structureTool)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -57,13 +58,9 @@ func (s *Server) Register(server *mcp.Server) {
 			Description: fmt.Sprintf("Run a read-only SQL query (SELECT or WITH) against the live %s database (%s) and write the FULL result to a file, always masked. The file extension defines the format: .csv, .html, .xlsx, .tsv, .json, .xml, .sql. Executed in a READ ONLY transaction; writes are impossible. 'all' bypasses the 500-row hard limit (only allowed together with 'export_to'). For .sql exports 'target_table' sets the table name used in the script (defaults to 'exported'). Uses the same security rules as %s_query (args as bound parameters, WHERE literals rejected, function allowlist).", cfg.Engine, env, prefix),
 		}, s.liveExportHandler(cfg))
 		mcp.AddTool(server, &mcp.Tool{
-			Name:        prefix + "_tables",
-			Description: fmt.Sprintf("List tables of the live %s database (%s). Output is always redacted.", cfg.Engine, env),
-		}, s.liveTablesHandler(cfg))
-		mcp.AddTool(server, &mcp.Tool{
-			Name:        prefix + "_schema",
-			Description: fmt.Sprintf("Describe the columns (name + type) of a %s table (%s). Use 'schema.table' or just 'table'. Output is always redacted.", cfg.Engine, env),
-		}, s.liveSchemaHandler(cfg))
+			Name:        prefix + "_structure",
+			Description: fmt.Sprintf("Structure of the live %s database (%s): lists tables when 'table' is empty; when 'table' is given (use 'schema.table' or just 'table'), shows columns + foreign keys + indexes. Output is always redacted.", cfg.Engine, env),
+		}, s.liveStructureHandler(cfg))
 
 	}
 }
@@ -125,7 +122,23 @@ func (s *Server) structureTool(ctx context.Context, _ *mcp.CallToolRequest, in s
 			}
 			fmt.Fprintf(&b, "### %s (esquema %s)\n", t.Name, schemaLabel(t.Schema))
 			for _, c := range cols {
-				fmt.Fprintf(&b, "- %s: %s\n", c.Name, c.Type)
+				fmt.Fprintf(&b, "- %s: %s\n", short(c.Name), short(c.Type))
+			}
+			if fks, e := s.store.tableForeignKeys(ctx, t.Schema, t.Name); e == nil && len(fks) > 0 {
+				b.WriteString("\nFks:\n")
+				for _, fk := range fks {
+					fmt.Fprintf(&b, "- %s → %s.%s\n", short(fk.Column), short(fk.RefTable), short(fk.RefColumn))
+				}
+			}
+			if idx, e := s.store.tableIndexes(ctx, t.Schema, t.Name); e == nil && len(idx) > 0 {
+				b.WriteString("\nÍndices:\n")
+				for _, ix := range idx {
+					u := ""
+					if ix.Unique {
+						u = " (único)"
+					}
+					fmt.Fprintf(&b, "- %s%s: %s\n", short(ix.Name), u, short(strings.Join(ix.Columns, ", ")))
+				}
 			}
 			b.WriteString("\n")
 		}
@@ -280,30 +293,13 @@ func (s *Server) liveExportHandler(cfg liveDBConfig) func(context.Context, *mcp.
 	}
 }
 
-func (s *Server) liveTablesHandler(cfg liveDBConfig) func(context.Context, *mcp.CallToolRequest, liveConnInput) (*mcp.CallToolResult, any, error) {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, _ liveConnInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) liveStructureHandler(cfg liveDBConfig) func(context.Context, *mcp.CallToolRequest, liveStructureInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in liveStructureInput) (*mcp.CallToolResult, any, error) {
 		c, err := newLiveDB(cfg)
 		if err != nil {
 			return nil, nil, err
 		}
-		res, err := c.tables(ctx)
-		if err != nil {
-			return nil, nil, err
-		}
-		return textResult(res)
-	}
-}
-
-func (s *Server) liveSchemaHandler(cfg liveDBConfig) func(context.Context, *mcp.CallToolRequest, liveTableInput) (*mcp.CallToolResult, any, error) {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in liveTableInput) (*mcp.CallToolResult, any, error) {
-		if strings.TrimSpace(in.Table) == "" {
-			return nil, nil, fmt.Errorf("'table' é obrigatório")
-		}
-		c, err := newLiveDB(cfg)
-		if err != nil {
-			return nil, nil, err
-		}
-		res, err := c.schema(ctx, in.Table)
+		res, err := c.structure(ctx, in.Table)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -317,10 +313,28 @@ type liveQueryInput struct {
 }
 
 
-type liveConnInput struct{}
+type liveStructureInput struct {
+	Table string `json:"table,omitempty" jsonschema:"Table name, optionally qualified as 'schema.table'. If empty, lists all tables."`
+}
 
-type liveTableInput struct {
-	Table string `json:"table" jsonschema:"Table name, optionally qualified as 'schema.table'."`
+const maxCellLen = 200
+
+func isBinaryText(s string) bool {
+	if strings.IndexByte(s, 0) >= 0 {
+		return true
+	}
+	return !utf8.ValidString(s)
+}
+
+func short(s string) string {
+	if isBinaryText(s) {
+		return "[binário]"
+	}
+	rs := []rune(s)
+	if len(rs) <= maxCellLen {
+		return s
+	}
+	return string(rs[:maxCellLen]) + "…"
 }
 
 func cleanCell(s string) string {
@@ -331,7 +345,7 @@ func cleanCell(s string) string {
 	for strings.Contains(s, "  ") {
 		s = strings.ReplaceAll(s, "  ", " ")
 	}
-	return strings.TrimSpace(s)
+	return short(strings.TrimSpace(s))
 }
 
 func markdownTable(headers []string, rows [][]string) string {

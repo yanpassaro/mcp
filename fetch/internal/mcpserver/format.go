@@ -18,7 +18,7 @@ import (
 	"ntdsk.com/mcp/fetch/internal/fetch"
 )
 
-func formatResponse(r *fetch.Resp, maxBody int64, htmlRaw bool, htmlMaxChars int) string {
+func formatResponse(r *fetch.Resp, maxBody int64, htmlRaw bool, htmlMaxChars, bodyMaxChars int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Fetch `%s %s`\n\n", r.Method, r.URL)
 	size := int64(len(r.Body))
@@ -40,7 +40,7 @@ func formatResponse(r *fetch.Resp, maxBody int64, htmlRaw bool, htmlMaxChars int
 	b.WriteString("\n### Headers\n\n")
 	b.WriteString(formatHeaders(r.Header))
 	b.WriteString("\n### Body\n\n")
-	b.WriteString(bodyBlock(r, htmlRaw, htmlMaxChars))
+	b.WriteString(bodyBlock(r, htmlRaw, htmlMaxChars, bodyMaxChars))
 	if r.Truncated {
 		fmt.Fprintf(&b, "\n\n_(corpo truncado em %s; aumente FETCH_MAX_BODY_KB se precisar)_\n", sizeLabel(maxBody))
 	}
@@ -53,6 +53,7 @@ func formatResponse(r *fetch.Resp, maxBody int64, htmlRaw bool, htmlMaxChars int
 }
 
 const defaultHTMLMaxChars = 1200
+const defaultBodyMaxChars = 1200
 
 func timingLine(r *fetch.Resp) string {
 	if len(r.Timings) == 0 {
@@ -228,7 +229,7 @@ func foldValue(s string, n int) string {
 	return string(r[:n]) + "…" + fmt.Sprintf(" (+%d chars)", len(r)-n)
 }
 
-func bodyBlock(r *fetch.Resp, htmlRaw bool, htmlMaxChars int) string {
+func bodyBlock(r *fetch.Resp, htmlRaw bool, htmlMaxChars, maxChars int) string {
 	if r.NoBody {
 		return "_(corpo omitido — noBody: true)_\n"
 	}
@@ -245,25 +246,36 @@ func bodyBlock(r *fetch.Resp, htmlRaw bool, htmlMaxChars int) string {
 	}
 	ct := strings.ToLower(r.Header.Get("Content-Type"))
 	trim := strings.ToLower(trimmed)
+	var body string
 	switch {
 	case strings.Contains(ct, "html") || strings.HasPrefix(trim, "<!doctype html") || strings.HasPrefix(trim, "<html"):
 		if htmlRaw {
-			return "```html\n" + string(r.Body) + "\n```\n"
+			body = "```html\n" + string(r.Body) + "\n```\n"
+		} else {
+			if htmlMaxChars < 100 {
+				htmlMaxChars = defaultHTMLMaxChars
+			}
+			body = formatExtractedHTML(r.Body, r.URL, htmlMaxChars)
 		}
-		if htmlMaxChars < 100 {
-			htmlMaxChars = defaultHTMLMaxChars
-		}
-		return formatExtractedHTML(r.Body, r.URL, htmlMaxChars)
 	case strings.Contains(ct, "json") || strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "["):
 		if pretty, err := prettyJSON(r.Body); err == nil {
-			return "```json\n" + pretty + "\n```\n"
+			body = "```json\n" + pretty + "\n```\n"
+		} else {
+			body = "```\n" + string(r.Body) + "\n```\n"
 		}
 	case strings.Contains(ct, "xml") || (strings.HasPrefix(trimmed, "<") && !strings.HasPrefix(trim, "<!doctype html")):
 		if pretty, err := prettyXML(r.Body); err == nil {
-			return "```xml\n" + pretty + "\n```\n"
+			body = "```xml\n" + pretty + "\n```\n"
+		} else {
+			body = "```\n" + string(r.Body) + "\n```\n"
 		}
+	default:
+		body = "```\n" + string(r.Body) + "\n```\n"
 	}
-	return "```\n" + string(r.Body) + "\n```\n"
+	if maxChars > 0 {
+		body = truncate(body, maxChars)
+	}
+	return body
 }
 
 var (

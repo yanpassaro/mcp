@@ -238,165 +238,32 @@ type contributorRow struct {
 	Count int
 }
 
-func formatContributors(rows []contributorRow, total int, excludeMerges bool) string {
-	var b strings.Builder
-	title := fmt.Sprintf("## 🏆 Maiores contribuidores — %s commits", formatThousands(total))
-	if excludeMerges {
-		title += " (sem merges)"
-	}
-	b.WriteString(title)
-	b.WriteString("\n\n")
-	if len(rows) == 0 {
-		b.WriteString("_Sem contribuidores._\n")
-		return b.String()
-	}
-	max := rows[0].Count
-	if max <= 0 {
-		max = 1
-	}
-	const barWidth = 20
-	medals := []string{"🥇", "🥈", "🥉"}
-	for i, r := range rows {
-		prefix := "  "
-		if i < len(medals) {
-			prefix = medals[i] + " "
-		}
-		filled := int(float64(r.Count) / float64(max) * barWidth)
-		if r.Count > 0 && filled < 1 {
-			filled = 1
-		}
-		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-		pct := int(float64(r.Count)/float64(total)*100 + 0.5)
-		commitWord := "commits"
-		if r.Count == 1 {
-			commitWord = "commit"
-		}
-		fmt.Fprintf(&b, "%s **%s** — %s %s\n", prefix, clean(r.Name), formatThousands(r.Count), commitWord)
-		fmt.Fprintf(&b, "   `%s` %d%%\n\n", bar, pct)
-	}
-	return b.String()
+
+type langShare struct {
+	Name string
+	Pct  int
 }
 
-var monthLabels = [12]string{"jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"}
-
-
-
-// formatContributionHeatmap desenha o grid estilo GitHub. A janela de 3 meses
-// é o limite; o grid começa na semana do primeiro commit do período (start),
-// evitando fileiras de células vazias em projetos jovens.
-func formatContributionHeatmap(counts map[string]int, start, now time.Time, weeks, total int, since time.Time) string {
-	const dayPad = 4 // etiquetas seg..dom + espaço
-	width := dayPad + weeks
-	var b strings.Builder
-	b.WriteString("### 📈 Contribuições (3 meses)\n\n```text\n")
-
-	// Linha de cabeçalho com os meses (3 letras), sobre as colunas em que começam.
-	header := make([]rune, width)
-	for i := range header {
-		header[i] = ' '
-	}
-	prevMonth := start.AddDate(0, -1, 0)
-	for w := range weeks {
-		weekStart := start.AddDate(0, 0, w*7)
-		if weekStart.Month() != prevMonth.Month() || weekStart.Year() != prevMonth.Year() {
-			label := monthLabels[int(weekStart.Month())-1]
-			for i, r := range label {
-				if dayPad+w+i < width {
-					header[dayPad+w+i] = r
-				}
-			}
-			prevMonth = weekStart
-		}
-	}
-	b.WriteString(string(header))
-	b.WriteString("\n")
-
-	dayNames := [7]string{"seg", "ter", "qua", "qui", "sex", "sáb", "dom"}
-	for d := range 7 {
-		line := []rune(dayNames[d] + " ")
-		for w := range weeks {
-			day := start.AddDate(0, 0, w*7+d)
-			n := 0
-			if !day.After(now) {
-				n = counts[day.Format("2006-01-02")]
-			}
-			line = append(line, heatChar(n))
-		}
-		b.WriteString(string(line))
-		b.WriteString("\n")
-	}
-	b.WriteString("```\n\n")
-	commitWord := "commits"
-	if total == 1 {
-		commitWord = "commit"
-	}
-	fmt.Fprintf(&b, "_Total no período: %s %s · desde %s · legenda: · 0 · ░ 1–2 · ▒ 3–5 · ▓ 6–9 · █ 10+_",
-		formatThousands(total), commitWord, since.Format("02/01/06"))
-	return b.String()
-}
-
-func heatChar(n int) rune {
-	switch {
-	case n <= 0:
-		return '·'
-	case n <= 2:
-		return '░'
-	case n <= 5:
-		return '▒'
-	case n <= 9:
-		return '▓'
-	default:
-		return '█'
-	}
-}
-
-type langRow struct {
-	Name  string
-	Lines int
-}
-
-func formatLanguages(counts map[string]int, total int) string {
-	var b strings.Builder
-	if total == 0 {
-		b.WriteString("### 🗂️ Linguagens\n\n_Sem arquivos de código detectados._\n")
-		return b.String()
-	}
-	fmt.Fprintf(&b, "### 🗂️ Linguagens — %s linhas\n\n", formatThousands(total))
-	rows := make([]langRow, 0, len(counts))
+func languageShares(counts map[string]int, total int) []langShare {
+	rows := make([]langShare, 0, len(counts))
 	for name, n := range counts {
-		rows = append(rows, langRow{Name: name, Lines: n})
+		pct := 0
+		if total > 0 {
+			pct = int(float64(n)/float64(total)*100 + 0.5)
+		}
+		rows = append(rows, langShare{Name: name, Pct: pct})
 	}
 	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Lines != rows[j].Lines {
-			return rows[i].Lines > rows[j].Lines
+		if rows[i].Pct != rows[j].Pct {
+			return rows[i].Pct > rows[j].Pct
 		}
 		return rows[i].Name < rows[j].Name
 	})
 	const top = 8
-	shown := rows
 	if len(rows) > top {
-		shown = rows[:top]
-		rest := 0
-		for _, r := range rows[top:] {
-			rest += r.Lines
-		}
-		shown = append(shown, langRow{Name: "Outras", Lines: rest})
+		rows = rows[:top]
 	}
-	max := shown[0].Lines
-	if max <= 0 {
-		max = 1
-	}
-	const barWidth = 10
-	for _, r := range shown {
-		filled := int(float64(r.Lines) / float64(max) * barWidth)
-		if r.Lines > 0 && filled < 1 {
-			filled = 1
-		}
-		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-		pct := int(float64(r.Lines)/float64(total)*100 + 0.5)
-		fmt.Fprintf(&b, "**%s** `%s` %d%% (%s linhas)\n", r.Name, bar, pct, formatThousands(r.Lines))
-	}
-	return b.String()
+	return rows
 }
 
 func formatThousands(n int) string {
@@ -513,15 +380,6 @@ func formatRevParse(rev, full, short, author, msg string) string {
 	return b.String()
 }
 
-func formatCheckIgnore(path string, ignored bool, note string) string {
-	if note != "" {
-		return fmt.Sprintf("## Check-ignore\n\n`%s` — **%s**.", clean(path), clean(note))
-	}
-	if ignored {
-		return fmt.Sprintf("## Check-ignore\n\n`%s` — **ignorado** (`.gitignore`).", clean(path))
-	}
-	return fmt.Sprintf("## Check-ignore\n\n`%s` — **não ignorado**.\n", clean(path))
-}
 
 func emojiTitle(typ string) string {
 	switch typ {
@@ -735,16 +593,19 @@ func formatWorkingDiff(title string, diffs []string, added, deleted int) string 
 const goGitVersion = "go-git v6.0.0-alpha.5"
 
 type repoInfoData struct {
-	Root        string
-	Branch      string
-	Detached    bool
-	Head        string
-	HeadFull    string
-	CommitCount int
-	BranchCount int
-	TagCount    int
-	RemoteCount int
-	Engine      string
+	Root         string
+	Branch       string
+	Detached     bool
+	Head         string
+	HeadFull     string
+	CommitCount  int
+	BranchCount  int
+	TagCount     int
+	Engine       string
+	Contributors []contributorRow
+	ContribTotal int
+	Languages    map[string]int
+	LangTotal    int
 }
 
 func formatRepoInfo(info repoInfoData) string {
@@ -766,36 +627,23 @@ func formatRepoInfo(info repoInfoData) string {
 	fmt.Fprintf(&b, "- **Commits (total):** %d\n", info.CommitCount)
 	fmt.Fprintf(&b, "- **Branches:** %d\n", info.BranchCount)
 	fmt.Fprintf(&b, "- **Tags:** %d\n", info.TagCount)
-	fmt.Fprintf(&b, "- **Remotes:** %d\n", info.RemoteCount)
 	fmt.Fprintf(&b, "- **Engine:** %s (sem git CLI)\n", info.Engine)
+
+	if len(info.Contributors) > 0 {
+		fmt.Fprintf(&b, "\n### 🏆 Top %d contribuidores (%s commits)\n\n", len(info.Contributors), formatThousands(info.ContribTotal))
+		for _, c := range info.Contributors {
+			fmt.Fprintf(&b, "- %s — %s commits\n", clean(c.Name), formatThousands(c.Count))
+		}
+	}
+	if info.LangTotal > 0 {
+		b.WriteString("\n### 🗂️ Linguagens\n\n")
+		for _, l := range languageShares(info.Languages, info.LangTotal) {
+			fmt.Fprintf(&b, "- %s — %d%%\n", l.Name, l.Pct)
+		}
+	}
 	return b.String()
 }
 
-func formatBranchCompare(base, head string, ahead, behind int, stats object.FileStats, commits []*object.Commit) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "## Comparação: `%s` → `%s`\n\n", base, head)
-	fmt.Fprintf(&b, "- 🔼 **Ahead:** %d commit(s) em `%s` ausentes em `%s`\n", ahead, head, base)
-	fmt.Fprintf(&b, "- 🔽 **Behind:** %d commit(s) em `%s` ausentes em `%s`\n\n", behind, base, head)
-	if len(stats) > 0 {
-		totalA, totalD := 0, 0
-		for _, s := range stats {
-			totalA += s.Addition
-			totalD += s.Deletion
-		}
-		fmt.Fprintf(&b, "📊 **%d** arquivo(s) alterado(s): **+%d / -%d**\n\n", len(stats), totalA, totalD)
-	} else {
-		b.WriteString("_Sem alterações de arquivos._\n\n")
-	}
-	fmt.Fprintf(&b, "### Commits de diferença (%d)\n\n", len(commits))
-	if len(commits) == 0 {
-		b.WriteString("_Nenhum commit de diferença._\n")
-		return b.String()
-	}
-	for _, c := range commits {
-		fmt.Fprintf(&b, "- `%s` **%s** — %s · %s\n", shortSHA(c.Hash), clean(truncate(firstLine(c.Message), 80)), clean(c.Author.Name), c.Author.When.Format("2006-01-02"))
-	}
-	return b.String()
-}
 
 func formatTree(paths []string) string {
 	if len(paths) == 0 {
@@ -823,55 +671,4 @@ func formatReadFile(path, at string, content string) string {
 	return fmt.Sprintf("## Arquivo `%s` (%s)\n\n```%s\n%s\n```\n", path, at, lang, content)
 }
 
-func formatFindFiles(pattern string, paths []string) string {
-	if len(paths) == 0 {
-		return "## Busca de arquivos\n\n_Nenhum arquivo encontrado para o padrão informado._"
-	}
-	label := pattern
-	if label == "" {
-		label = "(todos)"
-	}
-	return fmt.Sprintf("## Busca de arquivos: `%s` (%d)\n\n```\n%s\n```\n", label, len(paths), strings.Join(paths, "\n"))
-}
 
-type stashRow struct {
-	SHA     string
-	Branch  string
-	Message string
-}
-
-func formatStash(stashes []stashRow) string {
-	if len(stashes) == 0 {
-		return "## Stashes\n\n_Nenhum stash._"
-	}
-	var b strings.Builder
-	b.WriteString("## Stashes\n\n")
-	for _, st := range stashes {
-		extra := ""
-		if st.Branch != "" {
-			extra = " _(" + clean(st.Branch) + ")_"
-		}
-		fmt.Fprintf(&b, "- `%s` %s%s\n", st.SHA, clean(st.Message), extra)
-	}
-	return b.String()
-}
-
-type submoduleRow struct {
-	Path     string
-	Name     string
-	URL      string
-	Expected string
-	Branch   string
-}
-
-func formatSubmodules(rows []submoduleRow) string {
-	if len(rows) == 0 {
-		return "## Submodules\n\n_Nenhum submodule._"
-	}
-	var b strings.Builder
-	b.WriteString("## Submodules\n\n")
-	for _, r := range rows {
-		fmt.Fprintf(&b, "- `%s` (**%s**) — %s · esperado `%s` [branch: %s]\n", clean(r.Path), clean(r.Name), clean(r.URL), r.Expected, clean(r.Branch))
-	}
-	return b.String()
-}

@@ -7,8 +7,7 @@ export interface ParsedMarkdown {
   tables: { columns: string[]; rows: string[][] }[];
 }
 
-// Mirrors the slug used for bookmarks in flow.ts. Kept here so the table of
-// contents can build anchor links that exactly match heading bookmarks.
+
 export function slug(text: string): string {
   return text
     .trim()
@@ -51,9 +50,7 @@ function pushEmph(runs: RunSpec[], inner: string, flags: Partial<RunSpec>, refs:
 export function parseInline(text: string, refs: Record<string, string> = {}): RunSpec[] {
   const src = normalizeHtml(text);
   const runs: RunSpec[] = [];
-  // Ênfase com "_" não vale no meio de palavra (regra do CommonMark): sem os
-  // lookarounds, identificadores como utf8mb4_unicode_ci eram lidos como
-  // ênfase e perdiam os underscores (viravam "utf8mb4unicodeci").
+
   const re =
     /(\*\*[^*]+\*\*|(?<![A-Za-z0-9])__[^_]+__(?![A-Za-z0-9])|\*[^*]+\*|(?<![A-Za-z0-9])_[^_]+_(?![A-Za-z0-9])|`[^`]+`|~~[^~]+~~|\[\^([^\]]+)\]|\[[^\]]+\]\([^)]+\)|\[[^\]]+\]\[[^\]]+\]|<https?:\/\/[^\s>]+>)/g;
   let last = 0;
@@ -141,8 +138,7 @@ export function parseMarkdown(md: string): ParsedMarkdown {
     if (rd) refs[rd[1].toLowerCase()] = rd[2] ?? rd[3] ?? "";
   }
 
-  // First pass: gather the document outline (body headings only) so an inserted
-  // table of contents can link to every section, regardless of its position.
+
   let outlineCode = false;
   let outlineTitleSeen = false;
   let outlineSubSeen = false;
