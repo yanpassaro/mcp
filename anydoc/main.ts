@@ -39,7 +39,7 @@ serveStdio(() => {
       if (!stat.isFile) throw new Error(`Not a file: ${p}`);
       const bytes = await Deno.readFile(p);
       const ext = extname(p).toLowerCase();
-      const md = await sourceToMarkdown(bytes, ext);
+      const md = sourceToMarkdown(bytes, ext);
       const outPath = join(dirname(p), `${basename(p, extname(p))}.${format}`);
       const result = await exportFromMarkdown(outPath, format as DocumentFormat, md);
       return {
