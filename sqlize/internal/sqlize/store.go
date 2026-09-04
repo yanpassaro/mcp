@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -112,12 +113,22 @@ func sanitizeReadQuery(q string) (string, error) {
 	return t, nil
 }
 
-func (s *store) query(ctx context.Context, q string) (columns []string, rows [][]string, err error) {
+func (s *store) query(ctx context.Context, q string, args []string) (columns []string, rows [][]string, err error) {
 	clean, err := sanitizeReadQuery(q)
 	if err != nil {
 		return nil, nil, err
 	}
-	rs, err := s.db.QueryContext(ctx, clean)
+	if err := enforceQueryRules(clean, args, "?"); err != nil {
+		return nil, nil, err
+	}
+	if err := checkFuncAllowlist(clean); err != nil {
+		return nil, nil, err
+	}
+	params := make([]any, len(args))
+	for i, a := range args {
+		params[i] = a
+	}
+	rs, err := s.db.QueryContext(ctx, clean, params...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("executar consulta: %w", err)
 	}
@@ -185,7 +196,7 @@ func sanitizeStoreQuery(q string, args []string) (string, error) {
 	return t, nil
 }
 
-func (s *store) runQuery(ctx context.Context, q string, args []string, redact bool) (string, error) {
+func (s *store) runQuery(ctx context.Context, q string, args []string) (string, error) {
 	clean, err := sanitizeStoreQuery(q, args)
 	if err != nil {
 		return "", err
@@ -233,13 +244,8 @@ func (s *store) runQuery(ctx context.Context, q string, args []string, redact bo
 		if len(out) > max {
 			shown = out[:max]
 		}
-		if redact {
-			shown = RedactRows(cols, shown)
-		}
-		label := ""
-		if redact {
-			label = " (mascaradas)"
-		}
+		shown = RedactRows(cols, shown)
+		label := " (mascaradas)"
 		var b strings.Builder
 		b.WriteString(markdownTable(cols, shown))
 		if len(out) > max {
@@ -382,6 +388,7 @@ func inferColumnType(values []string) string {
 	has := false
 	allInt := true
 	allFloat := true
+	allDate := true
 	for _, v := range values {
 		if v == "" {
 			continue
@@ -397,7 +404,12 @@ func inferColumnType(values []string) string {
 				allFloat = false
 			}
 		}
-		if !allInt && !allFloat {
+		if allDate {
+			if !isDateLike(v) {
+				allDate = false
+			}
+		}
+		if !allInt && !allFloat && !allDate {
 			break
 		}
 	}
@@ -410,7 +422,25 @@ func inferColumnType(values []string) string {
 	if allFloat {
 		return "REAL"
 	}
+	if allDate {
+		return "DATE"
+	}
 	return "TEXT"
+}
+
+var dateLayouts = []string{"2006-01-02", "2006/01/02", "02/01/2006", "2006-1-2", "2/1/2006", "02-01-2006"}
+
+func isDateLike(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 8 {
+		return false
+	}
+	for _, layout := range dateLayouts {
+		if _, err := time.Parse(layout, s); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *store) loadTable(ctx context.Context, name string, columns []string, rows [][]string) error {

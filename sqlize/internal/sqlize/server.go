@@ -28,7 +28,7 @@ func (s *Server) Close() error {
 func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_import",
-		Description: "Import a file into the working SQLite database (stored under .local/state/sqlize). Supported formats: .json, .csv, .tsv, .xlsx, .sql, .sqlite, .db, .xml. For individual tables set 'table'; for .sqlite/.db the file is attached as a schema (use sqlize_structure to list its tables).",
+		Description: "Import a file into the working SQLite database (stored under .local/state/sqlize). Supported formats: .json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .xlsm, .xls, .sql, .sqlite, .db, .xml. For individual tables set 'table'; for .sqlite/.db the file is attached as a schema (use sqlize_structure to list its tables).",
 	}, s.importTool)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -38,12 +38,12 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_query",
-		Description: "Run a SQL statement (SELECT/WITH/INSERT/UPDATE/DELETE) over the local SQLite test database and return a Markdown table (for queries) or the affected-row count (for writes), limited to 200 rows. Do not use ';'. Values must be passed via 'args' as bound parameters - string literals and numeric/boolean literals inside WHERE are rejected (use '?' placeholders + 'args'; IS NULL / column-to-column comparisons are fine). Format/constant strings outside WHERE (TO_CHAR 'YYYY-MM-DD', COALESCE(..,''), CASE) are allowed. Only built-in functions from an allowlist (COUNT, SUM, TO_CHAR, COALESCE, DATE_TRUNC, ...) can be called; user-defined, extension or dangerous functions (pg_sleep, dblink, LOAD_FILE, ...) are rejected. Results are masked (CPF, CNPJ, e-mail, phone, card, dates, IP, PII) by default; set 'redact' false to disable.",
+		Description: "Run a SQL statement (SELECT/WITH/INSERT/UPDATE/DELETE) over the local SQLite test database and return a Markdown table (for queries) or the affected-row count (for writes), limited to 200 rows. Do not use ';'. Values must be passed via 'args' as bound parameters - string literals and numeric/boolean literals inside WHERE are rejected (use '?' placeholders + 'args'; IS NULL / column-to-column comparisons are fine). Format/constant strings outside WHERE (TO_CHAR 'YYYY-MM-DD', COALESCE(..,''), CASE) are allowed. Only built-in functions from an allowlist (COUNT, SUM, TO_CHAR, COALESCE, DATE_TRUNC, ...) can be called; user-defined, extension or dangerous functions (pg_sleep, dblink, LOAD_FILE, ...) are rejected. Results are ALWAYS masked (CPF, CNPJ, e-mail, phone, card, dates, IP, PII).",
 	}, s.queryTool)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_export",
-		Description: "Export the result of a query or a table to a file. Output formats: .json, .csv, .tsv, .xlsx, .sql, .html, .xml (determined by the 'path' extension).",
+		Description: "Export the result of a query or a table to a file. Output formats: .json, .csv, .tsv, .xlsx, .sql, .html, .xml (determined by the 'path' extension). Pass dynamic values via 'args' as bound '?' parameters (required when the WHERE clause compares values; inline literals are rejected). Results are masked (CPF, CNPJ, e-mail, phone, card, dates, IP, PII) by default; set 'redact' false to export without masking.",
 	}, s.exportTool)
 
 	for _, cfg := range discoverLiveDBs() {
@@ -79,7 +79,7 @@ func textResult(text string) (*mcp.CallToolResult, any, error) {
 }
 
 type importInput struct {
-	Path  string `json:"path" jsonschema:"Path of the input file (.json, .csv, .tsv, .xlsx, .sql, .sqlite, .db, .xml)"`
+	Path  string `json:"path" jsonschema:"Path of the input file (.json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .xlsm, .xls, .sql, .sqlite, .db, .xml)"`
 	Table string `json:"table,omitempty" jsonschema:"Name of the destination table (optional; defaults to the file name without extension; with 'sheet' this names the single imported table)"`
 	Sheet string `json:"sheet,omitempty" jsonschema:"Excel sheet name to import (optional, Excel only; defaults to all sheets)"`
 }
@@ -172,17 +172,15 @@ func schemaLabel(s string) string {
 }
 
 type queryInput struct {
-	SQL    string   `json:"sql" jsonschema:"SQL statement (SELECT/WITH/INSERT/UPDATE/DELETE) on the local SQLite test database. Do not use ';'. Values must be passed via 'args' (no inline literals)."`
-	Args   []string `json:"args,omitempty" jsonschema:"Bound parameters for the statement (optional). Passed as parameters, never interpolated into the SQL. Required for any value (no inline string literals allowed)."`
-	Redact *bool    `json:"redact,omitempty" jsonschema:"Apply partial masking to sensitive data (CPF, CNPJ, e-mail, phone, CEP, RG, card, dates, etc.). Default: true. Set false to disable."`
+	SQL  string   `json:"sql" jsonschema:"SQL statement (SELECT/WITH/INSERT/UPDATE/DELETE) on the local SQLite test database. Do not use ';'. Values must be passed via 'args' (no inline literals)."`
+	Args []string `json:"args,omitempty" jsonschema:"Bound parameters for the statement (optional). Passed as parameters, never interpolated into the SQL. Required for any value (no inline string literals allowed)."`
 }
 
 func (s *Server) queryTool(ctx context.Context, _ *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, any, error) {
 	if strings.TrimSpace(in.SQL) == "" {
 		return nil, nil, fmt.Errorf("'sql' é obrigatório")
 	}
-	doRedact := in.Redact == nil || *in.Redact
-	res, err := s.store.runQuery(ctx, in.SQL, in.Args, doRedact)
+	res, err := s.store.runQuery(ctx, in.SQL, in.Args)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -190,11 +188,12 @@ func (s *Server) queryTool(ctx context.Context, _ *mcp.CallToolRequest, in query
 }
 
 type exportInput struct {
-	Path   string `json:"path" jsonschema:"Path of the output file (.json, .csv, .tsv, .xlsx, .sql, .xml)"`
-	Query  string `json:"query,omitempty" jsonschema:"Source SQL query (optional if 'table' is provided)"`
-	Table  string `json:"table,omitempty" jsonschema:"Source table name (optional if 'query' is provided)"`
-	Target string `json:"target_table,omitempty" jsonschema:"Table name used in the exported SQL (optional; defaults to 'exported')"`
-	Redact *bool  `json:"redact,omitempty" jsonschema:"Apply partial masking to sensitive data (CPF, CNPJ, e-mail, phone, CEP, RG, card, dates, etc.). Default: true. Set false to disable."`
+	Path   string   `json:"path" jsonschema:"Path of the output file (.json, .csv, .tsv, .xlsx, .sql, .html, .xml)"`
+	Query  string   `json:"query,omitempty" jsonschema:"Source SQL query (optional if 'table' is provided)"`
+	Args   []string `json:"args,omitempty" jsonschema:"Bound parameters for the query (optional). Passed as '?' placeholders, never interpolated into the SQL."`
+	Table  string   `json:"table,omitempty" jsonschema:"Source table name (optional if 'query' is provided)"`
+	Target string   `json:"target_table,omitempty" jsonschema:"Table name used in the exported SQL (optional; defaults to 'exported')"`
+	Redact *bool    `json:"redact,omitempty" jsonschema:"Apply partial masking to sensitive data (CPF, CNPJ, e-mail, phone, CEP, RG, card, dates, etc.). Default: true. Set false to export without masking."`
 }
 
 func (s *Server) exportTool(ctx context.Context, _ *mcp.CallToolRequest, in exportInput) (*mcp.CallToolResult, any, error) {
@@ -206,7 +205,7 @@ func (s *Server) exportTool(ctx context.Context, _ *mcp.CallToolRequest, in expo
 		target = "exported"
 	}
 	doRedact := in.Redact == nil || *in.Redact
-	res, err := s.store.exportFile(ctx, in.Path, in.Query, in.Table, target, doRedact)
+	res, err := s.store.exportFile(ctx, in.Path, in.Query, in.Table, target, in.Args, doRedact)
 	if err != nil {
 		return nil, nil, err
 	}

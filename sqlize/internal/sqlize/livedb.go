@@ -149,11 +149,31 @@ func checkFuncAllowlist(q string) error {
 	return nil
 }
 
-func hasPlaceholders(q, driver string) bool {
-	if driver == "mysql" {
-		return strings.Contains(q, "?")
+func hasPlaceholderToken(clean, placeholder string) bool {
+	if placeholder == "?" {
+		return strings.Contains(clean, "?")
 	}
-	return rePgPlaceholder.MatchString(q)
+	return rePgPlaceholder.MatchString(clean)
+}
+
+// enforceQueryRules aplica as regras anti-injeção compartilhadas pelas consultas
+// parametrizadas (SQLite local e bancos ao vivo): nada de literais de string ou
+// valores brutos no WHERE, placeholders obrigatórios quando há 'args', e rejeição
+// de padrões suspeitos de injeção.
+func enforceQueryRules(clean string, args []string, placeholder string) error {
+	if reStringInWhere.MatchString(clean) {
+		return fmt.Errorf("consulta rejeitada: não inclua literais de string na cláusula WHERE; passe valores dinâmicos via 'args' (use %s)", placeholder)
+	}
+	if reWhereLiteral.MatchString(clean) && !hasPlaceholderToken(clean, placeholder) {
+		return fmt.Errorf("consulta rejeitada: cláusula WHERE compara valores; parametrize com %s e passe os valores em 'args'", placeholder)
+	}
+	if len(args) > 0 && !hasPlaceholderToken(clean, placeholder) {
+		return fmt.Errorf("'args' informado mas o SQL não contém placeholders; use %s e passe os valores em 'args'", placeholder)
+	}
+	if reInjection.MatchString(clean) {
+		return fmt.Errorf("consulta rejeitada: padrão suspeito de injeção de SQL (aspas seguidas de comentário ou de UNION/INTO); passe valores dinâmicos via 'args'")
+	}
+	return nil
 }
 
 func validateLiveQuery(q string, args []string, driver string, strict bool) (string, error) {
@@ -161,19 +181,14 @@ func validateLiveQuery(q string, args []string, driver string, strict bool) (str
 	if err != nil {
 		return "", err
 	}
-	if strict && reStringInWhere.MatchString(clean) {
-		return "", fmt.Errorf("consulta rejeitada: não inclua literais de string na cláusula WHERE; passe valores dinâmicos via 'args' (use ? no MySQL ou $1.. no Postgres)")
-	}
-	if strict && reWhereLiteral.MatchString(clean) && !hasPlaceholders(clean, driver) {
-		return "", fmt.Errorf("consulta rejeitada: cláusula WHERE compara valores; parametrize com ? (MySQL) ou $1.. (Postgres) e passe os valores em 'args' (ex.: WHERE id = $1)")
-	}
-	if len(args) > 0 && !hasPlaceholders(clean, driver) {
-		return "", fmt.Errorf("'args' informado mas o SQL não contém placeholders; use $1.. (Postgres) ou ? (MySQL) e passe os valores em 'args'")
-	}
-	if reInjection.MatchString(clean) {
-		return "", fmt.Errorf("consulta rejeitada: padrão suspeito de injeção de SQL (aspas seguidas de comentário ou de UNION/INTO); passe valores dinâmicos via 'args'")
-	}
 	if strict {
+		placeholder := "?"
+		if driver == "pgx" {
+			placeholder = "$1.."
+		}
+		if err := enforceQueryRules(clean, args, placeholder); err != nil {
+			return "", err
+		}
 		if err := checkFuncAllowlist(clean); err != nil {
 			return "", err
 		}

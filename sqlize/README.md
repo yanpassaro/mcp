@@ -95,9 +95,9 @@ defina `SQLIZE_STATE_DIR` no ambiente.)
 ## Fluxo de uso
 
 1. `sqlize_import` — carrega um arquivo no banco.
-   - `.json`, `.csv`, `.tsv`, `.xlsx`, `.xml` → viram tabelas (no Excel, uma por
-     aba; use o campo `sheet` para importar só uma aba — opcionalmente com
-     `table` nomeando a tabela criada).
+   - `.json`, `.jsonl`, `.ndjson`, `.csv`, `.tsv`, `.xlsx`, `.xlsm`, `.xls`, `.xml` →
+     viram tabelas (no Excel, uma por aba; use o campo `sheet` para importar só
+     uma aba — opcionalmente com `table` nomeando a tabela criada).
    - `.sql` → instruções executadas no banco.
    - `.sqlite`, `.db` → banco anexado como esquema (ex.: `db0`); suas tabelas
      ficam consultáveis diretamente pelo nome.
@@ -105,7 +105,8 @@ defina `SQLIZE_STATE_DIR` no ambiente.)
    (colunas + foreign keys + índices).
 3. `sqlize_query` — consulta SQL (`SELECT`/`WITH`, sem `;`).
 4. `sqlize_export` — grava o resultado em `.json`, `.csv`, `.tsv`, `.xlsx`,
-   `.sql` ou `.xml` (a extensão do `path` define o formato).
+   `.sql` ou `.xml` (a extensão do `path` define o formato). Valores dinâmicos
+   vão em `args` (placeholder `?`), como no `sqlize_query`.
 
 
 Reimportar um arquivo com o mesmo nome de tabela **recria** a tabela
@@ -176,8 +177,9 @@ Notas:
   (`JavaScript SQL`, `React Native`, `Desenvolvimento de Software`).
 - Padrões ambíguos (ex.: RG, CPF/CNPJ/cartão com checksum inválido) só mascaram
   com coluna PII confirmando ou palavra de contexto ao redor.
-- Para desativar o mascaramento nas tools do SQLite, informe `"redact": false`
-  em `sqlize_query` ou `sqlize_export`. As tools de bancos ao vivo são
+- No `sqlize_query` e no `sqlize_export` o mascaramento é aplicado **por padrão**;
+  no `sqlize_export` você pode desligar com `"redact": false` (útil para exportar
+  os dados originais). O `sqlize_query` e as tools de bancos ao vivo são
   **sempre** mascaradas (não há como desligar).
 
 - `sqlize_import` — importa arquivo (formatos acima).
@@ -236,7 +238,8 @@ O campo `all` (booleano) libera o limite forçado de 500 linhas na exportação,
 A consulta continua read-only e sem escrita.
 
 A tool `{engine}[_{alias}]_query` passou a ser apenas de consulta (retorna a
-tabela Markdown limitada a 500 linhas); para exportar, use a tool de exportação.
+tabela Markdown limitada a 200 linhas, sempre mascarada); para exportar, use a
+tool de exportação.
 
 ### Modo estrito (anti-injeção)
 
@@ -265,8 +268,9 @@ As queries ao vivo seguem regras de segurança, além do `READ ONLY` e do
   SQL (`--`, `#`, `/*`) ou de `UNION`/`INTO`. Queries parametrizadas legítimas
   não carregam valores entre aspas no próprio SQL.
 
-Essas regras valem também para o `sqlize_query` (SQLite local — placeholder
-`?`). Sempre passe valores dinâmicos em `args` (nunca concatene no `sql`).
+Essas regras valem também para o `sqlize_query` e o `sqlize_export` (SQLite
+local — placeholder `?`). Sempre passe valores dinâmicos em `args` (nunca
+concatene no `sql`).
 
 Requer os drivers `github.com/jackc/pgx/v5` e `github.com/go-sql-driver/mysql`
 (rode `go mod tidy`).
@@ -277,6 +281,12 @@ Requer os drivers `github.com/jackc/pgx/v5` e `github.com/go-sql-driver/mysql`
   esquemas, qualifique como `esquema.tabela` na consulta.
 - A importação de XML é heurística: identifica elementos repetidos como linhas e
   usa atributos + elementos folha como colunas.
-- O Excel suportado é `.xlsx`/`.xlsm` (não `.xls` legado).
+- Na importação, os tipos das colunas são inferidos a partir dos dados:
+  `INTEGER`, `REAL`, `DATE` ou `TEXT` (a coluna usa o tipo mais específico que
+  todos os valores suportam). Datas reconhecidas: `AAAA-MM-DD`, `DD/MM/AAAA`,
+  etc.
+- O Excel suportado é `.xlsx` e `.xlsm` (OOXML) e `.xls` (detectado por
+  conteúdo: OOXML zip ou HTML com tabela). O binário legado `.xls` (BIFF) não é
+  suportado — converta o arquivo para `.xlsx` antes de importar.
 - Nenhum resultado volta com binário: células com conteúdo binário são substituídas
   por `[binário]`. Valores de texto com mais de 200 caracteres são truncados com `…`.

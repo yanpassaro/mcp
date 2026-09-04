@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/xuri/excelize/v2"
+	"golang.org/x/net/html"
 )
 
 func (s *store) importFile(ctx context.Context, path, table, sheet string) (string, error) {
@@ -26,6 +28,16 @@ func (s *store) importFile(ctx context.Context, path, table, sheet string) (stri
 	switch ext {
 	case ".json":
 		cols, rows, err := parseJSON(path)
+		if err != nil {
+			return "", err
+		}
+		name := deriveTableName(table, path, "json")
+		if err := s.loadTable(ctx, name, cols, rows); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Tabela %q criada a partir de %s: %d colunas, %d linhas.", name, filepath.Base(path), len(cols), len(rows)), nil
+	case ".jsonl", ".ndjson":
+		cols, rows, err := parseJSONL(path)
 		if err != nil {
 			return "", err
 		}
@@ -54,8 +66,8 @@ func (s *store) importFile(ctx context.Context, path, table, sheet string) (stri
 			return "", err
 		}
 		return fmt.Sprintf("Tabela %q criada a partir de %s: %d colunas, %d linhas.", name, filepath.Base(path), len(cols), len(rows)), nil
-	case ".xlsx", ".xlsm":
-		sheets, err := parseExcel(path, sheet)
+	case ".xlsx", ".xlsm", ".xls":
+		sheets, err := parseWorkbook(path, sheet)
 		if err != nil {
 			return "", err
 		}
@@ -101,7 +113,7 @@ func (s *store) importFile(ctx context.Context, path, table, sheet string) (stri
 		}
 		return fmt.Sprintf("Tabela %q criada a partir de %s: %d colunas, %d linhas.", name, filepath.Base(path), len(cols), len(rows)), nil
 	default:
-		return "", fmt.Errorf("formato não suportado: %s (use .json, .csv, .tsv, .xlsx, .sql, .sqlite, .db, .xml)", ext)
+		return "", fmt.Errorf("formato não suportado: %s (use .json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .xlsm, .xls, .sql, .sqlite, .db, .xml)", ext)
 	}
 }
 
@@ -160,65 +172,7 @@ func parseJSON(path string) ([]string, [][]string, error) {
 	}
 	switch t := v.(type) {
 	case []any:
-		if len(t) == 0 {
-			return nil, nil, fmt.Errorf("JSON: array vazio")
-		}
-		switch t[0].(type) {
-		case map[string]any:
-			cols := make([]string, 0)
-			seen := map[string]bool{}
-			for _, item := range t {
-				if m, ok := item.(map[string]any); ok {
-					for k := range m {
-						if !seen[k] {
-							seen[k] = true
-							cols = append(cols, k)
-						}
-					}
-				}
-			}
-			rows := make([][]string, 0, len(t))
-			for _, item := range t {
-				row := make([]string, len(cols))
-				if m, ok := item.(map[string]any); ok {
-					for i, c := range cols {
-						row[i] = cellToString(m[c])
-					}
-				}
-				rows = append(rows, row)
-			}
-			return cols, rows, nil
-		case []any:
-			maxW := 0
-			for _, item := range t {
-				if arr, ok := item.([]any); ok && len(arr) > maxW {
-					maxW = len(arr)
-				}
-			}
-			cols := make([]string, maxW)
-			for i := range cols {
-				cols[i] = fmt.Sprintf("col_%d", i+1)
-			}
-			rows := make([][]string, 0, len(t))
-			for _, item := range t {
-				row := make([]string, maxW)
-				if arr, ok := item.([]any); ok {
-					for i, e := range arr {
-						if i < maxW {
-							row[i] = cellToString(e)
-						}
-					}
-				}
-				rows = append(rows, row)
-			}
-			return cols, rows, nil
-		default:
-			rows := make([][]string, 0, len(t))
-			for _, item := range t {
-				rows = append(rows, []string{cellToString(item)})
-			}
-			return []string{"value"}, rows, nil
-		}
+		return rowsFromArray(t)
 	case map[string]any:
 		cols := make([]string, 0, len(t))
 		for k := range t {
@@ -231,6 +185,94 @@ func parseJSON(path string) ([]string, [][]string, error) {
 		return cols, [][]string{row}, nil
 	default:
 		return nil, nil, fmt.Errorf("JSON: formato não suportado (esperado array ou objeto)")
+	}
+}
+
+func parseJSONL(path string) ([]string, [][]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	lines := strings.Split(string(data), "\n")
+	items := make([]any, 0, len(lines))
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		dec := json.NewDecoder(strings.NewReader(line))
+		dec.UseNumber()
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			return nil, nil, fmt.Errorf("JSONL: linha %d inválida: %w", i+1, err)
+		}
+		items = append(items, v)
+	}
+	if len(items) == 0 {
+		return nil, nil, fmt.Errorf("JSONL: arquivo vazio")
+	}
+	return rowsFromArray(items)
+}
+
+func rowsFromArray(t []any) ([]string, [][]string, error) {
+	if len(t) == 0 {
+		return nil, nil, fmt.Errorf("JSON: array vazio")
+	}
+	switch t[0].(type) {
+	case map[string]any:
+		cols := make([]string, 0)
+		seen := map[string]bool{}
+		for _, item := range t {
+			if m, ok := item.(map[string]any); ok {
+				for k := range m {
+					if !seen[k] {
+						seen[k] = true
+						cols = append(cols, k)
+					}
+				}
+			}
+		}
+		rows := make([][]string, 0, len(t))
+		for _, item := range t {
+			row := make([]string, len(cols))
+			if m, ok := item.(map[string]any); ok {
+				for i, c := range cols {
+					row[i] = cellToString(m[c])
+				}
+			}
+			rows = append(rows, row)
+		}
+		return cols, rows, nil
+	case []any:
+		maxW := 0
+		for _, item := range t {
+			if arr, ok := item.([]any); ok && len(arr) > maxW {
+				maxW = len(arr)
+			}
+		}
+		cols := make([]string, maxW)
+		for i := range cols {
+			cols[i] = fmt.Sprintf("col_%d", i+1)
+		}
+		rows := make([][]string, 0, len(t))
+		for _, item := range t {
+			row := make([]string, maxW)
+			if arr, ok := item.([]any); ok {
+				for i, e := range arr {
+					if i < maxW {
+						row[i] = cellToString(e)
+					}
+				}
+			}
+			rows = append(rows, row)
+		}
+		return cols, rows, nil
+	default:
+		rows := make([][]string, 0, len(t))
+		for _, item := range t {
+			rows = append(rows, []string{cellToString(item)})
+		}
+		return []string{"value"}, rows, nil
 	}
 }
 
@@ -314,6 +356,133 @@ func parseExcel(path, only string) (map[string]sheetData, error) {
 		return nil, fmt.Errorf("planilha sem dados: %s", filepath.Base(path))
 	}
 	return out, nil
+}
+
+func parseWorkbook(path, only string) (map[string]sheetData, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".xlsx" || ext == ".xlsm" {
+		return parseExcel(path, only)
+	}
+	head, err := readFileHead(path, 64*1024)
+	if err != nil {
+		return nil, err
+	}
+	if bytes.HasPrefix(bytes.TrimSpace(head), []byte("PK")) {
+		return parseExcel(path, only)
+	}
+	if looksLikeHTML(head) {
+		return parseHTMLWorkbook(path)
+	}
+	return nil, fmt.Errorf("formato .xls não reconhecido (o binário legado BIFF não é suportado). Converta o arquivo para .xlsx antes de importar.")
+}
+
+func readFileHead(path string, n int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	buf := make([]byte, n)
+	read, err := f.Read(buf)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	return buf[:read], nil
+}
+
+func looksLikeHTML(head []byte) bool {
+	lower := strings.ToLower(string(head))
+	for _, m := range []string{"<html", "<table", "<!doctype html"} {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseHTMLWorkbook(path string) (map[string]sheetData, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := html.Parse(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("analisar HTML: %w", err)
+	}
+	var tables []*html.Node
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "table" {
+			tables = append(tables, n)
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+	if len(tables) == 0 {
+		return nil, fmt.Errorf("arquivo .xls (HTML) sem tabela <table>: %s", filepath.Base(path))
+	}
+	base := deriveTableName("", path, "xls")
+	used := map[string]int{}
+	out := map[string]sheetData{}
+	for _, t := range tables {
+		rows := extractHTMLRows(t)
+		if len(rows) == 0 {
+			continue
+		}
+		cols := rows[0]
+		for i := range cols {
+			if strings.TrimSpace(cols[i]) == "" {
+				cols[i] = fmt.Sprintf("col_%d", i+1)
+			}
+		}
+		name := sheetToTable(base, used)
+		out[name] = sheetData{cols: cols, rows: rows[1:]}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("planilha .xls (HTML) sem dados: %s", filepath.Base(path))
+	}
+	return out, nil
+}
+
+func extractHTMLRows(table *html.Node) [][]string {
+	var rows [][]string
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "tr" {
+			var cells []string
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				if c.Type == html.ElementNode && (c.Data == "td" || c.Data == "th") {
+					cells = append(cells, strings.TrimSpace(htmlCellText(c)))
+				}
+			}
+			if len(cells) > 0 {
+				rows = append(rows, cells)
+			}
+			return
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(table)
+	return rows
+}
+
+func htmlCellText(n *html.Node) string {
+	var b strings.Builder
+	var collect func(*html.Node)
+	collect = func(x *html.Node) {
+		if x.Type == html.TextNode {
+			b.WriteString(x.Data)
+		}
+		for c := x.FirstChild; c != nil; c = c.NextSibling {
+			collect(c)
+		}
+	}
+	collect(n)
+	return b.String()
 }
 
 func sheetToTable(sheet string, used map[string]int) string {

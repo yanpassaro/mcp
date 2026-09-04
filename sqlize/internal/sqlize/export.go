@@ -15,7 +15,7 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-func (s *store) exportFile(ctx context.Context, outPath, source, table, target string, redact bool) (string, error) {
+func (s *store) exportFile(ctx context.Context, outPath, source, table, target string, args []string, redact bool) (string, error) {
 	if strings.TrimSpace(outPath) == "" {
 		return "", fmt.Errorf("caminho de saída é obrigatório")
 	}
@@ -31,7 +31,7 @@ func (s *store) exportFile(ctx context.Context, outPath, source, table, target s
 	} else {
 		return "", fmt.Errorf("informe 'query' (SQL) ou 'table' (nome da tabela)")
 	}
-	cols, rows, err := s.query(ctx, q)
+	cols, rows, err := s.query(ctx, q, args)
 	if err != nil {
 		return "", err
 	}
