@@ -1,169 +1,79 @@
 # MCP servers
 
-Servidores MCP (Model Context Protocol) para agentes e clientes MCP em geral
-(Zed, Claude Desktop etc.). Cada servidor é um módulo **independente** (próprio
-`go.mod`, `module ntdsk.com/mcp/<server>`) na sua pasta; o único fora do Go é o
-`anydoc` (Deno/TypeScript).
-
-Todos os servidores falam o protocolo MCP por **stdio** e gravam os logs em
-`~/.local/share/mcp/<server>/logs/` (detalhes em [Logs](#logs-e-dados-persistidos)).
+Servidores MCP (Model Context Protocol) para agentes/clientes como Zed e Claude
+Desktop. Cada um é um módulo **independente** na sua pasta (os Go têm `go.mod`
+próprio; o único fora do Go é o `anydoc`, em Deno/TypeScript). Todos falam o
+protocolo por **stdio** e logam em `~/.local/share/mcp/<server>/logs/`.
 
 ## Servidores
 
-| Servidor | O que faz | Tech | Variável de ambiente principal |
+| Servidor | O que faz | Tech | Env principal |
 | --- | --- | --- | --- |
-| `git-mcp` | Inspeção **read-only** de repositórios Git locais com [go-git](https://github.com/go-git/go-git) (sem `git` CLI): log, diff, branches, blame, stash, submodules | Go | — |
-| `github-mcp` | Consulta à API do GitHub (somente leitura): busca de código/commits/issues/PRs/usuários, releases, wiki, insights e árvore de arquivos | Go | `GITHUB_TOKEN` |
-| `sqlize-mcp` | Importa, consulta, exporta e compara dados (SQLite em arquivo + Postgres/MySQL read-only), com redator de PII | Go | `SQLIZE_STATE_DIR` (opcional) |
-| `fetch-mcp` | Testa endpoints HTTP da allowlist (`FETCH_ALLOW_HOST`, anti-SSRF): timing, status, headers, corpo JSON/XML pretty-printed, cookies e comando `curl` equivalente | Go | `FETCH_ALLOW_HOST` |
-| `anydoc` | Converte e exporta documentos (Word, PDF, Excel, OpenDocument, RTF, EPUB, CSV) com redator de PII embutido | Deno/TypeScript | — |
+| `git-mcp` | Inspeção **read-only** de repositórios Git locais (go-git, sem CLI): log, diff, branches, blame, refs, árvore, arquivos | Go | — |
+| `github-mcp` | Consulta **read-only** à API do GitHub: busca, arquivos, issues/PRs, releases, wiki | Go | `GITHUB_TOKEN` |
+| `sqlize-mcp` | Importa, consulta, exporta e compara dados (SQLite + Postgres/MySQL read-only), com redator de PII | Go | `SQLIZE_STATE_DIR` |
+| `anydoc` | Converte/exporta documentos (Word, PDF, Excel, OpenDocument, RTF, EPUB, CSV) com redator de PII embutido | Deno/TS | — |
+| `sandbox-mcp` | Sandbox **não-destrutivo** de scripts **JavaScript** (goja): API `std` (filesystem único `fs`, JSON, data, texto, listas, números, assert, encode) e rede opcional via `std.fetch` (allowlist). Sem acesso a processo/SO | Go | `SANDBOX_FS_DIR`, `SANDBOX_SCRIPTS_DIR` |
 
-## Tools principais (resumo)
+## Tools principais
 
-A lista completa está no README de cada servidor:
-
-- **git**: `git_repo_info`, `git_status`, `git_log`, `git_show`, `git_diff`,
-  `git_refs` (branch/remote/tag), `git_blame`, `git_tree`, `git_read_file`,
-  `git_find_commits`
-- **github**: `github_search` (com `type`), `github_get_tree`, `github_read_file`,
-  `github_repo_info`, `github_get_item` (issue/pr com `type`)
-- **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`,
-  `sqlize_export` + tools de bancos ao vivo (`postgres_*`/`mysql_*`)
-- **fetch**: `fetch_request`, `fetch_cookie`, `fetch_history`
+- **git**: `git_repo_info`, `git_status`, `git_log`, `git_show`, `git_diff`, `git_refs`, `git_blame`, `git_tree`, `git_read_file`, `git_find_commits`
+- **github**: `github_search`, `github_get_tree`, `github_read_file`, `github_repo_info`, `github_get_item`
+- **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`, `sqlize_export` (+ `postgres_*`/`mysql_*`)
 - **anydoc**: `anydoc_import`, `anydoc_export`
-
-## Layout padrão
-
-```text
-<server>/
-├── cmd/<server>-mcp/main.go     # entrypoint: env vars, setupLog, registro das tools
-├── internal/
-│   ├── <api>/client.go          # cliente da API (pacote com o nome da API)
-│   └── mcpserver/               # pacote mcpserver
-│       ├── server.go            # registro das tools + handlers
-│       └── format.go            # formatação da saída (Markdown)
-├── go.mod                       # module ntdsk.com/mcp/<server>
-└── README.md
-```
-
-## Requisitos
-
-- Go 1.26+ (os `go.mod` declaram `go 1.26.0`);
-- [Task](https://taskfile.dev/) v3 (opcional — para build via `Taskfile.yml`);
-- Deno 1.x+ (apenas para o `anydoc`).
+- **sandbox**: `sandbox_write_script`, `sandbox_read_script`, `sandbox_run_script`, `sandbox_help`
 
 ## Build
 
-O `Taskfile.yml` fixa `GOOS=windows`, `GOARCH=amd64` e `CGO_ENABLED=0` e gera
-os executáveis em `dist/` (pasta criada automaticamente e ignorada pelo git):
+Gera os executáveis em `dist/` (`GOOS=windows`, `GOARCH=amd64`, `CGO_ENABLED=0`):
 
 ```powershell
-task build          # todos os servidores
-task build:git      # apenas um servidor (git, github, sqlize, fetch, anydoc)
-task clean          # remove dist/
+task build        # todos os servidores
+task build:git    # um servidor (git, github, sqlize, anydoc, sandbox)
+task clean        # remove dist/
 ```
 
-Direto, por servidor (exemplo do `git`):
+Os servidores Go também compilam direto (`cd <server> && go build -o ../dist/<server>-mcp.exe ./cmd/<server>-mcp`); o `anydoc` via `cd anydoc && deno task compile`.
 
-```powershell
-cd git
-go mod tidy
-go build -o ../dist/git-mcp.exe ./cmd/git-mcp
-```
+## Logs
 
-O `anydoc` compila via Deno (o binário também vai para `dist/anydoc.exe`):
-
-```powershell
-cd anydoc
-deno task compile   # ou "deno task start" para rodar sem compilar
-```
-
-## CI / Release
-
-O workflow [`.github/workflows/build-windows.yml`](./.github/workflows/build-windows.yml)
-compila todos os servidores para Windows (`dist/*.exe`) no GitHub Actions e
-publica os binários no **GitHub Release**, prontos para baixar (junto com um
-arquivo `SHA256SUMS` para conferência):
-
-- **Push para `main`** — atualiza a release rolante **`latest`**, sem precisar de
-  tag: o link `https://github.com/yanpassaro/mcp/releases/latest` sempre aponta
-  para os binários mais recentes;
-- **Push de tag `v*`** (ex.: `git tag v1.0.0 && git push origin v1.0.0`) — cria a
-  release versionada da tag;
-- **Workflow manual** (aba *Actions* → *Build Windows* → *Run workflow*) — build
-  sob demanda; se informar uma **tag** no input, cria/atualiza a release dela
-  (vazio = atualiza a `latest`).
-
-## Logs e dados persistidos
-
-Todos os servidores Go gravam o log (apenas em stderr/arquivo, **nunca stdout**,
-para não quebrar o protocolo stdio do MCP) em:
+Todos os servidores Go gravam o log apenas em stderr/arquivo (nunca stdout, para
+não quebrar o stdio):
 
 ```text
 ~/.local/share/mcp/<server>/logs/<server>-<AAAA-MM-DD_HH-MM-SS>.log
-# Windows: C:\Users\<usuário>\.local\share\mcp\<server>\logs\<server>-<data>.log
+# Windows: C:\Users\<usuário>\.local\share\mcp\<server>\logs\
 ```
 
-Se a pasta/arquivo não puder ser criado, o log cai para stderr com um aviso
-(o servidor não quebra). O `anydoc` (Deno) também usa apenas stderr, sem arquivo.
-
-Dados persistidos ficam em locais específicos de cada servidor:
-
-- **fetch** — cookies em `~/.local/share/mcp/fetch/cookies.json`
-  (configurável via `FETCH_COOKIE_FILE`);
-- **sqlize** — banco de estado em `~/.local/state/sqlize/sqlize.db`
-  (configurável via `SQLIZE_STATE_DIR`).
+O `anydoc` usa só stderr. Dados persistidos: `sqlize` → `~/.local/state/sqlize/sqlize.db`.
 
 ## Variáveis de ambiente
 
 | Servidor | Variável | Padrão | Descrição |
 | --- | --- | --- | --- |
-| `git` | — | — | sem variáveis obrigatórias (repositório informado por chamada) |
 | `github` | `GITHUB_TOKEN` | obrigatório | Personal Access Token |
 | | `GITHUB_BASE_URL` | `https://api.github.com` | URL da API (GitHub Enterprise) |
-| | `GITHUB_TIMEOUT_SECONDS` | `60` | timeout de cada requisição HTTP |
+| | `GITHUB_TIMEOUT_SECONDS` | `60` | timeout por requisição |
 | `sqlize` | `SQLIZE_STATE_DIR` | `~/.local/state/sqlize` | pasta do banco de estado |
-| | `{PREFIXO}_POSTGRES_URL` / `_DSN` | — | conexão Postgres read-only (1 por prefixo) |
-| | `{PREFIXO}_MYSQL_URL` / `_DSN` | — | conexão MySQL read-only (1 por prefixo) |
-| | `SQLIZE_PII_NAMES` / `SQLIZE_PII_WORDS` | — | reforços do redator PII (nomes/termos do domínio) |
-| `fetch` | `FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | allowlist de hosts (`.domínio` libera subdomínios) |
-| | `FETCH_TIMEOUT_SECONDS` | `30` | timeout padrão de cada requisição |
-| | `FETCH_MAX_BODY_KB` | `1024` | teto do corpo da resposta |
-| | `FETCH_COOKIE_FILE` | `~/.local/share/mcp/fetch/cookies.json` | persistência dos cookies |
-| `anydoc` | — | — | sem variáveis de ambiente |
+| | `{PREFIXO}_POSTGRES_URL` / `_DSN` | — | conexão Postgres read-only (por prefixo) |
+| | `{PREFIXO}_MYSQL_URL` / `_DSN` | — | conexão MySQL read-only (por prefixo) |
+| | `SQLIZE_PII_NAMES` / `SQLIZE_PII_WORDS` | — | reforços do redator PII |
+| `sandbox` | `SANDBOX_FS_DIR` | `~/.local/share/mcp/sandbox/fs` | filesystem do script |
+| | `SANDBOX_SCRIPTS_DIR` | `~/.local/share/mcp/sandbox/scripts` | scripts do agente |
+| | `SANDBOX_FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | allowlist do `std.fetch` |
 
-## Exemplo de configuração
+Veja o README de cada servidor para as variáveis e comportamentos específicos.
 
-Gere os executáveis com `task build` e registre os servidores no seu cliente
-MCP no Zed (bloco `context_servers` em `~/.config/zed/settings.json`), com
-caminhos no padrão Linux (`~` expande para o home do usuário):
+## Exemplo de configuração (Zed)
 
 ```json
 {
   "context_servers": {
-    "git": {
-      "command": "~/nautidesk/mcp/dist/git-mcp.exe"
-    },
-    "github": {
-      "command": "~/nautidesk/mcp/dist/github-mcp.exe",
-      "env": {
-        "GITHUB_TOKEN": "<seu-token>"
-      }
-    },
-    "sqlize": {
-      "command": "~/nautidesk/mcp/dist/sqlize-mcp.exe"
-    },
-    "fetch": {
-      "command": "~/nautidesk/mcp/dist/fetch-mcp.exe",
-      "env": {
-        "FETCH_ALLOW_HOST": "localhost,example.com"
-      }
-    },
-    "anydoc": {
-      "command": "~/nautidesk/mcp/dist/anydoc.exe"
-    }
+    "git":     { "command": "~/nautidesk/mcp/dist/git-mcp.exe" },
+    "github":  { "command": "~/nautidesk/mcp/dist/github-mcp.exe", "env": { "GITHUB_TOKEN": "<token>" } },
+    "sqlize":  { "command": "~/nautidesk/mcp/dist/sqlize-mcp.exe" },
+    "sandbox": { "command": "~/nautidesk/mcp/dist/sandbox-mcp.exe" },
+    "anydoc":  { "command": "~/nautidesk/mcp/dist/anydoc.exe" }
   }
 }
 ```
-
-Veja o README de cada servidor para as variáveis de ambiente específicas.

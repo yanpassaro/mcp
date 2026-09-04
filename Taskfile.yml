@@ -24,8 +24,8 @@ tasks:
       - task: build:git
       - task: build:github
       - task: build:sqlize
-      - task: build:fetch
       - task: build:anydoc
+      - task: build:sandbox
 
   build:git:
     desc: Build git-mcp.exe
@@ -52,13 +52,19 @@ tasks:
     cmds:
       - deno task compile
 
+  build:sandbox:
+    desc: Build sandbox-mcp.exe
+    dir: sandbox
+    cmds:
+      - go build -o ../{{.DIST}}/sandbox-mcp.exe ./cmd/sandbox-mcp
+
   format:
     desc: Format all Go modules (gofmt -w, go mod tidy, go vet)
     cmds:
       - task: format:git
       - task: format:github
       - task: format:sqlize
-      - task: format:fetch
+      - task: format:sandbox
 
   format:git:
     desc: Format the git module
@@ -84,19 +90,13 @@ tasks:
       - go mod tidy
       - go vet ./...
 
-  format:fetch:
-    desc: Format the fetch module
-    dir: fetch
+  format:sandbox:
+    desc: Format the sandbox module
+    dir: sandbox
     cmds:
       - gofmt -w .
       - go mod tidy
       - go vet ./...
-
-  build:fetch:
-    desc: Build fetch-mcp.exe
-    dir: fetch
-    cmds:
-      - go build -o ../{{.DIST}}/fetch-mcp.exe ./cmd/fetch-mcp
 
   clean:
     desc: Remove dist/
