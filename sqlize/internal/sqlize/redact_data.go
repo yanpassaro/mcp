@@ -2,7 +2,6 @@ package sqlize
 
 import (
 	"encoding/json"
-	"os"
 	"regexp"
 	"strings"
 
@@ -16,17 +15,7 @@ type piiConfig struct {
 	Labels    map[string]string   `json:"labels"`
 	Columns   map[string][]string `json:"columns"`
 	Contexts  map[string][]string `json:"contexts"`
-	Name      piiName             `json:"name"`
 	Address   piiAddress          `json:"address"`
-	OrgSuffix []string            `json:"org_suffix"`
-}
-
-type piiName struct {
-	FirstNames []string `json:"first_names"`
-	Stopwords  []string `json:"stopwords"`
-	Deny       []string `json:"deny"`
-	Geo        []string `json:"geo"`
-	Context    []string `json:"context"`
 }
 
 type piiAddress struct {
@@ -34,17 +23,12 @@ type piiAddress struct {
 	Preps  []string `json:"preps"`
 }
 
-var (
-	columnEntityMap map[string]string
-	contextRe       map[string]*regexp.Regexp
-	labels          map[string]string
-	brFirstNames    map[string]bool
-	wordDeny        map[string]bool
-	geoDeny         map[string]bool
-	nameStopwords   map[string]bool
-	addressPreps    map[string]bool
-	orgSuffix       map[string]bool
-)
+	var (
+		columnEntityMap map[string]string
+		contextRe       map[string]*regexp.Regexp
+		labels          map[string]string
+		addressPreps    map[string]bool
+	)
 
 func init() { loadPII() }
 
@@ -75,15 +59,7 @@ func loadPII() {
 		contextRe[ent] = regexp.MustCompile(`(?i)\b(?:` + strings.Join(parts, "|") + `)\b`)
 	}
 
-	brFirstNames = toSet(cfg.Name.FirstNames)
-	wordDeny = toSet(cfg.Name.Deny)
-	geoDeny = toSet(cfg.Name.Geo)
-	nameStopwords = toSet(cfg.Name.Stopwords)
 	addressPreps = toSet(cfg.Address.Preps)
-	orgSuffix = toSet(cfg.OrgSuffix)
-
-	loadWordList(os.Getenv("SQLIZE_PII_NAMES"), brFirstNames)
-	loadWordList(os.Getenv("SQLIZE_PII_WORDS"), wordDeny)
 }
 
 func toSet(words []string) map[string]bool {

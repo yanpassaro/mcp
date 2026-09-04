@@ -1,7 +1,6 @@
 package sqlize
 
 import (
-	"os"
 	"strings"
 )
 
@@ -28,20 +27,4 @@ func normalizeWord(s string) string {
 		}
 	}
 	return b.String()
-}
-
-func loadWordList(path string, into map[string]bool) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	for line := range strings.SplitSeq(string(b), "\n") {
-		if w := normalizeWord(strings.TrimSpace(line)); w != "" {
-			into[w] = true
-		}
-	}
 }

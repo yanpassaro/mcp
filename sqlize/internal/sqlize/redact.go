@@ -4,8 +4,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 )
 
 const maskThreshold = 0.5
@@ -145,129 +143,13 @@ func luhn(s string) bool {
 
 func columnEntity(name string) (string, bool) {
 	ent, ok := columnEntityMap[normalizeWord(name)]
+	if !ok {
+		return "", false
+	}
+	if ent == "PERSON" {
+		return "", false
+	}
 	return ent, ok
-}
-
-var reNameSpan = regexp.MustCompile(`\p{Lu}\p{Ll}*(?:(?:\s+(?:de|da|do|dos|das|e)\s+|\s+)\p{Lu}\p{Ll}*)+`)
-
-var reNameContext = regexp.MustCompile(`(?i)\b(?:com|para|por|sr\.?|sra\.?|srta\.?|dr\.?|dra\.?|senhor|senhora|dona|dom|prof\.?|eng\.?|adv\.?)\s+$`)
-
-var reSingleName = regexp.MustCompile(`(?i:\b(?:sr\.?|sra\.?|srta\.?|dr\.?|dra\.?|senhor|senhora|dona|dom|prof\.?|eng\.?|adv\.?|com|para|por)\s+)(\p{Lu}\p{Ll}+)`)
-
-func nameContext(prev string) bool {
-	if len(prev) > 24 {
-		prev = prev[len(prev)-24:]
-	}
-	return reNameContext.MatchString(prev)
-}
-
-func findNameMatches(colName, cell string) []match {
-	if cell == "" {
-		return nil
-	}
-	var out []match
-
-	for _, idx := range reNameSpan.FindAllStringIndex(cell, -1) {
-		span := cell[idx[0]:idx[1]]
-		if s := nameScore(span, cell[:idx[0]]); s > 0 {
-			out = append(out, match{start: idx[0], end: idx[1], entity: "PERSON", score: s})
-		}
-	}
-
-	for _, idx := range reSingleName.FindAllStringSubmatchIndex(cell, -1) {
-		start, end := idx[2], idx[3]
-		span := cell[start:end]
-		if s := nameScore(span, cell[:start]); s > 0 {
-			out = append(out, match{start: start, end: end, entity: "PERSON", score: s})
-		}
-	}
-
-	if len(out) == 0 {
-		if m, ok := wholeCellName(colName, cell); ok {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-func deniedToken(t string) bool {
-	if brFirstNames[t] {
-		return false
-	}
-	return wordDeny[t] || geoDeny[t]
-}
-
-func wholeCellName(_ string, cell string) (match, bool) {
-	raw := strings.TrimSpace(cell)
-	if raw == "" {
-		return match{}, false
-	}
-	r0, _ := utf8.DecodeRuneInString(raw)
-	if !unicode.IsUpper(r0) {
-		return match{}, false
-	}
-	norm := normalizeWord(raw)
-	tokens := strings.Fields(norm)
-	if len(tokens) == 0 || len(tokens) > 4 {
-		return match{}, false
-	}
-	known := 0
-	first := ""
-	for _, t := range tokens {
-		if nameStopwords[t] {
-			continue
-		}
-		if first == "" {
-			first = t
-		}
-		if brFirstNames[t] {
-			known++
-		}
-	}
-	if first == "" || deniedToken(first) || geoDeny[norm] || orgSuffix[tokens[len(tokens)-1]] {
-		return match{}, false
-	}
-	for _, t := range tokens {
-		if t != first && wordDeny[t] {
-			return match{}, false
-		}
-	}
-	if known < 1 {
-		return match{}, false
-	}
-	return match{start: 0, end: len(cell), entity: "PERSON", score: 0.9}, true
-}
-
-func nameScore(span, prev string) float64 {
-	norm := normalizeWord(span)
-	tokens := strings.Fields(norm)
-	if len(tokens) == 0 {
-		return 0
-	}
-	known := 0
-	first := ""
-	for _, t := range tokens {
-		if nameStopwords[t] {
-			continue
-		}
-		if first == "" {
-			first = t
-		}
-		if brFirstNames[t] {
-			known++
-		}
-	}
-	if first == "" || deniedToken(first) || geoDeny[norm] || orgSuffix[tokens[len(tokens)-1]] {
-		return 0
-	}
-	switch {
-	case known >= 1:
-		return 0.9
-	case nameContext(prev):
-		return 0.85
-	default:
-		return 0
-	}
 }
 
 func analyzeCell(colName, cell string) []match {
@@ -310,7 +192,6 @@ func analyzeCell(colName, cell string) []match {
 			ms = append(ms, match{start: idx[0], end: idx[1], entity: r.entity, score: score})
 		}
 	}
-	ms = append(ms, findNameMatches(colName, cell)...)
 	ms = append(ms, findAddressMatches(cell)...)
 	return ms
 }

@@ -1,7 +1,6 @@
 {
   "version": 1,
   "labels": {
-    "PERSON": "PESSOA",
     "CPF": "CPF",
     "CNPJ": "CNPJ",
     "ID": "DOCUMENTO",
@@ -24,26 +23,6 @@
     "CREDURL": "URL"
   },
   "columns": {
-    "PERSON": [
-      "nome", "nome completo", "nome da mae", "nome do pai", "nome social",
-      "nome completo do cliente", "nome responsavel", "pessoa", "pessoas",
-      "cliente", "consumidor", "responsavel", "responsavel legal", "contato",
-      "contato principal", "proprietario", "funcionario", "colaborador",
-      "atendente", "vendedor", "representante", "diretor", "gerente", "medico",
-      "paciente", "aluno", "professor", "candidato", "solicitante",
-      "beneficiario", "customer", "client", "full name", "first name",
-      "firstname", "last name", "lastname", "surname", "given name", "person",
-      "person name", "name of contact", "mothers name", "fathers name",
-      "contact name", "contact person", "responsible", "owner", "proprietor",
-      "employee", "staff", "buyer", "seller", "supplier", "vendor", "merchant",
-      "agent", "manager", "supervisor", "salesperson", "salesman", "consultant",
-      "attorney", "lawyer", "applicant", "tenant", "guest", "member", "partner",
-      "recipient", "author", "creator", "employer", "contractor", "assistant",
-      "coordinator", "founder", "president", "secretary", "advisor", "analyst",
-      "engineer", "developer", "delivery", "courier", "driver", "landlord",
-      "spouse", "relative", "guardian", "emergency contact", "next of kin",
-      "doctor", "patient", "student", "teacher", "candidate"
-    ],
     "CPF": ["cpf"],
     "CNPJ": ["cnpj"],
     "ID": [
@@ -106,11 +85,6 @@
     ]
   },
   "contexts": {
-    "PERSON": [
-      "nome", "cliente", "responsavel", "contato", "paciente", "sr", "sra",
-      "srta", "dr", "dra", "senhor", "senhora", "dona", "dom", "prof", "eng",
-      "adv", "com", "para", "por", "name", "customer", "patient", "contact"
-    ],
     "CPF": ["cpf", "documento", "doc", "inscricao", "document"],
     "CNPJ": ["cnpj", "inscricao", "juridica", "document", "company"],
     "ID": [
@@ -135,79 +109,6 @@
     ],
     "USER": ["usuario", "login", "user", "username", "account"]
   },
-  "name": {
-    "first_names": [
-      "joao", "jose", "antonio", "francisco", "carlos", "paulo", "pedro",
-      "lucas", "gabriel", "matheus", "rafael", "marcos", "bruno", "thiago",
-      "felipe", "gustavo", "rodrigo", "fernando", "eduardo", "daniel",
-      "leonardo", "ricardo", "andre", "henrique", "guilherme", "diego",
-      "vinicius", "alexandre", "fabio", "sergio", "rogerio", "jorge", "marcio",
-      "anderson", "douglas", "miguel", "arthur", "bernardo", "enzo", "samuel",
-      "benjamin", "maria", "ana", "juliana", "mariana", "fernanda", "camila",
-      "larissa", "beatriz", "amanda", "patricia", "leticia", "vanessa",
-      "carolina", "gabriela", "aline", "bruna", "jessica", "natalia", "bianca",
-      "raquel", "renata", "sabrina", "luciana", "sandra", "claudia", "adriana",
-      "daniela", "priscila", "isadora", "helena", "alice", "sophia", "laura",
-      "valentina", "julia", "giovanna", "luana"
-    ],
-    "stopwords": ["de", "da", "do", "dos", "das", "e", "a", "o"],
-    "deny": [
-      "janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho",
-      "agosto", "setembro", "outubro", "novembro", "dezembro",
-      "segunda", "terca", "quarta", "quinta", "sexta", "sabado", "domingo",
-      "january", "february", "march", "april", "may", "june", "july", "august",
-      "september", "october", "november", "december",
-      "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
-      "sunday",
-      "sao", "santa", "nossa", "senhor", "senhora", "dom", "vila", "bom",
-      "boa", "valor", "total", "status", "pedido", "venda", "compra", "produto",
-      "servico", "item", "codigo", "numero", "nota", "registro", "cadastro",
-      "usuario", "banco", "rua", "avenida", "travessa", "alameda", "estrada",
-      "rodovia", "praca", "beco", "largo", "viela", "condominio", "conjunto",
-      "residencial", "loteamento", "chacara", "sitio", "fazenda",
-      "street", "avenue", "road", "highway", "lane", "square", "building",
-      "floor", "suite", "apartment", "house", "bank", "company", "group",
-      "association", "university", "college", "school", "hospital", "clinic",
-      "institute", "center", "government", "ministry", "agency", "society",
-      "industry", "factory",
-      "javascript", "script", "typescript", "python", "java", "ruby", "php",
-      "golang", "kotlin", "swift", "scala", "rust", "html", "css", "sql",
-      "mysql", "postgresql", "mongodb", "redis", "docker", "kubernetes",
-      "linux", "windows", "android", "ios", "cloud", "aws", "azure", "gcp",
-      "react", "angular", "vue", "node", "api", "graphql", "git", "github",
-      "devops", "backend", "frontend", "fullstack", "database", "serverless",
-      "terraform", "software", "sistema", "dados", "web", "mobile", "stack"
-    ],
-    "geo": [
-      "acre", "alagoas", "amapa", "amazonas", "bahia", "ceara", "espirito santo",
-      "goias", "maranhao", "mato grosso", "mato grosso do sul", "minas gerais",
-      "para", "paraiba", "parana", "pernambuco", "piaui", "rio de janeiro",
-      "rio grande do norte", "rio grande do sul", "rondonia", "roraima",
-      "santa catarina", "sao paulo", "sergipe", "tocantins",
-      "distrito federal",
-      "aracaju", "belem", "belo horizonte", "boa vista", "brasilia",
-      "campina grande", "campinas", "campo grande", "cuiaba", "curitiba",
-      "florianopolis", "fortaleza", "goiania", "guarulhos", "joao pessoa",
-      "macapa", "maceio", "manaus", "natal", "niteroi", "palmas",
-      "paulo afonso", "porto alegre", "porto velho", "recife", "rio branco",
-      "salvador", "santos", "sao bernardo do campo", "sao caetano do sul",
-      "sao goncalo", "sao jose", "sao jose do rio preto", "sao jose dos campos",
-      "sao luis", "sao vicente", "sorocaba", "teresina", "vitoria",
-      "vitoria da conquista",
-      "africa do sul", "arabia saudita", "coreia do norte", "coreia do sul",
-      "costa do marfim", "emirados arabes", "estados unidos", "nova zelandia",
-      "reino unido", "brasil", "argentina", "portugal", "italia", "franca",
-      "espanha", "alemanha", "inglaterra", "canada", "mexico", "chile",
-      "uruguai", "paraguai", "china", "japao", "india", "russia", "australia",
-      "suica", "holanda", "belgica", "suecia", "noruega", "finlandia", "grecia",
-      "irlanda", "polonia", "ucrania", "turquia", "egito", "marrocos",
-      "porto seguro", "rio grande"
-    ],
-    "context": [
-      "sr", "sra", "srta", "dr", "dra", "senhor", "senhora", "dona", "dom",
-      "prof", "eng", "adv", "com", "para", "por"
-    ]
-  },
   "address": {
     "starts": [
       "rua", "r", "av", "avenida", "travessa", "alameda", "estrada", "rodovia",
@@ -215,6 +116,5 @@
       "residencial", "loteamento", "chacara", "sitio", "fazenda"
     ],
     "preps": ["em", "no", "na", "nos", "nas", "e", "a", "o", "com", "para", "por", "sobre"]
-  },
-  "org_suffix": ["ltda", "eireli", "epp"]
+  }
 }

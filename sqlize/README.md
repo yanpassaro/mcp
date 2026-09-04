@@ -124,33 +124,22 @@ redator é inspirado na arquitetura do [Presidio](https://github.com/data-privac
    verificador / Luhn). Válidos sobem para score 1.0; inválidos caem e **só
    mascaram se a coluna confirmar** (acaba o falso positivo de "qualquer
    número de 11 dígitos vira CPF").
-3. **Contexto de coluna (pt + en)**: colunas como `cpf`, `nome`, `email`,
-   `senha` — ou `customer`, `phone`, `password`, `address` — recebem score
-   1.0 e são sempre mascaradas, mesmo sem bater padrão.
+3. **Contexto de coluna (pt + en)**: colunas como `cpf`, `email`, `senha` —
+   ou `phone`, `password`, `address` — recebem score 1.0 e são sempre
+   mascaradas, mesmo sem bater padrão. **Nomes/pessoas (`PESSOA`) não são
+   mascarados.**
 4. **Reforço por contexto ao redor** (o *context-aware enhancer* do Presidio):
    um padrão ambíguo (ex.: `RG 12.345.678-9`, `cpf 123.456.789-00`, cartão
    sem checksum) só é mascarado se uma **palavra de contexto** da entidade
    aparecer numa janela curta ao redor (`rg`/`identidade`, `cpf`, `cartão`...)
    — ou se a coluna confirmar.
-5. **Pessoas**: detecção **sem depender de lista de nomes**: seqüências de
-   2+ palavras capitalizadas (`João da Silva`, `Tomasz Kowalski`), nomes
-   únicos após honoríficos/preposições (`Sr. Pedro`, `falei com Maria`) e
-   células inteiras no formato de nome ganham score por **forma + contexto**.
-   A lista de primeiros nomes é apenas um **booster** (optional), e o conjunto
-   usado para **excluir** não-nomes é pequeno: dias/meses, logradouros,
-   geográficos (estados, capitais, países) e termos **técnico/tecnológicos**
-   (JavaScript, SQL, Cloud, Linux, React, Docker, AWS...) — para não mascarar
-   habilidades de currículos/portfólios como se fossem pessoas. Tudo isso vive
-   em `data/pii.json` (fonte canônica, lida direto pelo `anydoc`); o sqlize
-   embute uma cópia em `internal/data/pii.json` via `//go:embed` (pacote
-      `internal/data`).
-   Aumentáveis por arquivo: `SQLIZE_PII_NAMES` (nomes para reforçar, um por
-   linha) e `SQLIZE_PII_WORDS` (palavras comuns do seu domínio para excluir,
-   ex.: nomes de produtos internos) — ambos normalizados (lowercase, sem
-   acento), com a mesma regra do contexto de coluna.
+5. **Nomes/pessoas não são mascarados.** A detecção de pessoas (`PESSOA`) foi
+   desativada nas tools (SQLite e bancos ao vivo), então `nome`, `cliente`,
+   `customer` etc. aparecem como estão. As envs `SQLIZE_PII_NAMES` e
+   `SQLIZE_PII_WORDS` deixam de ter efeito.
 6. **Limiar** (`score >= 0.5`) e **resolução de sobreposição** decidem o que
    é mascarado; a máscara é sempre o rótulo da entidade entre colchetes
-   (`[CPF]`, `[CARTÃO]`, `[PESSOA]`...).
+   (`[CPF]`, `[CARTÃO]`, `[EMAIL]`...).
 
 Exemplos de saída (a máscara é o rótulo da entidade entre colchetes):
 
@@ -164,17 +153,15 @@ Exemplos de saída (a máscara é o rótulo da entidade entre colchetes):
 - **qualquer URL** vira PII: `https://exemplo.com/pagina?x=1`, `www.site.com.br`
   ou mesmo `exemplo.com.br` → `[URL]`
 - **endereços** detectados pelo logradouro: `Rua das Flores, 123` → `[ENDEREÇO]`
-- `nome`/`customer` = `João da Silva` → `[PESSOA]`
+- **nomes/pessoas não são mascarados**: `João da Silva` fica como está
 - colunas de segredo (`senha`, `token`, `apikey`...) → `[SEGREDO]`
 - entidades tokenizadas (IP, MAC, JWT, hash, BTC) → `[IP]`, `[MAC]`, `[JWT]`, `[HASH]`, `[BTC]`
 
 Notas:
 
-- Nomes em texto livre só são mascarados com evidência positiva: nome em lista
-  de reforço (booster opcional) ou contexto imediatamente anterior
-  (honorífico/preposição: `com`, `para`, `Sr.`...), ou contexto de coluna.
-  Sem isso o texto fica como está — evita mascarar stacks de currículos
-  (`JavaScript SQL`, `React Native`, `Desenvolvimento de Software`).
+- **Nomes/pessoas nunca são mascarados**, mesmo em colunas `nome`, `cliente`,
+  `customer` etc. — evita o falso positivo de mascarar qualquer sequência de
+  palavras capitalizadas.
 - Padrões ambíguos (ex.: RG, CPF/CNPJ/cartão com checksum inválido) só mascaram
   com coluna PII confirmando ou palavra de contexto ao redor.
 - No `sqlize_query` e no `sqlize_export` o mascaramento é aplicado **por padrão**;
