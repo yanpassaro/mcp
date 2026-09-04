@@ -101,12 +101,16 @@ defina `SQLIZE_STATE_DIR` no ambiente.)
    - `.sql` → instruções executadas no banco.
    - `.sqlite`, `.db` → banco anexado como esquema (ex.: `db0`); suas tabelas
      ficam consultáveis diretamente pelo nome.
-2. `sqlize_structure` — lista tabelas/colunas; com `table`, detalha a tabela
-   (colunas + foreign keys + índices).
+
+2. `sqlize_structure` — lista tabelas/colunas; **`table` é opcional** e, quando
+   informado, detalha a tabela (colunas + foreign keys + índices).
 3. `sqlize_query` — consulta SQL (`SELECT`/`WITH`, sem `;`).
 4. `sqlize_export` — grava o resultado em `.json`, `.csv`, `.tsv`, `.xlsx`,
    `.sql` ou `.xml` (a extensão do `path` define o formato). Valores dinâmicos
    vão em `args` (placeholder `?`), como no `sqlize_query`.
+5. `sqlize_clear` — dropar tabelas do banco de trabalho. Sem `table`, remove
+   **todas** as tabelas (esquema `main`); com `table`, remove só aquela. Os
+   bancos `.sqlite`/`.db` anexados **não** são alterados.
 
 
 Reimportar um arquivo com o mesmo nome de tabela **recria** a tabela
@@ -172,6 +176,7 @@ Notas:
 - `sqlize_structure` — estrutura dos dados (todas as tabelas ou uma específica).
 - `sqlize_query` — consulta SQL somente leitura (retorna Markdown, até 200 linhas).
 - `sqlize_export` — exporta consulta/tabela para arquivo.
+- `sqlize_clear` — remove tabelas do banco de trabalho (todas ou uma específica).
 
 
 ## Bancos ao vivo (Postgres / MySQL)

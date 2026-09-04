@@ -10,8 +10,6 @@ import (
 	"github.com/go-git/go-git/v6/plumbing/object"
 )
 
-// extLanguages mapeia extensão de arquivo → linguagem (heurística simplificada
-// no estilo do GitHub linguist, sem dependência externa).
 var extLanguages = map[string]string{
 	".go":         "Go",
 	".ts":         "TypeScript",
@@ -101,7 +99,6 @@ var extLanguages = map[string]string{
 	".dockerfile": "Dockerfile",
 }
 
-// binaryExts arquivos binários que nunca entram na contagem de linhas.
 var binaryExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
 	".bmp": true, ".ico": true, ".tiff": true, ".tif": true,
@@ -114,8 +111,6 @@ var binaryExts = map[string]bool{
 	".wasm": true, ".class": true, ".jar": true, ".pyc": true, ".pyo": true,
 }
 
-// fallbackDirs só é usado quando o repo NÃO tem .gitignore: diretórios
-// gerados/dependências que não devem contar como código.
 var fallbackDirs = []string{
 	".git", "node_modules", "vendor", "dist", "build", "out", ".next", ".nuxt",
 	".venv", "venv", ".tox", "__pycache__", ".cache", "coverage", "target",
@@ -149,7 +144,6 @@ func inIgnoredDir(name string) bool {
 	return false
 }
 
-// gitIgnorer reúne os padrões dos .gitignore presentes na árvore do HEAD.
 type gitIgnorer struct {
 	entries []gitignore.Pattern
 }
@@ -180,8 +174,6 @@ func buildGitIgnorer(tree *object.Tree) *gitIgnorer {
 		}
 		for _, line := range strings.Split(content, "\n") {
 			line = strings.TrimSpace(line)
-			// Linhas de negação ("!") re-incluem arquivos: como aqui a decisão é
-			// "exclui ou conta", ignorá-las evita marcação incorreta num OR simples.
 			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
 				continue
 			}
@@ -192,14 +184,11 @@ func buildGitIgnorer(tree *object.Tree) *gitIgnorer {
 	return g
 }
 
-// repoLanguages conta linhas por linguagem nos arquivos rastreados no HEAD,
-// ignorando o que o .gitignore do próprio repo exclui (com fallback de
-// diretórios comuns quando não há .gitignore).
 func repoLanguages(repo *git.Repository) (map[string]int, int, error) {
 	langs := map[string]int{}
 	head, err := repo.Head()
 	if err != nil {
-		return langs, 0, nil // repositório sem commits: nada a contar
+		return langs, 0, nil
 	}
 	commit, err := repo.CommitObject(head.Hash())
 	if err != nil {

@@ -748,8 +748,6 @@ export interface LoadedImage {
   height: number;
 }
 
-// Keep images inside the printable content area while preserving the
-// intrinsic aspect ratio, so large/wide screenshots are never squashed.
 const IMAGE_MAX_W = 430;
 const IMAGE_MAX_H = 440;
 

@@ -37,6 +37,11 @@ func (s *Server) Register(server *mcp.Server) {
 	}, s.structureTool)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "sqlize_clear",
+		Description: "Remove tables from the working SQLite database. Without 'table', drops ALL tables (main schema). With 'table', drops only that table. Attached .sqlite/.db schemas are never touched.",
+	}, s.clearTool)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_query",
 		Description: "Run a SQL statement (SELECT/WITH/INSERT/UPDATE/DELETE) over the local SQLite test database and return a Markdown table (for queries) or the affected-row count (for writes), limited to 200 rows. Do not use ';'. Values must be passed via 'args' as bound parameters - string literals and numeric/boolean literals inside WHERE are rejected (use '?' placeholders + 'args'; IS NULL / column-to-column comparisons are fine). Format/constant strings outside WHERE (TO_CHAR 'YYYY-MM-DD', COALESCE(..,''), CASE) are allowed. Only built-in functions from an allowlist (COUNT, SUM, TO_CHAR, COALESCE, DATE_TRUNC, ...) can be called; user-defined, extension or dangerous functions (pg_sleep, dblink, LOAD_FILE, ...) are rejected. Results are ALWAYS masked (CPF, CNPJ, e-mail, phone, card, dates, IP, PII).",
 	}, s.queryTool)
@@ -89,6 +94,18 @@ func (s *Server) importTool(ctx context.Context, _ *mcp.CallToolRequest, in impo
 		return nil, nil, fmt.Errorf("'path' é obrigatório")
 	}
 	res, err := s.store.importFile(ctx, in.Path, in.Table, in.Sheet)
+	if err != nil {
+		return nil, nil, err
+	}
+	return textResult(res)
+}
+
+type clearInput struct {
+	Table string `json:"table,omitempty" jsonschema:"Name of the table to drop (optional). If empty, drops ALL tables in the working database (main schema)."`
+}
+
+func (s *Server) clearTool(ctx context.Context, _ *mcp.CallToolRequest, in clearInput) (*mcp.CallToolResult, any, error) {
+	res, err := s.store.dropTables(ctx, in.Table)
 	if err != nil {
 		return nil, nil, err
 	}

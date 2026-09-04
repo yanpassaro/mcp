@@ -22,14 +22,11 @@ function u32le(b: Uint8Array, o: number): number {
   return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
 }
 
-// Reads the intrinsic pixel size of the most common image formats so the
-// exported image keeps its real aspect ratio instead of being squashed.
 export function imageDimensions(
   bytes: Uint8Array,
 ): { width: number; height: number } | undefined {
   if (bytes.length < 24) return undefined;
 
-  // PNG
   if (
     bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e &&
     bytes[3] === 0x47
@@ -38,18 +35,15 @@ export function imageDimensions(
     return { width: u32be(bytes, 16), height: u32be(bytes, 20) };
   }
 
-  // GIF
   if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
     return { width: u16le(bytes, 6), height: u16le(bytes, 8) };
   }
 
-  // BMP
   if (bytes[0] === 0x42 && bytes[1] === 0x4d) {
     if (bytes.length < 26) return undefined;
     return { width: u32le(bytes, 18), height: Math.abs(u32le(bytes, 22)) };
   }
 
-  // JPEG (scan markers for a SOF frame, skipping APPn/metadata segments)
   if (bytes[0] === 0xff && bytes[1] === 0xd8) {
     let o = 2;
     while (o + 9 < bytes.length) {
@@ -84,7 +78,6 @@ export function imageDimensions(
     return undefined;
   }
 
-  // WebP
   if (
     bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 &&
     bytes[3] === 0x46 &&
