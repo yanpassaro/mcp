@@ -138,18 +138,6 @@ func buildFetch(vm *goja.Runtime) *goja.Object {
 	return o
 }
 
-func isStringValue(v goja.Value) bool {
-	if isNilValue(v) {
-		return false
-	}
-	_, ok := v.Export().(string)
-	return ok
-}
-
-func isNilValue(v goja.Value) bool {
-	return v == nil || goja.IsUndefined(v) || goja.IsNull(v)
-}
-
 func doFetch(cfg *fetchConfig, urlStr string, opts map[string]any) (map[string]any, error) {
 	method, _ := opts["method"].(string)
 	method = strings.ToUpper(strings.TrimSpace(method))
@@ -267,17 +255,6 @@ func doFetch(cfg *fetchConfig, urlStr string, opts map[string]any) (map[string]a
 	}, nil
 }
 
-func numOpt(v any) (float64, bool) {
-	switch n := v.(type) {
-	case float64:
-		return n, true
-	case int64:
-		return float64(n), true
-	case int:
-		return float64(n), true
-	}
-	return 0, false
-}
 
 type cookieRec struct {
 	Name     string    `json:"name"`
