@@ -773,9 +773,61 @@ export interface MermaidImageData {
   height: number;
 }
 
+export interface LoadedImage {
+  bytes: Uint8Array;
+  width: number;
+  height: number;
+}
+
+// Keep images inside the printable content area while preserving the
+// intrinsic aspect ratio, so large/wide screenshots are never squashed.
+const IMAGE_MAX_W = 430;
+const IMAGE_MAX_H = 440;
+
+function fitToPage(w: number, h: number): { w: number; h: number } {
+  if (w > IMAGE_MAX_W || h > IMAGE_MAX_H) {
+    const k = Math.min(
+      w > IMAGE_MAX_W ? IMAGE_MAX_W / w : 1,
+      h > IMAGE_MAX_H ? IMAGE_MAX_H / h : 1,
+    );
+    w *= k;
+    h *= k;
+  }
+  return { w, h };
+}
+
+function imageSizeFor(
+  img: LoadedImage,
+  requestedWidth?: number,
+  requestedHeight?: number,
+): { w: number; h: number } {
+  const iw = img.width > 0 ? img.width : 0;
+  const ih = img.height > 0 ? img.height : 0;
+
+  if (requestedWidth && requestedHeight) {
+    return fitToPage(requestedWidth, requestedHeight);
+  }
+  if (requestedWidth) {
+    return fitToPage(
+      requestedWidth,
+      iw > 0 ? (requestedWidth * ih) / iw : requestedHeight ?? requestedWidth * 0.75,
+    );
+  }
+  if (requestedHeight) {
+    return fitToPage(
+      ih > 0 ? (requestedHeight * iw) / ih : requestedWidth ?? requestedHeight * 1.5,
+      requestedHeight,
+    );
+  }
+  if (iw > 0 && ih > 0) {
+    return fitToPage(iw, ih);
+  }
+  return { w: 300, h: 200 };
+}
+
 export function jsonToFlowDoc(
   content: unknown,
-  images?: Map<string, Uint8Array>,
+  images?: Map<string, LoadedImage>,
   options: FlowDocOptions = {},
   mermaidImages?: Map<number, MermaidImageData>,
 ): FlowDoc {
@@ -891,14 +943,19 @@ export function jsonToFlowDoc(
         },
       });
     } else if (kind === "image") {
-      const bytes = images?.get(String(b.url ?? ""));
-      if (bytes) {
+      const img = images?.get(String(b.url ?? ""));
+      if (img) {
+        const size = imageSizeFor(
+          img,
+          Number(b.width) || undefined,
+          Number(b.height) || undefined,
+        );
         body.push({
           kind: "image",
           image: {
-            resource: resources.put(bytes),
-            width: pt(Number(b.width) || 300),
-            height: pt(Number(b.height) || 200),
+            resource: resources.put(img.bytes),
+            width: pt(size.w),
+            height: pt(size.h),
             paragraphProperties: {
               alignment: (b.align ?? "center") as unknown as Alignment,
               spacingBefore: pt(6),
