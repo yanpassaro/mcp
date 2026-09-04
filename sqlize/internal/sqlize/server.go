@@ -28,27 +28,22 @@ func (s *Server) Close() error {
 func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_import",
-		Description: "Import a file into the working SQLite database (stored under .local/state/sqlize). Supported formats: .json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .xlsm, .xls, .sql, .sqlite, .db, .xml. For individual tables set 'table'; for .sqlite/.db the file is attached as a schema (use sqlize_structure to list its tables).",
+		Description: "Import a file into the working SQLite database. Formats: .json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .xlsm, .xls, .sql, .sqlite, .db, .xml. 'table' names the destination table; .sqlite/.db are attached as a schema.",
 	}, s.importTool)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_structure",
-		Description: "Show the structure of the imported data. Without 'table', lists every table and its columns. With 'table', shows the columns plus foreign keys and indexes of that table.",
+		Description: "List tables and columns. With 'table', show columns, foreign keys and indexes.",
 	}, s.structureTool)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sqlize_clear",
-		Description: "Remove tables from the working SQLite database. Without 'table', drops ALL tables (main schema). With 'table', drops only that table. Attached .sqlite/.db schemas are never touched.",
-	}, s.clearTool)
-
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_query",
-		Description: "Run a SQL statement (SELECT/WITH/INSERT/UPDATE/DELETE) over the local SQLite test database and return a Markdown table (for queries) or the affected-row count (for writes), limited to 200 rows. Do not use ';'. Values must be passed via 'args' as bound parameters - string literals and numeric/boolean literals inside WHERE are rejected (use '?' placeholders + 'args'; IS NULL / column-to-column comparisons are fine). Format/constant strings outside WHERE (TO_CHAR 'YYYY-MM-DD', COALESCE(..,''), CASE) are allowed. Only built-in functions from an allowlist (COUNT, SUM, TO_CHAR, COALESCE, DATE_TRUNC, ...) can be called; user-defined, extension or dangerous functions (pg_sleep, dblink, LOAD_FILE, ...) are rejected. Results are ALWAYS masked (CPF, CNPJ, e-mail, phone, card, dates, IP, PII).",
+		Description: "Run any SQL statement on the local SQLite database; returns Markdown (up to 200 rows) for queries. Pass values via 'args' (use ? placeholders).",
 	}, s.queryTool)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_export",
-		Description: "Export the result of a query or a table to a file. Output formats: .json, .csv, .tsv, .xlsx, .sql, .html, .xml (determined by the 'path' extension). Pass dynamic values via 'args' as bound '?' parameters (required when the WHERE clause compares values; inline literals are rejected). Results are masked (CPF, CNPJ, e-mail, phone, card, dates, IP, PII) by default; set 'redact' false to export without masking.",
+		Description: "Export a query or table to a file (.json, .csv, .tsv, .xlsx, .sql, .html, .xml by path extension). Values in 'args'.",
 	}, s.exportTool)
 
 	for _, cfg := range discoverLiveDBs() {
@@ -56,15 +51,15 @@ func (s *Server) Register(server *mcp.Server) {
 		env := cfg.EnvVar
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        prefix + "_query",
-			Description: fmt.Sprintf("Run a read-only SQL query (SELECT or WITH) against the live %s database configured in %s. Executed inside a READ ONLY transaction; writes are impossible. By default a hard LIMIT of 500 rows is enforced. Results are ALWAYS masked (CPF, CNPJ, e-mail, phone, card, IP, plus PII column names; generic dates are NOT masked). Pass dynamic values via 'args' as bound parameters (%s); string and numeric/boolean literals inside WHERE are rejected (use placeholders + 'args'; IS NULL / column-to-column comparisons are fine; format/constant strings outside WHERE are allowed). Only built-in functions from an allowlist (COUNT, SUM, TO_CHAR, COALESCE, DATE_TRUNC, ...) can be called; user-defined, extension or dangerous functions (pg_sleep, dblink, LOAD_FILE, ...) are rejected. To write the full result to a file use %s_export.", cfg.Engine, env, livePlaceholders(cfg.Engine), prefix),
+			Description: fmt.Sprintf("Run a read-only SQL query (SELECT/WITH) against the live %s database (%s), limited to 500 rows. Pass values via 'args' (%s).", cfg.Engine, env, livePlaceholders(cfg.Engine)),
 		}, s.liveQueryHandler(cfg))
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        prefix + "_export",
-			Description: fmt.Sprintf("Run a read-only SQL query (SELECT or WITH) against the live %s database (%s) and write the FULL result to a file, always masked. The file extension defines the format: .csv, .html, .xlsx, .tsv, .json, .xml, .sql. Executed in a READ ONLY transaction; writes are impossible. 'all' bypasses the 500-row hard limit (only allowed together with 'export_to'). For .sql exports 'target_table' sets the table name used in the script (defaults to 'exported'). Uses the same security rules as %s_query (args as bound parameters, WHERE literals rejected, function allowlist).", cfg.Engine, env, prefix),
+			Description: fmt.Sprintf("Run a read-only query (SELECT/WITH) on the live %s database (%s) and write the full result to a file; the extension sets the format (.csv, .html, .xlsx, .tsv, .json, .xml, .sql).", cfg.Engine, env),
 		}, s.liveExportHandler(cfg))
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        prefix + "_structure",
-			Description: fmt.Sprintf("Structure of the live %s database (%s): lists tables when 'table' is empty; when 'table' is given (use 'schema.table' or just 'table'), shows columns + foreign keys + indexes. Output is always redacted.", cfg.Engine, env),
+			Description: fmt.Sprintf("Structure of the live %s database (%s): tables (no 'table') or columns + FKs + indexes ('table').", cfg.Engine, env),
 		}, s.liveStructureHandler(cfg))
 
 	}
@@ -84,9 +79,9 @@ func textResult(text string) (*mcp.CallToolResult, any, error) {
 }
 
 type importInput struct {
-	Path  string `json:"path" jsonschema:"Path of the input file (.json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .xlsm, .xls, .sql, .sqlite, .db, .xml)"`
-	Table string `json:"table,omitempty" jsonschema:"Name of the destination table (optional; defaults to the file name without extension; with 'sheet' this names the single imported table)"`
-	Sheet string `json:"sheet,omitempty" jsonschema:"Excel sheet name to import (optional, Excel only; defaults to all sheets)"`
+	Path  string `json:"path" jsonschema:"Input file path."`
+	Table string `json:"table,omitempty" jsonschema:"Destination table name (optional; defaults to file name)."`
+	Sheet string `json:"sheet,omitempty" jsonschema:"Excel sheet to import (optional, Excel only)."`
 }
 
 func (s *Server) importTool(ctx context.Context, _ *mcp.CallToolRequest, in importInput) (*mcp.CallToolResult, any, error) {
@@ -100,20 +95,8 @@ func (s *Server) importTool(ctx context.Context, _ *mcp.CallToolRequest, in impo
 	return textResult(res)
 }
 
-type clearInput struct {
-	Table string `json:"table,omitempty" jsonschema:"Name of the table to drop (optional). If empty, drops ALL tables in the working database (main schema)."`
-}
-
-func (s *Server) clearTool(ctx context.Context, _ *mcp.CallToolRequest, in clearInput) (*mcp.CallToolResult, any, error) {
-	res, err := s.store.dropTables(ctx, in.Table)
-	if err != nil {
-		return nil, nil, err
-	}
-	return textResult(res)
-}
-
 type structureInput struct {
-	Table string `json:"table,omitempty" jsonschema:"Specific table (optional). If omitted, lists all tables and columns."`
+	Table string `json:"table,omitempty" jsonschema:"Table (optional). Empty = list all."`
 }
 
 func (s *Server) structureTool(ctx context.Context, _ *mcp.CallToolRequest, in structureInput) (*mcp.CallToolResult, any, error) {
@@ -189,8 +172,8 @@ func schemaLabel(s string) string {
 }
 
 type queryInput struct {
-	SQL  string   `json:"sql" jsonschema:"SQL statement (SELECT/WITH/INSERT/UPDATE/DELETE) on the local SQLite test database. Do not use ';'. Values must be passed via 'args' (no inline literals)."`
-	Args []string `json:"args,omitempty" jsonschema:"Bound parameters for the statement (optional). Passed as parameters, never interpolated into the SQL. Required for any value (no inline string literals allowed)."`
+	SQL  string   `json:"sql" jsonschema:"SQL statement. Values via 'args' (use ? placeholders)."`
+	Args []string `json:"args,omitempty" jsonschema:"Bound parameters for '?' placeholders."`
 }
 
 func (s *Server) queryTool(ctx context.Context, _ *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, any, error) {
@@ -205,12 +188,12 @@ func (s *Server) queryTool(ctx context.Context, _ *mcp.CallToolRequest, in query
 }
 
 type exportInput struct {
-	Path   string   `json:"path" jsonschema:"Path of the output file (.json, .csv, .tsv, .xlsx, .sql, .html, .xml)"`
-	Query  string   `json:"query,omitempty" jsonschema:"Source SQL query (optional if 'table' is provided)"`
-	Args   []string `json:"args,omitempty" jsonschema:"Bound parameters for the query (optional). Passed as '?' placeholders, never interpolated into the SQL."`
-	Table  string   `json:"table,omitempty" jsonschema:"Source table name (optional if 'query' is provided)"`
-	Target string   `json:"target_table,omitempty" jsonschema:"Table name used in the exported SQL (optional; defaults to 'exported')"`
-	Redact *bool    `json:"redact,omitempty" jsonschema:"Apply partial masking to sensitive data (CPF, CNPJ, e-mail, phone, CEP, RG, card, dates, etc.). Default: true. Set false to export without masking."`
+	Path   string   `json:"path" jsonschema:"Output file path (.json, .csv, .tsv, .xlsx, .sql, .html, .xml)."`
+	Query  string   `json:"query,omitempty" jsonschema:"Source SQL (optional if 'table' given)."`
+	Args   []string `json:"args,omitempty" jsonschema:"Bound parameters for the query."`
+	Table  string   `json:"table,omitempty" jsonschema:"Source table (optional if 'query' given)."`
+	Target string   `json:"target_table,omitempty" jsonschema:"Table name in exported .sql (default 'exported')."`
+	Redact *bool    `json:"redact,omitempty" jsonschema:"Mask sensitive data (default true). Set false to export raw."`
 }
 
 func (s *Server) exportTool(ctx context.Context, _ *mcp.CallToolRequest, in exportInput) (*mcp.CallToolResult, any, error) {
@@ -274,11 +257,11 @@ func (s *Server) liveQueryHandler(cfg liveDBConfig) func(context.Context, *mcp.C
 }
 
 type liveExportInput struct {
-	Query       string   `json:"query" jsonschema:"Read-only SQL query (SELECT or WITH). Do not use ';'. Executed in a READ ONLY transaction; writes are rejected."`
-	Args        []string `json:"args,omitempty" jsonschema:"Bound parameters for the query (optional). Passed as parameters, never interpolated into the SQL."`
-	ExportTo    string   `json:"export_to" jsonschema:"Output path to write the full result to a file. The file extension defines the format: .csv, .html, .xlsx, .tsv, .json, .xml, .sql. The result is always masked."`
-	All         bool     `json:"all,omitempty" jsonschema:"Return all rows, bypassing the 500-row hard limit. Only allowed together with 'export_to'."`
-	TargetTable string   `json:"target_table,omitempty" jsonschema:"Table name used in the exported SQL script (only relevant for .sql exports; defaults to 'exported')."`
+	Query       string   `json:"query" jsonschema:"Read-only SQL query (SELECT/WITH)."`
+	Args        []string `json:"args,omitempty" jsonschema:"Bound parameters."`
+	ExportTo    string   `json:"export_to" jsonschema:"Output file path (.csv, .html, .xlsx, .tsv, .json, .xml, .sql)."`
+	All         bool     `json:"all,omitempty" jsonschema:"Bypass the 500-row limit (only with 'export_to')."`
+	TargetTable string   `json:"target_table,omitempty" jsonschema:"Table name in exported .sql (default 'exported')."`
 }
 
 func (s *Server) liveExportHandler(cfg liveDBConfig) func(context.Context, *mcp.CallToolRequest, liveExportInput) (*mcp.CallToolResult, any, error) {
@@ -324,13 +307,13 @@ func (s *Server) liveStructureHandler(cfg liveDBConfig) func(context.Context, *m
 }
 
 type liveQueryInput struct {
-	SQL  string   `json:"sql" jsonschema:"Read-only SQL query (SELECT or WITH). Do not use ';'. Executed in a READ ONLY transaction; writes are rejected."`
-	Args []string `json:"args,omitempty" jsonschema:"Bound parameters for the query (optional). Passed as parameters, never interpolated into the SQL."`
+	SQL  string   `json:"sql" jsonschema:"Read-only SQL query (SELECT/WITH)."`
+	Args []string `json:"args,omitempty" jsonschema:"Bound parameters."`
 }
 
 
 type liveStructureInput struct {
-	Table string `json:"table,omitempty" jsonschema:"Table name, optionally qualified as 'schema.table'. If empty, lists all tables."`
+	Table string `json:"table,omitempty" jsonschema:"Table (optional). Empty = list all."`
 }
 
 const maxCellLen = 200

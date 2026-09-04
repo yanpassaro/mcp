@@ -23,27 +23,27 @@ func New(client *github.Client) *Server {
 func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "github_search",
-		Description: "Unified GitHub search. 'type' selects the endpoint: code (/search/code), repo (/search/repositories), issue (/search/issues), pr (/search/issues + is:pr), commit (/search/commits; or lists a repo's commits with repo:owner/name), user (/search/users). 'query' takes GitHub qualifiers (e.g. 'func Validate extension:go repo:owner/name', 'topic:llm stars:>100', 'bug is:issue is:open'); sort/order/perPage/page are optional.",
+		Description: "Unified GitHub search. 'type': code, repo, issue, pr, commit, user. 'query' accepts GitHub qualifiers. Optional: sort, order, perPage, page.",
 	}, s.searchTool)
 
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "github_get_tree",
-		Description: "List a repository's file tree (git trees). Provide owner and repo; ref is optional (branch, tag or SHA). If omitted, uses the default branch; if provided but invalid, also falls back to the default branch. recursive=true returns the entire tree. Useful for understanding folder/file structure and where to find documentation or code.",
+		Description: "List a repository's file tree (git trees) by owner/repo; 'ref' optional, 'recursive' returns the full tree.",
 	}, s.getTree)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "github_read_file",
-		Description: "Read the full content of a repository file (endpoint /repos/{owner}/{repo}/contents/{path}). Returns the file text (markdown, code, etc.) in UTF-8. ref is optional (uses the default branch when omitted, or falls back to the default branch if the given one does not exist). Files over 200KB are truncated.",
+		Description: "Read a file's content by owner/repo/path; 'ref' optional.",
 	}, s.fetchFile)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "github_repo_info",
-		Description: "Repository info by owner/name (endpoint /repos/{owner}/{repo}): stars, forks, license, default branch, topics, description, dates — plus the latest 5 releases.",
+		Description: "Repository info by owner/name: stars, forks, license, topics, latest 5 releases.",
 	}, s.getRepo)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "github_get_item",
-		Description: "Read a single issue or pull request by number (endpoint /repos/{owner}/{repo}/issues/{number} for issue, /pulls/{number} for PR). 'type' selects: issue (state, author, assignees, labels, dates, body) or pr (state open/closed/merged, source/target branch, mergeable, commits, +additions/-deletions, body).",
+		Description: "Read an issue or pull request by number; 'type': issue or pr.",
 	}, s.getItem)
 }
 

@@ -26,7 +26,7 @@ serveStdio(() => {
     {
       title: "Export document",
       description:
-        "Export a file to pdf, docx or xlsx in the same folder (same base name), going through Markdown. Sources: .md, or CSV/TSV/JSON/XML/HTML-table/XLS (and any doc the converter supports: docx, pdf, pptx, odt…) — so CSV/TSV/JSON/XML/HTML/XLS become XLSX, and docx/pdf become PDF/DOCX/XLSX. PII is redacted. Returns the absolute output path.",
+        "Export a file to pdf, docx or xlsx in the same folder (same base name), going through Markdown. Sources: .md, or CSV/TSV/JSON/XML/HTML-table/XLS (and any doc the converter supports). Returns the absolute output path.",
       inputSchema: z.object({
         path: z.string("Path to the source file to export."),
         format: z.enum(EXPORT_FORMATS),

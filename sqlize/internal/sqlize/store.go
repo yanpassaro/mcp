@@ -169,29 +169,8 @@ func sanitizeStoreQuery(q string, args []string) (string, error) {
 	if strings.Contains(t, ";") {
 		return "", fmt.Errorf("consultas não podem conter ';' (apenas uma instrução por vez)")
 	}
-	lower := strings.ToLower(t)
-	allowed := []string{"select", "with", "insert", "update", "delete", "replace"}
-	ok := false
-	for _, p := range allowed {
-		if strings.HasPrefix(lower, p) {
-			ok = true
-			break
-		}
-	}
-	if !ok {
-		return "", fmt.Errorf("apenas SELECT/WITH/INSERT/UPDATE/DELETE/REPLACE são permitidos no SQLite local")
-	}
-	if reStringInWhere.MatchString(t) {
-		return "", fmt.Errorf("consulta rejeitada: não inclua literais de string na cláusula WHERE; passe valores via 'args' (use ? no SQLite)")
-	}
-	if reWhereLiteral.MatchString(t) && !strings.Contains(t, "?") {
-		return "", fmt.Errorf("consulta rejeitada: cláusula WHERE compara valores; use ? no lugar do valor e passe-o em 'args' (ex.: WHERE id = ?)")
-	}
 	if len(args) > 0 && !strings.Contains(t, "?") {
 		return "", fmt.Errorf("'args' informado mas o SQL não contém placeholders; use ? e passe os valores em 'args'")
-	}
-	if err := checkFuncAllowlist(t); err != nil {
-		return "", err
 	}
 	return t, nil
 }
@@ -264,78 +243,6 @@ func (s *store) runQuery(ctx context.Context, q string, args []string) (string, 
 		return "", err
 	}
 	return fmt.Sprintf("OK. %d linha(s) afetada(s).", n), nil
-}
-
-func (s *store) dropTables(ctx context.Context, name string) (string, error) {
-	if strings.TrimSpace(name) != "" {
-		return s.dropOneMainTable(ctx, strings.TrimSpace(name))
-	}
-	return s.dropAllMainTables(ctx)
-}
-
-func (s *store) dropAllMainTables(ctx context.Context) (string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-	if err != nil {
-		return "", err
-	}
-	var names []string
-	for rows.Next() {
-		var n string
-		if err := rows.Scan(&n); err != nil {
-			rows.Close()
-			return "", err
-		}
-		names = append(names, n)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return "", err
-	}
-	rows.Close()
-	if len(names) == 0 {
-		return "Banco de trabalho já está vazio (nenhuma tabela).", nil
-	}
-	if err := s.dropTablesInTx(ctx, names); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%d tabela(s) removida(s) do banco de trabalho.", len(names)), nil
-}
-
-func (s *store) dropOneMainTable(ctx context.Context, name string) (string, error) {
-	var exists string
-	err := s.db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name = ? AND name NOT LIKE 'sqlite_%'", name).Scan(&exists)
-	if err == sql.ErrNoRows {
-		tables, lerr := s.listTables(ctx)
-		if lerr != nil {
-			return "", lerr
-		}
-		names := make([]string, 0, len(tables))
-		for _, t := range tables {
-			names = append(names, t.Name)
-		}
-		return "", fmt.Errorf("tabela %q não encontrada no banco de trabalho; disponíveis: %s", name, strings.Join(names, ", "))
-	}
-	if err != nil {
-		return "", err
-	}
-	if err := s.dropTablesInTx(ctx, []string{name}); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("Tabela %q removida.", name), nil
-}
-
-func (s *store) dropTablesInTx(ctx context.Context, names []string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	for _, n := range names {
-		if _, err := tx.ExecContext(ctx, "DROP TABLE "+quoteIdent(n)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("dropar tabela %q: %w", n, err)
-		}
-	}
-	return tx.Commit()
 }
 
 func (s *store) listTables(ctx context.Context) ([]tableInfo, error) {

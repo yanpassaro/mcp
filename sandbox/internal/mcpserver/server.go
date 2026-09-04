@@ -41,7 +41,7 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sandbox_run",
-		Description: "Run a saved Lua script by 'name', with optional 'args'. Works on the std namespace: result.ok/err, log.ok/err (alias console.ok/err), args, fs.read/lines/json/write/append/del/exists/stat/dir, date.now/iso/format/parse/add/unix/diff, random.pick/shuffle/int/seed, str, list, num, json, assert, encode, fetch. No network/process/OS. Fixed 30s timeout.",
+		Description: "Run a saved Lua script by 'name', with optional 'args'. Sandboxed: no OS/process; filesystem confined to fs/; network only via std.fetch (allowlist). Fixed 30s timeout.",
 	}, s.runScript)
 }
 
@@ -52,7 +52,7 @@ type readScriptInput struct {
 type writeScriptInput struct {
 	Name        string `json:"name" jsonschema:"Script file name (inside the scripts folder). The .lua extension is optional."`
 	Description string `json:"description,omitempty" jsonschema:"One-line description of what the script does (optional)."`
-	Code        string `json:"code" jsonschema:"The body of main(std) - the Lua code that runs. It is wrapped automatically."`
+	Code        string `json:"code" jsonschema:"Body of main(std) (wrapped automatically)."`
 }
 
 type delScriptInput struct {
@@ -61,7 +61,7 @@ type delScriptInput struct {
 
 type runScriptInput struct {
 	Name string `json:"name" jsonschema:"Saved script name (in the scripts folder) to run (.lua extension optional)."`
-	Args string `json:"args,omitempty" jsonschema:"Arguments for the script, accessed via std.args. If valid JSON it is parsed (object/array); otherwise it stays a string."`
+	Args string `json:"args,omitempty" jsonschema:"Script args (JSON parsed, else string)."`
 }
 
 func (s *Server) readScript(ctx context.Context, _ *mcp.CallToolRequest, in readScriptInput) (*mcp.CallToolResult, any, error) {
