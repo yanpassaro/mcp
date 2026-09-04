@@ -5,109 +5,117 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/dop251/goja"
+	lua "github.com/Shopify/go-lua"
 )
 
-func buildList(vm *goja.Runtime) *goja.Object {
-	o := vm.NewObject()
-	o.Set("chunk", func(call goja.FunctionCall) goja.Value {
-		arr, _ := call.Argument(0).Export().([]any)
-		return vm.ToValue(chunk(arr, int(toNum(call.Argument(1)))))
+func buildList(L *lua.State) int {
+	t := newTable(L)
+	setGoFunc(L, t, "chunk", func(l *lua.State) int {
+		pushAny(l, chunk(luaArrayAny(l, 1), int(argNum(l, 2))))
+		return 1
 	})
-	o.Set("groupBy", func(call goja.FunctionCall) goja.Value {
-		arr, _ := call.Argument(0).Export().([]any)
-		keyArg := call.Argument(1)
-		fn, isFn := goja.AssertFunction(keyArg)
-		prop := keyProp(keyArg, isFn)
+	setGoFunc(L, t, "groupBy", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
+		prop := argString(l, 2)
 		groups := map[string][]any{}
 		for _, item := range arr {
-			k := keyOf(vm, item, keyArg, fn, isFn, prop).String()
+			k := fmt.Sprint(itemProp(item, prop))
 			groups[k] = append(groups[k], item)
 		}
 		res := make(map[string]any, len(groups))
 		for k, v := range groups {
 			res[k] = v
 		}
-		return vm.ToValue(res)
+		pushAny(l, res)
+		return 1
 	})
-	o.Set("unique", func(call goja.FunctionCall) goja.Value {
-		arr, _ := call.Argument(0).Export().([]any)
-		return vm.ToValue(uniqueItems(arr))
+	setGoFunc(L, t, "unique", func(l *lua.State) int {
+		pushAny(l, uniqueItems(luaArrayAny(l, 1)))
+		return 1
 	})
-	o.Set("flatten", func(call goja.FunctionCall) goja.Value {
-		arr, _ := call.Argument(0).Export().([]any)
-		return vm.ToValue(flatten(arr))
+	setGoFunc(L, t, "flatten", func(l *lua.State) int {
+		pushAny(l, flatten(luaArrayAny(l, 1)))
+		return 1
 	})
-	o.Set("sortBy", func(call goja.FunctionCall) goja.Value {
-		arr, _ := call.Argument(0).Export().([]any)
-		keyArg := call.Argument(1)
-		fn, isFn := goja.AssertFunction(keyArg)
-		prop := keyProp(keyArg, isFn)
+	setGoFunc(L, t, "sortBy", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
 		cp := append([]any(nil), arr...)
+		prop := argString(l, 2)
 		sort.SliceStable(cp, func(i, j int) bool {
-			return lessValue(keyOf(vm, cp[i], keyArg, fn, isFn, prop), keyOf(vm, cp[j], keyArg, fn, isFn, prop))
+			return fmt.Sprint(itemProp(cp[i], prop)) < fmt.Sprint(itemProp(cp[j], prop))
 		})
-		return vm.ToValue(cp)
+		pushAny(l, cp)
+		return 1
 	})
-	o.Set("countBy", func(call goja.FunctionCall) goja.Value {
-		arr, _ := call.Argument(0).Export().([]any)
-		keyArg := call.Argument(1)
-		fn, isFn := goja.AssertFunction(keyArg)
-		prop := keyProp(keyArg, isFn)
+	setGoFunc(L, t, "countBy", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
+		prop := argString(l, 2)
 		counts := map[string]int{}
 		for _, item := range arr {
-			counts[keyOf(vm, item, keyArg, fn, isFn, prop).String()]++
+			counts[fmt.Sprint(itemProp(item, prop))]++
 		}
-		return vm.ToValue(counts)
+		pushAny(l, counts)
+		return 1
 	})
-	o.Set("first", func(call goja.FunctionCall) goja.Value {
-		arr, _ := call.Argument(0).Export().([]any)
-		n := int(toNum(call.Argument(1)))
+	setGoFunc(L, t, "first", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
+		n := int(argNum(l, 2))
 		if n <= 0 {
 			n = 1
 		}
-		if n >= len(arr) {
-			return vm.ToValue(arr)
+		if n > len(arr) {
+			n = len(arr)
 		}
-		return vm.ToValue(arr[:n])
+		pushAny(l, arr[:n])
+		return 1
 	})
-	o.Set("last", func(call goja.FunctionCall) goja.Value {
-		arr, _ := call.Argument(0).Export().([]any)
-		n := int(toNum(call.Argument(1)))
+	setGoFunc(L, t, "last", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
+		n := int(argNum(l, 2))
 		if n <= 0 {
 			n = 1
 		}
-		if n >= len(arr) {
-			return vm.ToValue(arr)
+		if n > len(arr) {
+			n = len(arr)
 		}
-		return vm.ToValue(arr[len(arr)-n:])
+		pushAny(l, arr[len(arr)-n:])
+		return 1
 	})
-	return o
+	return t
 }
 
-func keyProp(keyArg goja.Value, isFn bool) string {
-	if isFn {
-		return ""
-	}
-	return keyArg.String()
-}
-
-func keyOf(vm *goja.Runtime, item any, keyArg goja.Value, fn goja.Callable, isFn bool, prop string) goja.Value {
-	if isFn {
-		v, err := fn(goja.Undefined(), vm.ToValue(item))
-		if err != nil {
-			panic(vm.NewGoError(err))
-		}
+func luaArrayAny(l *lua.State, index int) []any {
+	switch v := luaToAny(l, index).(type) {
+	case []any:
 		return v
+	case []string:
+		out := make([]any, len(v))
+		for i, s := range v {
+			out[i] = s
+		}
+		return out
+	case []float64:
+		out := make([]any, len(v))
+		for i, n := range v {
+			out[i] = n
+		}
+		return out
+	case []int:
+		out := make([]any, len(v))
+		for i, n := range v {
+			out[i] = float64(n)
+		}
+		return out
+	default:
+		return []any{}
 	}
-	if prop == "" {
-		return goja.Undefined()
-	}
-	return vm.ToValue(propValue(item, prop))
 }
 
-func propValue(item any, prop string) any {
-	if m, ok := item.(map[string]any); ok {
+func itemProp(item any, prop string) any {
+	switch m := item.(type) {
+	case map[string]any:
+		return m[prop]
+	case map[any]any:
 		return m[prop]
 	}
 	return nil
@@ -159,35 +167,4 @@ func flatten(arr []any) []any {
 		}
 	}
 	return out
-}
-
-func lessValue(a, b goja.Value) bool {
-	if isNil(a) {
-		return !isNil(b)
-	}
-	if isNil(b) {
-		return false
-	}
-	if an, ok := toFloat(a); ok {
-		if bn, okB := toFloat(b); okB {
-			return an < bn
-		}
-	}
-	return a.String() < b.String()
-}
-
-func isNil(v goja.Value) bool {
-	return v == nil || goja.IsUndefined(v) || goja.IsNull(v)
-}
-
-func toFloat(v goja.Value) (float64, bool) {
-	switch n := v.Export().(type) {
-	case int64:
-		return float64(n), true
-	case float64:
-		return n, true
-	case int:
-		return float64(n), true
-	}
-	return 0, false
 }

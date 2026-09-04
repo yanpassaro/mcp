@@ -34,7 +34,7 @@ func formatScriptList(entries []sandbox.Entry) string {
 }
 
 func formatScriptRead(name, content string) string {
-	return fmt.Sprintf("## Script `%s`\n\n```js\n%s\n```\n", name, content)
+	return fmt.Sprintf("## Script `%s`\n\n```lua\n%s\n```\n", name, content)
 }
 
 func formatRunResult(res sandbox.RunResult, runErr error) string {
@@ -64,8 +64,7 @@ func formatRunResult(res sandbox.RunResult, runErr error) string {
 	} else {
 		content := strings.TrimRight(res.Data, "\n")
 		if res.DataJSON && content != "" {
-			b.WriteString(content)
-			b.WriteString("\n")
+			fmt.Fprintf(&b, "```json\n%s\n```\n", content)
 		} else {
 			if content == "" {
 				content = strings.TrimRight(res.Output, "\n")

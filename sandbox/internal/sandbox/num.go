@@ -5,70 +5,79 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dop251/goja"
+	lua "github.com/Shopify/go-lua"
 )
 
-func buildNum(vm *goja.Runtime) *goja.Object {
-	o := vm.NewObject()
-	o.Set("round", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(round(toNum(call.Argument(0)), int(toNum(call.Argument(1)))))
+func buildNum(L *lua.State) int {
+	t := newTable(L)
+	setGoFunc(L, t, "round", func(l *lua.State) int {
+		l.PushNumber(round(argNum(l, 1), int(argNum(l, 2))))
+		return 1
 	})
-	o.Set("clamp", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(clamp(toNum(call.Argument(0)), toNum(call.Argument(1)), toNum(call.Argument(2))))
+	setGoFunc(L, t, "clamp", func(l *lua.State) int {
+		l.PushNumber(clamp(argNum(l, 1), argNum(l, 2), argNum(l, 3)))
+		return 1
 	})
-	o.Set("percent", func(call goja.FunctionCall) goja.Value {
-		a, b := toNum(call.Argument(0)), toNum(call.Argument(1))
+	setGoFunc(L, t, "percent", func(l *lua.State) int {
+		a, b := argNum(l, 1), argNum(l, 2)
 		if b == 0 {
-			return vm.ToValue(0)
+			l.PushNumber(0)
+		} else {
+			l.PushNumber(a / b * 100)
 		}
-		return vm.ToValue(a / b * 100)
+		return 1
 	})
-	o.Set("sum", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(sumNums(vm, call.Argument(0)))
+	setGoFunc(L, t, "sum", func(l *lua.State) int {
+		l.PushNumber(sumNums(l, 1))
+		return 1
 	})
-	o.Set("avg", func(call goja.FunctionCall) goja.Value {
-		arr, _ := call.Argument(0).Export().([]any)
+	setGoFunc(L, t, "avg", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
 		if len(arr) == 0 {
-			return vm.ToValue(0)
+			l.PushNumber(0)
+		} else {
+			l.PushNumber(sumNums(l, 1) / float64(len(arr)))
 		}
-		return vm.ToValue(sumNums(vm, call.Argument(0)) / float64(len(arr)))
+		return 1
 	})
-	o.Set("parse", func(call goja.FunctionCall) goja.Value {
-		s := strings.TrimSpace(call.Argument(0).String())
+	setGoFunc(L, t, "parse", func(l *lua.State) int {
+		s := strings.TrimSpace(argString(l, 1))
 		if v, err := strconv.ParseFloat(s, 64); err == nil {
-			return vm.ToValue(v)
+			l.PushNumber(v)
+		} else if iv, err := strconv.ParseInt(s, 10, 64); err == nil {
+			l.PushNumber(float64(iv))
+		} else {
+			l.PushNumber(math.NaN())
 		}
-		if iv, err := strconv.ParseInt(s, 10, 64); err == nil {
-			return vm.ToValue(iv)
-		}
-		return vm.ToValue(math.NaN())
+		return 1
 	})
-	o.Set("fmt", func(call goja.FunctionCall) goja.Value {
-		n := toNum(call.Argument(0))
+	setGoFunc(L, t, "fmt", func(l *lua.State) int {
 		dec, loc := 2, ""
-		if len(call.Arguments) > 1 && !isNilValue(call.Argument(1)) {
-			if isStringValue(call.Argument(1)) {
-				loc = call.Argument(1).String()
-				if len(call.Arguments) > 2 {
-					dec = int(toNum(call.Argument(2)))
+		if l.Top() >= 2 {
+			if _, isStr := l.ToValue(2).(string); isStr {
+				loc = argString(l, 2)
+				if l.Top() >= 3 {
+					dec = int(argNum(l, 3))
 				}
 			} else {
-				dec = int(toNum(call.Argument(1)))
-				if len(call.Arguments) > 2 {
-					loc = call.Argument(2).String()
+				dec = int(argNum(l, 2))
+				if l.Top() >= 3 {
+					loc = argString(l, 3)
 				}
 			}
 		}
-		return vm.ToValue(formatNum(n, dec, loc))
+		l.PushString(formatNum(argNum(l, 1), dec, loc))
+		return 1
 	})
-	return o
+	return t
 }
 
-func sumNums(vm *goja.Runtime, v goja.Value) float64 {
-	arr, _ := v.Export().([]any)
+func sumNums(l *lua.State, index int) float64 {
 	var s float64
-	for _, e := range arr {
-		s += toNum(vm.ToValue(e))
+	for _, e := range luaArrayAny(l, index) {
+		if n, ok := numOpt(e); ok {
+			s += n
+		}
 	}
 	return s
 }

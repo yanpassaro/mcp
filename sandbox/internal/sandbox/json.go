@@ -5,59 +5,66 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dop251/goja"
+	lua "github.com/Shopify/go-lua"
 )
 
-func buildJson(vm *goja.Runtime) *goja.Object {
-	o := vm.NewObject()
-	o.Set("parse", func(call goja.FunctionCall) goja.Value {
+func buildJson(L *lua.State) int {
+	t := newTable(L)
+	setGoFunc(L, t, "parse", func(l *lua.State) int {
 		var v any
-		if err := json.Unmarshal([]byte(call.Argument(0).String()), &v); err != nil {
-			panic(vm.NewGoError(err))
+		if err := json.Unmarshal([]byte(argString(l, 1)), &v); err != nil {
+			panic(err)
 		}
-		return vm.ToValue(v)
+		pushAny(l, v)
+		return 1
 	})
-	o.Set("stringify", func(call goja.FunctionCall) goja.Value {
-		exp := call.Argument(0).Export()
-		if indent := int(toNum(call.Argument(1))); indent > 0 {
+	setGoFunc(L, t, "stringify", func(l *lua.State) int {
+		exp := luaToAny(l, 1)
+		if indent := int(argNum(l, 2)); indent > 0 {
 			b, err := json.MarshalIndent(exp, "", strings.Repeat(" ", indent))
 			if err != nil {
-				panic(vm.NewGoError(err))
+				panic(err)
 			}
-			return vm.ToValue(string(b))
+			l.PushString(string(b))
+		} else {
+			b, err := json.Marshal(exp)
+			if err != nil {
+				panic(err)
+			}
+			l.PushString(string(b))
 		}
-		b, err := json.Marshal(exp)
-		if err != nil {
-			panic(vm.NewGoError(err))
-		}
-		return vm.ToValue(string(b))
+		return 1
 	})
-	o.Set("format", func(call goja.FunctionCall) goja.Value {
-		b, err := json.MarshalIndent(call.Argument(0).Export(), "", "  ")
+	setGoFunc(L, t, "format", func(l *lua.State) int {
+		b, err := json.MarshalIndent(luaToAny(l, 1), "", "  ")
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(err)
 		}
-		return vm.ToValue(string(b))
+		l.PushString(string(b))
+		return 1
 	})
-	o.Set("minify", func(call goja.FunctionCall) goja.Value {
+	setGoFunc(L, t, "minify", func(l *lua.State) int {
 		var v any
-		if err := json.Unmarshal([]byte(call.Argument(0).String()), &v); err != nil {
-			panic(vm.NewGoError(err))
+		if err := json.Unmarshal([]byte(argString(l, 1)), &v); err != nil {
+			panic(err)
 		}
 		b, err := json.Marshal(v)
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(err)
 		}
-		return vm.ToValue(string(b))
+		l.PushString(string(b))
+		return 1
 	})
-	o.Set("path", func(call goja.FunctionCall) goja.Value {
-		v, ok := jsonPath(call.Argument(0).Export(), call.Argument(1).String())
+	setGoFunc(L, t, "path", func(l *lua.State) int {
+		v, ok := jsonPath(luaToAny(l, 1), argString(l, 2))
 		if !ok {
-			return goja.Undefined()
+			l.PushNil()
+		} else {
+			pushAny(l, v)
 		}
-		return vm.ToValue(v)
+		return 1
 	})
-	return o
+	return t
 }
 
 func jsonPath(v any, path string) (any, bool) {

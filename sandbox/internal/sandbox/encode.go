@@ -9,59 +9,58 @@ import (
 	"hash/crc32"
 	"strings"
 
-	"github.com/dop251/goja"
+	lua "github.com/Shopify/go-lua"
 )
 
-func buildEncode(vm *goja.Runtime) *goja.Object {
-	o := vm.NewObject()
-	o.Set("crc32", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(fmt.Sprintf("%08x", crc32.ChecksumIEEE([]byte(call.Argument(0).String()))))
+func buildEncode(L *lua.State) int {
+	t := newTable(L)
+	setGoFunc(L, t, "crc32", func(l *lua.State) int {
+		l.PushString(fmt.Sprintf("%08x", crc32.ChecksumIEEE([]byte(argString(l, 1)))))
+		return 1
 	})
-	o.Set("md5", func(call goja.FunctionCall) goja.Value {
-		sum := md5.Sum([]byte(call.Argument(0).String()))
-		return vm.ToValue(hex.EncodeToString(sum[:]))
+	setGoFunc(L, t, "md5", func(l *lua.State) int {
+		sum := md5.Sum([]byte(argString(l, 1)))
+		l.PushString(hex.EncodeToString(sum[:]))
+		return 1
 	})
-	o.Set("sha256", func(call goja.FunctionCall) goja.Value {
-		sum := sha256.Sum256([]byte(call.Argument(0).String()))
-		return vm.ToValue(hex.EncodeToString(sum[:]))
+	setGoFunc(L, t, "sha256", func(l *lua.State) int {
+		sum := sha256.Sum256([]byte(argString(l, 1)))
+		l.PushString(hex.EncodeToString(sum[:]))
+		return 1
 	})
-	o.Set("base64", func(call goja.FunctionCall) goja.Value {
-		s := call.Argument(0).String()
-		switch strings.ToLower(strings.TrimSpace(optString(call, 1))) {
+	setGoFunc(L, t, "base64", func(l *lua.State) int {
+		s := argString(l, 1)
+		switch strings.ToLower(strings.TrimSpace(argString(l, 2))) {
 		case "", "encode", "std", "standard":
-			return vm.ToValue(base64.StdEncoding.EncodeToString([]byte(s)))
+			l.PushString(base64.StdEncoding.EncodeToString([]byte(s)))
 		case "decode", "dec":
 			b, err := base64.StdEncoding.DecodeString(s)
 			if err != nil {
-				panic(vm.NewGoError(err))
+				panic(fmt.Errorf("modo base64 inválido: %v", err))
 			}
-			return vm.ToValue(string(b))
+			l.PushString(string(b))
 		case "url", "encodeurl", "urlencode", "urlsafe", "url-safe":
-			return vm.ToValue(base64.URLEncoding.EncodeToString([]byte(s)))
-		case "urldecode", "decodeurl", "url_decode":
-			b, err := base64.URLEncoding.DecodeString(s)
-			if err != nil {
-				panic(vm.NewGoError(err))
-			}
-			return vm.ToValue(string(b))
+			l.PushString(base64.URLEncoding.EncodeToString([]byte(s)))
 		default:
-			panic(vm.NewGoError(fmt.Errorf("modo base64 inválido: %s", optString(call, 1))))
+			panic(fmt.Errorf("modo base64 inválido: %s", argString(l, 2)))
 		}
+		return 1
 	})
-	o.Set("hex", func(call goja.FunctionCall) goja.Value {
-		s := call.Argument(0).String()
-		switch strings.ToLower(strings.TrimSpace(optString(call, 1))) {
+	setGoFunc(L, t, "hex", func(l *lua.State) int {
+		s := argString(l, 1)
+		switch strings.ToLower(strings.TrimSpace(argString(l, 2))) {
 		case "", "encode", "enc":
-			return vm.ToValue(hex.EncodeToString([]byte(s)))
+			l.PushString(hex.EncodeToString([]byte(s)))
 		case "decode", "dec":
 			b, err := hex.DecodeString(s)
 			if err != nil {
-				panic(vm.NewGoError(err))
+				panic(fmt.Errorf("modo hex inválido: %v", err))
 			}
-			return vm.ToValue(string(b))
+			l.PushString(string(b))
 		default:
-			panic(vm.NewGoError(fmt.Errorf("modo hex inválido: %s", optString(call, 1))))
+			panic(fmt.Errorf("modo hex inválido: %s", argString(l, 2)))
 		}
+		return 1
 	})
-	return o
+	return t
 }

@@ -3,85 +3,108 @@ package sandbox
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
-	"github.com/dop251/goja"
+	lua "github.com/Shopify/go-lua"
 )
 
-func buildFS(vm *goja.Runtime, fs *Store) *goja.Object {
-	o := vm.NewObject()
-	o.Set("read", func(call goja.FunctionCall) goja.Value {
-		content, err := fs.Read(call.Argument(0).String())
+func fsErr(op, name string, err error) error {
+	if os.IsNotExist(err) {
+		return fmt.Errorf("%s %q: arquivo não encontrado", op, name)
+	}
+	if os.IsPermission(err) {
+		return fmt.Errorf("%s %q: sem permissão", op, name)
+	}
+	return fmt.Errorf("%s %q: %w", op, name, err)
+}
+
+func buildFS(L *lua.State, fs *Store) int {
+	t := newTable(L)
+	setGoFunc(L, t, "read", func(l *lua.State) int {
+		name := argString(l, 1)
+		content, err := fs.Read(name)
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(fsErr("ler", name, err))
 		}
-		return vm.ToValue(content)
+		l.PushString(content)
+		return 1
 	})
-	o.Set("lines", func(call goja.FunctionCall) goja.Value {
-		lines, err := fs.ReadLines(call.Argument(0).String())
+	setGoFunc(L, t, "lines", func(l *lua.State) int {
+		name := argString(l, 1)
+		lines, err := fs.ReadLines(name)
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(fsErr("ler", name, err))
 		}
-		return vm.ToValue(lines)
+		pushAny(l, lines)
+		return 1
 	})
-	o.Set("json", func(call goja.FunctionCall) goja.Value {
-		content, err := fs.Read(call.Argument(0).String())
+	setGoFunc(L, t, "json", func(l *lua.State) int {
+		name := argString(l, 1)
+		content, err := fs.Read(name)
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(fsErr("ler", name, err))
 		}
 		var v any
 		if err := json.Unmarshal([]byte(content), &v); err != nil {
-			panic(vm.NewGoError(fmt.Errorf("JSON inválido: %w", err)))
+			panic(fmt.Errorf("JSON inválido em %q: %w", name, err))
 		}
-		return vm.ToValue(v)
+		pushAny(l, v)
+		return 1
 	})
-	o.Set("write", func(call goja.FunctionCall) goja.Value {
-		n, err := fs.Write(call.Argument(0).String(), call.Argument(1).String())
+	setGoFunc(L, t, "write", func(l *lua.State) int {
+		n, err := fs.Write(argString(l, 1), argString(l, 2))
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(err)
 		}
-		return vm.ToValue(n)
+		l.PushInteger(n)
+		return 1
 	})
-	o.Set("append", func(call goja.FunctionCall) goja.Value {
-		n, err := fs.Append(call.Argument(0).String(), call.Argument(1).String())
+	setGoFunc(L, t, "append", func(l *lua.State) int {
+		n, err := fs.Append(argString(l, 1), argString(l, 2))
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(err)
 		}
-		return vm.ToValue(n)
+		l.PushInteger(n)
+		return 1
 	})
-	o.Set("del", func(call goja.FunctionCall) goja.Value {
-		if err := fs.Delete(call.Argument(0).String()); err != nil {
-			panic(vm.NewGoError(err))
+	setGoFunc(L, t, "del", func(l *lua.State) int {
+		if err := fs.Delete(argString(l, 1)); err != nil {
+			panic(err)
 		}
-		return vm.ToValue(true)
+		l.PushBoolean(true)
+		return 1
 	})
-	o.Set("exists", func(call goja.FunctionCall) goja.Value {
-		st, err := fs.Stat(call.Argument(0).String())
+	setGoFunc(L, t, "exists", func(l *lua.State) int {
+		st, err := fs.Stat(argString(l, 1))
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(err)
 		}
-		return vm.ToValue(st.Exists)
+		l.PushBoolean(st.Exists)
+		return 1
 	})
-	o.Set("stat", func(call goja.FunctionCall) goja.Value {
-		st, err := fs.Stat(call.Argument(0).String())
+	setGoFunc(L, t, "stat", func(l *lua.State) int {
+		st, err := fs.Stat(argString(l, 1))
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(err)
 		}
-		return vm.ToValue(map[string]any{
+		pushAny(l, map[string]any{
 			"name": st.Name, "exists": st.Exists, "isDir": st.IsDir,
 			"size": st.Size, "lines": st.Lines,
 		})
+		return 1
 	})
-	o.Set("dir", func(call goja.FunctionCall) goja.Value {
-		entries, err := fs.ListDir(strings.TrimSpace(call.Argument(0).String()))
+	setGoFunc(L, t, "dir", func(l *lua.State) int {
+		entries, err := fs.ListDir(strings.TrimSpace(argString(l, 1)))
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(err)
 		}
 		names := make([]string, len(entries))
 		for i, e := range entries {
 			names[i] = e.Name
 		}
-		return vm.ToValue(names)
+		pushAny(l, names)
+		return 1
 	})
-	return o
+	return t
 }

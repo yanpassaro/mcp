@@ -1,15 +1,11 @@
 package sandbox
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/dop251/goja"
+	lua "github.com/Shopify/go-lua"
 )
 
 const (
@@ -18,10 +14,9 @@ const (
 )
 
 type RunRequest struct {
-	Code       string
-	Args       string
-	Timeout    time.Duration
-	FullStdlib bool
+	Code    string
+	Args    string
+	Timeout time.Duration
 }
 
 type RunResult struct {
@@ -36,16 +31,11 @@ type RunResult struct {
 	Truncated   bool
 }
 
-type sdkResult struct {
-	Ok      bool
-	Message string
-	Data    goja.Value
+type luaResult struct {
+	ok   bool
+	msg  string
+	data any
 }
-
-var (
-	exportStrip = regexp.MustCompile(`(?m)(^[ \t]*)export[ \t]+(function|const|let|var|class)`)
-	metaRe      = regexp.MustCompile(`(?m)^\s*(?:export\s+)?const\s+(name|desc)\s*=\s*(?:"([^"]*)"|'([^']*)')`)
-)
 
 func Run(fs *Store, r RunRequest) (RunResult, error) {
 	code := strings.TrimSpace(r.Code)
@@ -61,10 +51,13 @@ func Run(fs *Store, r RunRequest) (RunResult, error) {
 		timeout = maxTimeout
 	}
 
-	name, desc := parseMeta(r.Code)
-	program := exportStrip.ReplaceAllString(r.Code, "$1$2")
+	name, desc := parseMeta(code)
 
-	vm := goja.New()
+	L := lua.NewState()
+	lua.Require(L, "base", lua.BaseOpen, true)
+	lua.Require(L, "table", lua.TableOpen, true)
+	lua.Require(L, "string", lua.StringOpen, true)
+	lua.Require(L, "math", lua.MathOpen, true)
 
 	var outBuf strings.Builder
 	truncated := false
@@ -81,163 +74,145 @@ func Run(fs *Store, r RunRequest) (RunResult, error) {
 		outBuf.WriteString(s)
 	}
 
-	std := vm.NewObject()
-
-	printFn := func(call goja.FunctionCall) goja.Value {
-		parts := make([]string, 0, len(call.Arguments))
-		for _, a := range call.Arguments {
-			parts = append(parts, a.String())
-		}
-		writeOut(strings.Join(parts, " ") + "\n")
-		return goja.Undefined()
-	}
-	logObj := vm.NewObject()
-	logObj.Set("ok", printFn)
-	logObj.Set("err", printFn)
-	std.Set("log", logObj)
-
-	console := vm.NewObject()
-	console.Set("log", printFn)
-	console.Set("error", printFn)
-	vm.Set("console", console)
-
-	retObj := vm.NewObject()
-	retObj.Set("ok", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(&sdkResult{Ok: true, Data: call.Argument(0)})
-	})
-	retObj.Set("err", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(&sdkResult{Ok: false, Message: call.Argument(0).String()})
-	})
-	std.Set("return", retObj)
-
-	std.Set("fs", buildFS(vm, fs))
-	std.Set("args", loadArgs(vm, r.Args))
-
-	std.Set("date", buildDate(vm))
-	std.Set("random", buildRandom(vm))
-
-	std.Set("str", buildStr(vm))
-	std.Set("list", buildList(vm))
-	std.Set("num", buildNum(vm))
-	std.Set("encode", buildEncode(vm))
-	std.Set("json", buildJson(vm))
-	std.Set("assert", buildAssert(vm))
-	std.Set("fetch", buildFetch(vm))
-
-	vm.Set("std", std)
-
-	if !r.FullStdlib && stdlibDisabledByEnv() {
-		disableStdlib(vm, "std", "console")
-	}
-
-	stop := make(chan struct{})
-	go func() {
-		select {
-		case <-time.After(timeout):
-			vm.Interrupt(fmt.Errorf("timeout excedido (%v)", timeout))
-		case <-stop:
-		}
-	}()
+	var res *luaResult
+	buildStd(L, fs, r.Args, writeOut, &res)
+	L.SetGlobal("std")
 
 	start := time.Now()
-	_, runErr := vm.RunString(program)
-	close(stop)
-	dur := time.Since(start)
-
-	res := RunResult{
-		Name:        name,
-		Description: desc,
-		Output:      outBuf.String(),
-		Duration:    dur,
-		Truncated:   truncated,
-		Ok:          true,
+	if err := L.Load(strings.NewReader(code), "@script", "t"); err != nil {
+		return RunResult{Name: name, Description: desc, Output: outBuf.String(), Duration: time.Since(start), Ok: false, Error: callError(L, err)}, nil
+	}
+	if err := L.ProtectedCall(0, 0, 0); err != nil {
+		return RunResult{Name: name, Description: desc, Output: outBuf.String(), Duration: time.Since(start), Ok: false, Error: callError(L, err)}, nil
 	}
 
-	if runErr != nil {
-		res.Ok = false
-		res.Error = errorText(runErr)
-		return res, nil
-	}
+	result := RunResult{Name: name, Description: desc, Output: outBuf.String(), Ok: true, Truncated: truncated}
 
-	mainFn, ok := goja.AssertFunction(vm.Get("main"))
-	if !ok {
-		res.Ok = false
-		res.Error = "o script precisa definir `function main(std)` (ou `export function main(std)`)"
-		return res, nil
+	L.Global("main")
+	if L.IsNil(L.Top()) {
+		result.Ok = false
+		result.Error = "o script precisa definir `function main(std)`"
+		result.Duration = time.Since(start)
+		return result, nil
 	}
-
-	ret, callErr := mainFn(goja.Undefined(), std)
-	if callErr != nil {
-		res.Ok = false
-		res.Error = "exceção em main: " + errorText(callErr)
-		return res, nil
+	L.Global("std")
+	if err := L.ProtectedCall(1, 1, 0); err != nil {
+		result.Ok = false
+		result.Error = callError(L, err)
+		result.Duration = time.Since(start)
+		return result, nil
 	}
+	ret := L.Top()
+	result.Duration = time.Since(start)
 
-	if sr, isRes := ret.Export().(*sdkResult); isRes {
-		res.Ok = sr.Ok
-		if sr.Ok {
-			res.Data, res.DataJSON = renderData(sr.Data)
+	if res != nil {
+		result.Ok = res.ok
+		if res.ok {
+			result.Data, result.DataJSON = renderData(res.data)
 		} else {
-			res.Error = sr.Message
+			result.Error = res.msg
 		}
-	} else if !goja.IsUndefined(ret) && !goja.IsNull(ret) {
-		res.Data, res.DataJSON = renderData(ret)
+	} else if !L.IsNil(ret) {
+		result.Data, result.DataJSON = renderData(luaToAny(L, ret))
 	}
-	return res, nil
+	return result, nil
 }
 
-func parseMeta(src string) (string, string) {
+func callError(l *lua.State, err error) string {
+	msg := ""
+	if l.Top() > 0 {
+		if s, ok := l.ToString(l.Top()); ok && s != "" {
+			msg = s
+		}
+	}
+	if msg == "" {
+		msg = errorText(err)
+	}
+	msg = strings.TrimPrefix(msg, "runtime error: ")
+	msg = strings.TrimPrefix(msg, "error: ")
+	return msg
+}
+
+func parseMeta(code string) (string, string) {
 	var name, desc string
-	for _, m := range metaRe.FindAllStringSubmatch(src, -1) {
-		if len(m) != 4 {
-			continue
-		}
-		val := m[2]
-		if val == "" {
-			val = m[3]
-		}
-		switch m[1] {
-		case "name":
-			name = val
-		case "desc":
-			desc = val
+	for _, line := range strings.Split(code, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "--") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "--"))
+			if strings.HasPrefix(line, "name=") {
+				name = strings.Trim(strings.TrimPrefix(line, "name="), `"' `)
+			} else if strings.HasPrefix(line, "desc=") {
+				desc = strings.Trim(strings.TrimPrefix(line, "desc="), `"' `)
+			}
 		}
 	}
 	return name, desc
 }
 
 func WrapScript(name, desc, body string) string {
-	return fmt.Sprintf("const name = %s;\nconst desc = %s;\n\nexport function main(std) {\n%s\n}\n",
-		strconv.Quote(name), strconv.Quote(desc), strings.TrimSpace(body))
+	return fmt.Sprintf("-- name=%q\n-- desc=%q\n\nfunction main(std)\n%s\nend\n", name, desc, strings.TrimSpace(body))
 }
 
-func stdlibDisabledByEnv() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("SANDBOX_DISABLE_JS_STDLIB"))) {
-	case "0", "false", "no", "off":
-		return false
-	default:
-		return true
+func buildStd(L *lua.State, fs *Store, args string, writeOut func(string), res **luaResult) {
+	L.NewTable()
+	std := L.Top()
+
+	buildLog(L, writeOut)
+	L.SetField(std, "log")
+
+	buildResult(L, res)
+	L.SetField(std, "result")
+
+	pushAny(L, parseArgs(args))
+	L.SetField(std, "args")
+
+	setModule := func(name string, build func() int) {
+		build()
+		L.SetField(std, name)
 	}
+	setModule("fs", func() int { return buildFS(L, fs) })
+	setModule("date", func() int { return buildDate(L) })
+	setModule("random", func() int { return buildRandom(L) })
+	setModule("str", func() int { return buildStr(L) })
+	setModule("list", func() int { return buildList(L) })
+	setModule("num", func() int { return buildNum(L) })
+	setModule("encode", func() int { return buildEncode(L) })
+	setModule("json", func() int { return buildJson(L) })
+	setModule("assert", func() int { return buildAssert(L) })
+	setModule("fetch", func() int { return buildFetch(L) })
+
+	buildLog(L, writeOut)
+	L.SetGlobal("console")
 }
 
-func disableStdlib(vm *goja.Runtime, keep ...string) {
-	keepSet := make(map[string]bool, len(keep))
-	for _, k := range keep {
-		keepSet[k] = true
-	}
-	g := vm.GlobalObject()
-	vm.Set("__sandbox_g", g)
-	names, err := vm.RunString("Object.getOwnPropertyNames(__sandbox_g)")
-	if err != nil {
-		return
-	}
-	if arr, ok := names.Export().([]any); ok {
-		for _, n := range arr {
-			name, _ := n.(string)
-			if name == "" || keepSet[name] {
-				continue
-			}
-			g.Delete(name)
+func buildLog(L *lua.State, writeOut func(string)) int {
+	t := newTable(L)
+	print := func(l *lua.State) int {
+		parts := make([]string, 0, l.Top())
+		for i := 1; i <= l.Top(); i++ {
+			parts = append(parts, argString(l, i))
 		}
+		writeOut(strings.Join(parts, " ") + "\n")
+		return 0
 	}
+	setGoFunc(L, t, "ok", print)
+	setGoFunc(L, t, "err", print)
+	setGoFunc(L, t, "log", print)
+	setGoFunc(L, t, "error", print)
+	setGoFunc(L, t, "info", print)
+	setGoFunc(L, t, "warn", print)
+	return t
+}
+
+func buildResult(L *lua.State, res **luaResult) int {
+	t := newTable(L)
+	setGoFunc(L, t, "ok", func(l *lua.State) int {
+		*res = &luaResult{ok: true, data: luaToAny(l, 1)}
+		return 0
+	})
+	setGoFunc(L, t, "err", func(l *lua.State) int {
+		*res = &luaResult{ok: false, msg: argString(l, 1)}
+		return 0
+	})
+	return t
 }

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dop251/goja"
+	lua "github.com/Shopify/go-lua"
 )
 
 type fetchConfig struct {
@@ -91,51 +91,61 @@ func (c *fetchConfig) allowHost(authority string) bool {
 	return false
 }
 
-func buildFetch(vm *goja.Runtime) *goja.Object {
+func buildFetch(L *lua.State) int {
 	cfg := defaultFetchConfig()
-	o := vm.NewObject()
+	t := newTable(L)
 
-	run := func(urlStr string, opts map[string]any) goja.Value {
-		res, err := doFetch(&cfg, urlStr, opts)
+	setGoFunc(L, t, "request", func(l *lua.State) int {
+		res, err := doFetch(&cfg, argString(l, 1), toAnyMap(l, 2))
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(err)
 		}
-		return vm.ToValue(res)
-	}
-
-	o.Set("request", func(call goja.FunctionCall) goja.Value {
-		return run(call.Argument(0).String(), toStringMap(call.Argument(1)))
+		pushAny(l, res)
+		return 1
 	})
-	o.Set("get", func(call goja.FunctionCall) goja.Value {
-		opts := toStringMap(call.Argument(1))
+	setGoFunc(L, t, "get", func(l *lua.State) int {
+		opts := toAnyMap(l, 2)
 		opts["method"] = "GET"
-		return run(call.Argument(0).String(), opts)
+		res, err := doFetch(&cfg, argString(l, 1), opts)
+		if err != nil {
+			panic(err)
+		}
+		pushAny(l, res)
+		return 1
 	})
-	o.Set("post", func(call goja.FunctionCall) goja.Value {
-		opts := toStringMap(call.Argument(2))
+	setGoFunc(L, t, "post", func(l *lua.State) int {
+		opts := toAnyMap(l, 3)
 		opts["method"] = "POST"
-		if a := call.Argument(1); isStringValue(a) {
-			opts["body"] = a.String()
-		} else if len(call.Arguments) > 1 && !isNilValue(a) {
-			opts = toStringMap(call.Argument(1))
+		if s, ok := l.ToValue(2).(string); ok {
+			opts["body"] = s
+		} else if l.Top() >= 2 && l.ToValue(2) != nil {
+			opts = toAnyMap(l, 2)
 			opts["method"] = "POST"
 		}
-		return run(call.Argument(0).String(), opts)
+		res, err := doFetch(&cfg, argString(l, 1), opts)
+		if err != nil {
+			panic(err)
+		}
+		pushAny(l, res)
+		return 1
 	})
 
-	cookies := vm.NewObject()
-	cookies.Set("list", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(cfg.store.List())
+	cookies := newTable(L)
+	setGoFunc(L, cookies, "list", func(l *lua.State) int {
+		pushAny(l, cfg.store.List())
+		return 1
 	})
-	cookies.Set("clear", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(cfg.store.Clear(call.Argument(0).String()))
+	setGoFunc(L, cookies, "clear", func(l *lua.State) int {
+		l.PushInteger(cfg.store.Clear(argString(l, 1)))
+		return 1
 	})
-	cookies.Set("set", func(call goja.FunctionCall) goja.Value {
-		ok := cfg.store.Set(call.Argument(0).String(), call.Argument(1).String(), call.Argument(2).String(), toStringMap(call.Argument(3)))
-		return vm.ToValue(ok)
+	setGoFunc(L, cookies, "set", func(l *lua.State) int {
+		ok := cfg.store.Set(argString(l, 1), argString(l, 2), argString(l, 3), toAnyMap(l, 4))
+		l.PushBoolean(ok)
+		return 1
 	})
-	o.Set("cookies", cookies)
-	return o
+	setFieldValue(L, t, "cookies")
+	return t
 }
 
 func doFetch(cfg *fetchConfig, urlStr string, opts map[string]any) (map[string]any, error) {

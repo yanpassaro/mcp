@@ -5,48 +5,53 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dop251/goja"
+	lua "github.com/Shopify/go-lua"
 )
 
-func buildDate(vm *goja.Runtime) *goja.Object {
-	o := vm.NewObject()
-	o.Set("now", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(time.Now().UnixMilli())
+func buildDate(L *lua.State) int {
+	t := newTable(L)
+	setGoFunc(L, t, "now", func(l *lua.State) int {
+		l.PushNumber(float64(time.Now().UnixMilli()))
+		return 1
 	})
-	o.Set("iso", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(toTime(call.Argument(0), time.Now()).Format(time.RFC3339))
+	setGoFunc(L, t, "iso", func(l *lua.State) int {
+		l.PushString(toTime(l, 1, time.Now()).Format(time.RFC3339))
+		return 1
 	})
-	o.Set("format", func(call goja.FunctionCall) goja.Value {
-		layout := call.Argument(0).String()
+	setGoFunc(L, t, "format", func(l *lua.State) int {
+		layout := argString(l, 1)
 		ref := time.Now()
-		if len(call.Arguments) > 1 {
-			ref = toTime(call.Argument(1), ref)
+		if l.Top() >= 2 {
+			ref = toTime(l, 2, ref)
 		}
-		return vm.ToValue(formatDate(ref, layout))
+		l.PushString(formatDate(ref, layout))
+		return 1
 	})
-	o.Set("parse", func(call goja.FunctionCall) goja.Value {
-		t, err := parseTimeStr(call.Argument(0).String())
+	setGoFunc(L, t, "parse", func(l *lua.State) int {
+		ts, err := parseTimeStr(argString(l, 1))
 		if err != nil {
-			panic(vm.NewGoError(err))
+			panic(err)
 		}
-		return vm.ToValue(t.UnixMilli())
+		l.PushNumber(float64(ts.UnixMilli()))
+		return 1
 	})
-	o.Set("add", func(call goja.FunctionCall) goja.Value {
-		ref := toTime(call.Argument(0), time.Now())
-		amount := int64(toNum(call.Argument(1)))
-		unit := call.Argument(2).String()
-		return vm.ToValue(addDate(ref, amount, unit).UnixMilli())
+	setGoFunc(L, t, "add", func(l *lua.State) int {
+		ref := toTime(l, 1, time.Now())
+		amount := int64(argNum(l, 2))
+		l.PushNumber(float64(addDate(ref, amount, argString(l, 3)).UnixMilli()))
+		return 1
 	})
-	o.Set("unix", func(call goja.FunctionCall) goja.Value {
-		ref := toTime(call.Argument(0), time.Now())
-		return vm.ToValue(ref.Unix())
+	setGoFunc(L, t, "unix", func(l *lua.State) int {
+		l.PushNumber(float64(toTime(l, 1, time.Now()).Unix()))
+		return 1
 	})
-	o.Set("diff", func(call goja.FunctionCall) goja.Value {
-		a := toTime(call.Argument(0), time.Now())
-		b := toTime(call.Argument(1), time.Now())
-		return vm.ToValue(diffIn(a, b, call.Argument(2).String()))
+	setGoFunc(L, t, "diff", func(l *lua.State) int {
+		a := toTime(l, 1, time.Now())
+		b := toTime(l, 2, time.Now())
+		l.PushNumber(diffIn(a, b, argString(l, 3)))
+		return 1
 	})
-	return o
+	return t
 }
 
 func formatDate(t time.Time, layout string) string {
@@ -109,19 +114,15 @@ func parseTimeStr(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("data inválida: %s", s)
 }
 
-func toTime(v goja.Value, def time.Time) time.Time {
-	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+func toTime(l *lua.State, index int, def time.Time) time.Time {
+	if l.IsNil(index) {
 		return def
 	}
-	switch t := v.Export().(type) {
-	case time.Time:
-		return t
-	case int64:
-		return time.UnixMilli(t)
+	switch v := l.ToValue(index).(type) {
 	case float64:
-		return time.UnixMilli(int64(t))
+		return time.UnixMilli(int64(v))
 	case string:
-		if p, err := parseTimeStr(t); err == nil {
+		if p, err := parseTimeStr(v); err == nil {
 			return p
 		}
 	}

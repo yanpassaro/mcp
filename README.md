@@ -13,15 +13,15 @@ protocolo por **stdio** e logam em `~/.local/share/mcp/<server>/logs/`.
 | `github-mcp` | Consulta **read-only** à API do GitHub: busca, arquivos, issues/PRs, releases, wiki | Go | `GITHUB_TOKEN` |
 | `sqlize-mcp` | Importa, consulta, exporta e compara dados (SQLite + Postgres/MySQL read-only), com redator de PII | Go | `SQLIZE_STATE_DIR` |
 | `anydoc` | Converte/exporta documentos (Word, PDF, Excel, OpenDocument, RTF, EPUB, CSV) com redator de PII embutido | Deno/TS | — |
-| `sandbox-mcp` | Sandbox **não-destrutivo** de scripts **JavaScript** (goja): API `std` (filesystem único `fs`, JSON, data, texto, listas, números, assert, encode) e rede opcional via `std.fetch` (allowlist). Sem acesso a processo/SO | Go | `SANDBOX_FS_DIR`, `SANDBOX_SCRIPTS_DIR` |
+| `sandbox-mcp` | Sandbox **não-destrutivo** de scripts **Lua** (go-lua): API `std` (filesystem único `fs`, JSON, data, texto, listas, números, assert, encode) e rede opcional via `std.fetch` (allowlist). Sem acesso a processo/SO | Go | `SANDBOX_FS_DIR`, `SANDBOX_SCRIPTS_DIR` |
 
 ## Tools principais
 
 - **git**: `git_repo_info`, `git_status`, `git_log`, `git_show`, `git_diff`, `git_refs`, `git_blame`, `git_tree`, `git_read_file`, `git_find_commits`
 - **github**: `github_search`, `github_get_tree`, `github_read_file`, `github_repo_info`, `github_get_item`
-- **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`, `sqlize_export` (+ `postgres_*`/`mysql_*`)
+- **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`, `sqlize_export`, `sqlize_clear` (+ `postgres_*`/`mysql_*`)
 - **anydoc**: `anydoc_import`, `anydoc_export`
-- **sandbox**: `sandbox_write_script`, `sandbox_read_script`, `sandbox_run_script`, `sandbox_help`
+- **sandbox**: `sandbox_read`, `sandbox_write`, `sandbox_del`, `sandbox_run`
 
 ## Build
 

@@ -34,9 +34,13 @@ func (s *Store) List() ([]Entry, error) {
 }
 
 func (s *Store) ListDir(rel string) ([]Entry, error) {
-	full, err := s.resolve(rel)
-	if err != nil {
-		return nil, err
+	full := s.Root
+	if rel = strings.TrimSpace(rel); rel != "" {
+		var err error
+		full, err = s.resolve(rel)
+		if err != nil {
+			return nil, err
+		}
 	}
 	entries, err := os.ReadDir(full)
 	if err != nil {

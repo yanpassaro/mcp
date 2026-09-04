@@ -7,54 +7,67 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/dop251/goja"
+	lua "github.com/Shopify/go-lua"
 	"golang.org/x/text/unicode/norm"
 )
 
-func buildStr(vm *goja.Runtime) *goja.Object {
-	o := vm.NewObject()
-	o.Set("normalize", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(normalizeStr(call.Argument(0).String()))
+func buildStr(L *lua.State) int {
+	t := newTable(L)
+	setGoFunc(L, t, "normalize", func(l *lua.State) int {
+		l.PushString(normalizeStr(argString(l, 1)))
+		return 1
 	})
-	o.Set("slug", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(slugify(call.Argument(0).String()))
+	setGoFunc(L, t, "slug", func(l *lua.State) int {
+		l.PushString(slugify(argString(l, 1)))
+		return 1
 	})
-	o.Set("title", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(titleCase(call.Argument(0).String()))
+	setGoFunc(L, t, "title", func(l *lua.State) int {
+		l.PushString(titleCase(argString(l, 1)))
+		return 1
 	})
-	o.Set("camel", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(camelCase(call.Argument(0).String()))
+	setGoFunc(L, t, "camel", func(l *lua.State) int {
+		l.PushString(camelCase(argString(l, 1)))
+		return 1
 	})
-	o.Set("pascal", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(pascalCase(call.Argument(0).String()))
+	setGoFunc(L, t, "pascal", func(l *lua.State) int {
+		l.PushString(pascalCase(argString(l, 1)))
+		return 1
 	})
-	o.Set("snake", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(joinWords("_", call.Argument(0).String()))
+	setGoFunc(L, t, "snake", func(l *lua.State) int {
+		l.PushString(joinWords("_", argString(l, 1)))
+		return 1
 	})
-	o.Set("kebab", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(joinWords("-", call.Argument(0).String()))
+	setGoFunc(L, t, "kebab", func(l *lua.State) int {
+		l.PushString(joinWords("-", argString(l, 1)))
+		return 1
 	})
-	o.Set("wrap", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(wrapText(call.Argument(0).String(), int(toNum(call.Argument(1)))))
+	setGoFunc(L, t, "wrap", func(l *lua.State) int {
+		pushAny(l, wrapText(argString(l, 1), int(argNum(l, 2))))
+		return 1
 	})
-	o.Set("summarize", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(summarize(call.Argument(0).String(), int(toNum(call.Argument(1)))))
+	setGoFunc(L, t, "summarize", func(l *lua.State) int {
+		l.PushString(summarize(argString(l, 1), int(argNum(l, 2))))
+		return 1
 	})
-	o.Set("format", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(renderTemplate(call.Argument(0).String(), toStringMap(call.Argument(1))))
+	setGoFunc(L, t, "format", func(l *lua.State) int {
+		l.PushString(renderTemplate(argString(l, 1), toAnyMap(l, 2)))
+		return 1
 	})
-	o.Set("count", func(call goja.FunctionCall) goja.Value {
-		return vm.ToValue(strings.Count(call.Argument(0).String(), optString(call, 1)))
+	setGoFunc(L, t, "count", func(l *lua.State) int {
+		l.PushInteger(strings.Count(argString(l, 1), argString(l, 2)))
+		return 1
 	})
-	o.Set("split", func(call goja.FunctionCall) goja.Value {
-		s := call.Argument(0).String()
-		sep := optString(call, 1)
-		if limit := int(toNum(call.Argument(2))); limit > 0 {
-			return vm.ToValue(strings.SplitN(s, sep, limit))
+	setGoFunc(L, t, "split", func(l *lua.State) int {
+		s := argString(l, 1)
+		sep := argString(l, 2)
+		if limit := int(argNum(l, 3)); limit > 0 {
+			pushAny(l, strings.SplitN(s, sep, limit))
+		} else {
+			pushAny(l, strings.Split(s, sep))
 		}
-		return vm.ToValue(strings.Split(s, sep))
+		return 1
 	})
-	return o
+	return t
 }
 
 func normalizeStr(s string) string {
