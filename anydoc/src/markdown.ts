@@ -7,7 +7,6 @@ export interface ParsedMarkdown {
   tables: { columns: string[]; rows: string[][] }[];
 }
 
-
 export function slug(text: string): string {
   return text
     .trim()
@@ -36,18 +35,29 @@ function normalizeHtml(text: string): string {
     .replace(/<(strong|b)>([\s\S]*?)<\/\1>/gi, "**$2**")
     .replace(/<(em|i)>([\s\S]*?)<\/\1>/gi, "*$2*")
     .replace(/<code>([\s\S]*?)<\/code>/gi, "`$1`")
-    .replace(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, "[$2]($1)")
+    .replace(
+      /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+      "[$2]($1)",
+    )
     .replace(/<(https?:\/\/[^\s>]+)>/gi, "[$1]($1)")
     .replace(/<[^>]+>/g, "");
 }
 
-function pushEmph(runs: RunSpec[], inner: string, flags: Partial<RunSpec>, refs: Record<string, string>): void {
+function pushEmph(
+  runs: RunSpec[],
+  inner: string,
+  flags: Partial<RunSpec>,
+  refs: Record<string, string>,
+): void {
   for (const r of parseInline(inner, refs)) {
     runs.push({ ...r, ...flags });
   }
 }
 
-export function parseInline(text: string, refs: Record<string, string> = {}): RunSpec[] {
+export function parseInline(
+  text: string,
+  refs: Record<string, string> = {},
+): RunSpec[] {
   const src = normalizeHtml(text);
   const runs: RunSpec[] = [];
 
@@ -98,10 +108,17 @@ export function parseInline(text: string, refs: Record<string, string> = {}): Ru
   return runs;
 }
 
-function emitParagraph(lines: string[], container: DocumentBlock[], refs: Record<string, string>): void {
+function emitParagraph(
+  lines: string[],
+  container: DocumentBlock[],
+  refs: Record<string, string>,
+): void {
   const hasImage = lines.some((l) => /!\[[^\]]*\]\([^)]+\)/.test(l));
   if (!hasImage) {
-    container.push({ kind: "paragraph", runs: parseInline(lines.join(" "), refs) });
+    container.push({
+      kind: "paragraph",
+      runs: parseInline(lines.join(" "), refs),
+    });
     return;
   }
   const IMAGE_RE = /!\[([^\]]*)\]\(([^)]+)\)/g;
@@ -124,7 +141,9 @@ function emitParagraph(lines: string[], container: DocumentBlock[], refs: Record
       last = (m.index ?? 0) + m[0].length;
     }
     const after = line.slice(last).trim();
-    if (after) container.push({ kind: "paragraph", runs: parseInline(after, refs) });
+    if (after) {
+      container.push({ kind: "paragraph", runs: parseInline(after, refs) });
+    }
   }
 }
 
@@ -138,14 +157,16 @@ export function parseMarkdown(md: string): ParsedMarkdown {
     if (rd) refs[rd[1].toLowerCase()] = rd[2] ?? rd[3] ?? "";
   }
 
-
   let outlineCode = false;
   let outlineTitleSeen = false;
   let outlineSubSeen = false;
   const outline: { text: string; level: number }[] = [];
   for (const raw of lines) {
     const tl = raw.trim();
-    if (/^```/.test(tl)) { outlineCode = !outlineCode; continue; }
+    if (/^```/.test(tl)) {
+      outlineCode = !outlineCode;
+      continue;
+    }
     if (outlineCode) continue;
     const oh = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(tl);
     if (oh) {
@@ -153,8 +174,13 @@ export function parseMarkdown(md: string): ParsedMarkdown {
       const txt = oh[2].trim();
       let isTitle = false;
       let isSub = false;
-      if (lvl === 1 && !outlineTitleSeen) { isTitle = true; outlineTitleSeen = true; }
-      else if (lvl === 2 && !outlineSubSeen && !outlineTitleSeen) { isSub = true; outlineSubSeen = true; }
+      if (lvl === 1 && !outlineTitleSeen) {
+        isTitle = true;
+        outlineTitleSeen = true;
+      } else if (lvl === 2 && !outlineSubSeen && !outlineTitleSeen) {
+        isSub = true;
+        outlineSubSeen = true;
+      }
       if (!isTitle && !isSub) outline.push({ text: txt, level: lvl });
     }
   }
@@ -202,7 +228,11 @@ export function parseMarkdown(md: string): ParsedMarkdown {
           blocks.push({
             kind: "paragraph",
             indent: Math.max(0, entry.level - 1),
-            runs: [{ text: entry.text, link: true, url: "#" + slug(entry.text) }],
+            runs: [{
+              text: entry.text,
+              link: true,
+              url: "#" + slug(entry.text),
+            }],
           });
         }
       }
@@ -251,7 +281,9 @@ export function parseMarkdown(md: string): ParsedMarkdown {
       continue;
     }
 
-    if (trimmed.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+    if (
+      trimmed.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])
+    ) {
       const columns = splitRow(trimmed);
       const sep = lines[i + 1].trim();
       const aligns = splitRow(sep).map((s) => {
@@ -264,7 +296,10 @@ export function parseMarkdown(md: string): ParsedMarkdown {
       });
       i += 2;
       const rows: string[][] = [];
-      while (i < lines.length && lines[i].trim().includes("|") && !/^```/.test(lines[i].trim())) {
+      while (
+        i < lines.length && lines[i].trim().includes("|") &&
+        !/^```/.test(lines[i].trim())
+      ) {
         rows.push(splitRow(lines[i].trim()));
         i++;
       }
@@ -303,7 +338,11 @@ export function parseMarkdown(md: string): ParsedMarkdown {
 
     if (trimmed.startsWith(": ")) {
       flushList();
-      blocks.push({ kind: "paragraph", runs: parseInline(trimmed.slice(2), refs), size: 10 });
+      blocks.push({
+        kind: "paragraph",
+        runs: parseInline(trimmed.slice(2), refs),
+        size: 10,
+      });
       i++;
       continue;
     }
@@ -340,7 +379,9 @@ export function parseMarkdown(md: string): ParsedMarkdown {
       if (/^```/.test(t)) break;
       if (/^([-*_])\1{2,}$/.test(t)) break;
       if (/^(\s*)(?:[-*+]|\d+[.)])\s+/.test(t)) break;
-      if (t.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) break;
+      if (t.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+        break;
+      }
       paraLines.push(t);
       i++;
     }

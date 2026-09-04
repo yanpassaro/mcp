@@ -467,42 +467,100 @@ const LANGS: Record<string, Set<string>> = {
     "docker-compose",
   ]),
   powershell: new Set([
-    "if", "else", "elseif",
-    "for", "foreach", "while", "do",
-    "switch", "case", "default",
-    "function", "return", "param",
-    "begin", "process", "end",
-    "try", "catch", "finally", "throw",
-    "import", "export", "from",
-    "class", "enum", "using",
-    "var", "let", "const",
-    "write", "echo", "exit",
-    "New-Item", "Set-Item", "Get-Item", "Remove-Item",
-    "Copy-Item", "Move-Item", "Invoke-Command",
-    "Write-Host", "Write-Output", "Write-Error",
-    "Select-Object", "Where-Object", "ForEach-Object",
-    "Sort-Object", "Group-Object", "Measure-Object",
-    "Get-Process", "Get-Service", "Start-Service", "Stop-Service",
-    "Get-ChildItem", "Set-Location", "Get-Location",
-    "Test-Path", "Resolve-Path", "Push-Location", "Pop-Location",
-    "Set-ExecutionPolicy", "Get-Help", "Get-Command",
-    "Invoke-RestMethod", "Invoke-WebRequest",
-    "ConvertTo-Json", "ConvertFrom-Json",
-    "ConvertTo-SecureString", "ConvertFrom-SecureString",
-    "Compress-Archive", "Expand-Archive",
-    "Get-Credential", "Get-Random",
-    "Start-Job", "Receive-Job", "Remove-Job",
-    "Out-Null", "Out-File", "Out-Printer",
-    "Tee-Object", "Format-Table", "Format-List",
-    "cd", "ls", "dir", "mkdir", "rm", "cp", "mv",
-    "cat", "type", "more", "less",
+    "if",
+    "else",
+    "elseif",
+    "for",
+    "foreach",
+    "while",
+    "do",
+    "switch",
+    "case",
+    "default",
+    "function",
+    "return",
+    "param",
+    "begin",
+    "process",
+    "end",
+    "try",
+    "catch",
+    "finally",
+    "throw",
+    "import",
+    "export",
+    "from",
+    "class",
+    "enum",
+    "using",
+    "var",
+    "let",
+    "const",
+    "write",
+    "echo",
+    "exit",
+    "New-Item",
+    "Set-Item",
+    "Get-Item",
+    "Remove-Item",
+    "Copy-Item",
+    "Move-Item",
+    "Invoke-Command",
+    "Write-Host",
+    "Write-Output",
+    "Write-Error",
+    "Select-Object",
+    "Where-Object",
+    "ForEach-Object",
+    "Sort-Object",
+    "Group-Object",
+    "Measure-Object",
+    "Get-Process",
+    "Get-Service",
+    "Start-Service",
+    "Stop-Service",
+    "Get-ChildItem",
+    "Set-Location",
+    "Get-Location",
+    "Test-Path",
+    "Resolve-Path",
+    "Push-Location",
+    "Pop-Location",
+    "Set-ExecutionPolicy",
+    "Get-Help",
+    "Get-Command",
+    "Invoke-RestMethod",
+    "Invoke-WebRequest",
+    "ConvertTo-Json",
+    "ConvertFrom-Json",
+    "ConvertTo-SecureString",
+    "ConvertFrom-SecureString",
+    "Compress-Archive",
+    "Expand-Archive",
+    "Get-Credential",
+    "Get-Random",
+    "Start-Job",
+    "Receive-Job",
+    "Remove-Job",
+    "Out-Null",
+    "Out-File",
+    "Out-Printer",
+    "Tee-Object",
+    "Format-Table",
+    "Format-List",
+    "cd",
+    "ls",
+    "dir",
+    "mkdir",
+    "rm",
+    "cp",
+    "mv",
+    "cat",
+    "type",
+    "more",
+    "less",
   ]),
 };
-
-
-
-
-
 
 const JSON_RE =
   /("(?:[^"\\]|\\.)*")(\s*:)|("(?:[^"\\]|\\.)*")|(\b(?:true|false|null)\b)|([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)|([{}\[\],:])/g;
@@ -514,7 +572,6 @@ function highlightJson(line: string): Run[] {
   while ((m = JSON_RE.exec(line)) !== null) {
     if (m.index > last) out.push({ text: line.slice(last, m.index) });
     if (m[1] !== undefined) {
-
       out.push({ text: m[1], color: "E5C07B" });
       out.push({ text: m[2], color: "7F848E" });
     } else if (m[3] !== undefined) {
@@ -532,20 +589,30 @@ function highlightJson(line: string): Run[] {
   return out.length ? out : [{ text: line }];
 }
 
-
 const YAML_VALUE_RE =
   /("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')|(&[A-Za-z0-9_-]+)|(\*[A-Za-z0-9_-]+)|(!{1,2}[A-Za-z0-9_./-]+)|(\b(?:[Tt]rue|[Ff]alse|[Yy]es|[Nn]o|[Oo]n|[Oo]ff|[Nn]ull|[Nn]one|~)\b)|(\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})?)?)|([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)|(\|[+-]?\d*)|(>[+-]?\d*)/g;
 
 function highlightYaml(line: string): Run[] {
-
   let cut = -1;
   let inS = false, inD = false;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
-    if (c === "\\" && (inS || inD)) { i++; continue; }
-    if (c === "'" && !inD) { inS = !inS; continue; }
-    if (c === '"' && !inS) { inD = !inD; continue; }
-    if (c === "#" && !inS && !inD) { cut = i; break; }
+    if (c === "\\" && (inS || inD)) {
+      i++;
+      continue;
+    }
+    if (c === "'" && !inD) {
+      inS = !inS;
+      continue;
+    }
+    if (c === '"' && !inS) {
+      inD = !inD;
+      continue;
+    }
+    if (c === "#" && !inS && !inD) {
+      cut = i;
+      break;
+    }
   }
   const code = cut < 0 ? line : line.slice(0, cut);
   const comment = cut < 0 ? "" : line.slice(cut);
@@ -558,14 +625,12 @@ function highlightYaml(line: string): Run[] {
   push(ws);
   let rest = code.slice(ws.length);
 
-
   const dash = /^(-)(\s+)/.exec(rest);
   if (dash) {
     push("-", "C678DD");
     push(dash[2]);
     rest = rest.slice(dash[0].length);
   }
-
 
   const ref = /^([&*][A-Za-z0-9_-]+)(\s*)/.exec(rest);
   if (ref) {
@@ -574,8 +639,9 @@ function highlightYaml(line: string): Run[] {
     rest = rest.slice(ref[0].length);
   }
 
-
-  const key = /^([A-Za-z_][A-Za-z0-9_.-]*|"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')(\s*)(:)(?=\s|$)/.exec(rest);
+  const key =
+    /^([A-Za-z_][A-Za-z0-9_.-]*|"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')(\s*)(:)(?=\s|$)/
+      .exec(rest);
   if (key) {
     push(key[1], "E5C07B");
     push(key[2]);
@@ -583,15 +649,15 @@ function highlightYaml(line: string): Run[] {
     rest = rest.slice(key[0].length);
   }
 
-
   YAML_VALUE_RE.lastIndex = 0;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = YAML_VALUE_RE.exec(rest)) !== null) {
     if (m.index > last) push(rest.slice(last, m.index));
     if (m[1] !== undefined) push(m[1], "98C379");
-    else if (m[2] !== undefined || m[3] !== undefined || m[4] !== undefined) push(m[0], "61AFEF");
-    else if (m[5] !== undefined) push(m[5], "C678DD");
+    else if (m[2] !== undefined || m[3] !== undefined || m[4] !== undefined) {
+      push(m[0], "61AFEF");
+    } else if (m[5] !== undefined) push(m[5], "C678DD");
     else if (m[6] !== undefined || m[7] !== undefined) push(m[0], "D19A66");
     else push(m[0], "C678DD");
     last = YAML_VALUE_RE.lastIndex;
@@ -600,7 +666,6 @@ function highlightYaml(line: string): Run[] {
   if (comment) push(comment, "338B1A");
   return out.length ? out : [{ text: line }];
 }
-
 
 const TOML_RE =
   /(\[\[[^\[\]]*\]\]|\[[^\[\]]*\])|([A-Za-z0-9_.-]+)(\s*)(=)|("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')|(\b(?:true|false)\b)|(\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})?)?)|([+-]?(?:\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+)?|0x[0-9A-Fa-f_]+|0o[0-7_]+|0b[01_]+))|(^|\s)(#.*)/g;
@@ -612,7 +677,6 @@ function highlightToml(line: string): Run[] {
   while ((m = TOML_RE.exec(line)) !== null) {
     if (m.index > last) out.push({ text: line.slice(last, m.index) });
     if (m[1] !== undefined) {
-
       out.push({ text: m[1], color: "61AFEF" });
     } else if (m[2] !== undefined) {
       out.push({ text: m[2], color: "E5C07B" });
@@ -625,7 +689,6 @@ function highlightToml(line: string): Run[] {
     } else if (m[7] !== undefined || m[8] !== undefined) {
       out.push({ text: m[0], color: "D19A66" });
     } else {
-
       if (m[9]) out.push({ text: m[9] });
       out.push({ text: m[10], color: "338B1A" });
     }
@@ -634,7 +697,6 @@ function highlightToml(line: string): Run[] {
   if (last < line.length) out.push({ text: line.slice(last) });
   return out.length ? out : [{ text: line }];
 }
-
 
 const XML_RE =
   /(<!--[\s\S]*?-->)|(<!\[CDATA\[[\s\S]*?\]\]>)|(<\?[\s\S]*?\?>)|(<![A-Za-z][^>]*>)|(<\/?[A-Za-z][A-Za-z0-9:_-]*)|([A-Za-z_:][A-Za-z0-9_:.-]*)(\s*=\s*)("(?:[^"\\]|\\.)*"|'[^']*')|(>|\/>)/g;
@@ -650,7 +712,6 @@ function highlightXml(line: string): Run[] {
     } else if (m[2] !== undefined || m[3] !== undefined || m[4] !== undefined) {
       out.push({ text: m[0], color: "61AFEF" });
     } else if (m[5] !== undefined) {
-
       out.push({ text: m[5], color: "61AFEF" });
     } else if (m[6] !== undefined) {
       out.push({ text: m[6], color: "E5C07B" });
@@ -665,10 +726,8 @@ function highlightXml(line: string): Run[] {
   return out.length ? out : [{ text: line }];
 }
 
-
 const SEGMENT_RE =
   /(#[^\n]*)|(\$[A-Za-z0-9_]+)|("[^"]*"|'[^']*')|([+-]?(?:\d+(?:\.\d+)?(?:[a-z%]+)?))|([{};=])/g;
-
 
 function segmentRuns(text: string): Run[] {
   const out: Run[] = [];
@@ -688,15 +747,26 @@ function segmentRuns(text: string): Run[] {
   return out;
 }
 
-
 const NGINX_BLOCKS = new Set([
-  "location", "server", "http", "events", "upstream", "if", "map",
-  "geo", "stream", "mail", "types", "split_clients",
+  "location",
+  "server",
+  "http",
+  "events",
+  "upstream",
+  "if",
+  "map",
+  "geo",
+  "stream",
+  "mail",
+  "types",
+  "split_clients",
 ]);
 
 function highlightNginx(line: string): Run[] {
   const out: Run[] = [];
-  const push = (text: string, color?: string) => { if (text) out.push(color ? { text, color } : { text }); };
+  const push = (text: string, color?: string) => {
+    if (text) out.push(color ? { text, color } : { text });
+  };
   const ws = /^\s*/.exec(line)?.[0] ?? "";
   push(ws);
   let rest = line.slice(ws.length);
@@ -714,13 +784,14 @@ function highlightNginx(line: string): Run[] {
   return out.length ? out : [{ text: line }];
 }
 
-
 const CRON_FIELD_RE =
   /^(?:\*|\?|@[A-Za-z]+|\d+|\d+-\d+|\*\/\d+|\d+-\d+\/\d+|\d+(?:,\d+)+|[A-Za-z]{3}(?:-[A-Za-z]{3})?)$/;
 
 function highlightCron(line: string): Run[] {
   const out: Run[] = [];
-  const push = (text: string, color?: string) => { if (text) out.push(color ? { text, color } : { text }); };
+  const push = (text: string, color?: string) => {
+    if (text) out.push(color ? { text, color } : { text });
+  };
   const ws = /^\s*/.exec(line)?.[0] ?? "";
   push(ws);
   const rest = line.slice(ws.length);
@@ -737,8 +808,9 @@ function highlightCron(line: string): Run[] {
     return out;
   }
 
-  const fm =
-    /^(\S+)(\s+)(\S+)(\s+)(\S+)(\s+)(\S+)(\s+)(\S+)(\s+)(.*)$/.exec(rest);
+  const fm = /^(\S+)(\s+)(\S+)(\s+)(\S+)(\s+)(\S+)(\s+)(\S+)(\s+)(.*)$/.exec(
+    rest,
+  );
   if (fm && [1, 3, 5, 7, 9].every((i) => CRON_FIELD_RE.test(fm[i]))) {
     for (let i = 1; i <= 9; i += 2) {
       push(fm[i], "D19A66");
@@ -774,13 +846,61 @@ function buildRegex(lang?: string): RegExp {
   const l = (lang ?? "").toLowerCase();
 
   const commentPatterns: string[] = [];
-  if (["python", "py", "bash", "sh", "shell", "zsh", "yaml", "yml", "ruby", "rb", "toml", "ini", "dockerfile", "make", "powershell", "ps1"].some((p) => l === p || l.startsWith(p))) {
+  if (
+    [
+      "python",
+      "py",
+      "bash",
+      "sh",
+      "shell",
+      "zsh",
+      "yaml",
+      "yml",
+      "ruby",
+      "rb",
+      "toml",
+      "ini",
+      "dockerfile",
+      "make",
+      "powershell",
+      "ps1",
+    ].some((p) => l === p || l.startsWith(p))
+  ) {
     commentPatterns.push("#[^\\n]*");
   }
-  if (["javascript", "js", "typescript", "ts", "jsx", "tsx", "c", "cpp", "csharp", "cs", "java", "go", "rust", "php", "swift", "kotlin", "scala", "dart", "zig", "css", "scss", "less"].some((p) => l === p || l.startsWith(p))) {
+  if (
+    [
+      "javascript",
+      "js",
+      "typescript",
+      "ts",
+      "jsx",
+      "tsx",
+      "c",
+      "cpp",
+      "csharp",
+      "cs",
+      "java",
+      "go",
+      "rust",
+      "php",
+      "swift",
+      "kotlin",
+      "scala",
+      "dart",
+      "zig",
+      "css",
+      "scss",
+      "less",
+    ].some((p) => l === p || l.startsWith(p))
+  ) {
     commentPatterns.push("//[^\\n]*");
   }
-  if (["sql", "mariadb", "mysql", "postgresql", "postgres", "sqlite"].some((p) => l === p || l.startsWith(p))) {
+  if (
+    ["sql", "mariadb", "mysql", "postgresql", "postgres", "sqlite"].some((p) =>
+      l === p || l.startsWith(p)
+    )
+  ) {
     commentPatterns.push("--[^\\n]*");
   }
 
@@ -798,19 +918,25 @@ function buildRegex(lang?: string): RegExp {
 }
 
 export function highlight(line: string, lang?: string): Run[] {
-
   const l = (lang ?? "").toLowerCase();
   if (l === "env") {
-    if (line.trimStart().startsWith("#")) return [{ text: line, color: "338B1A" }];
+    if (line.trimStart().startsWith("#")) {
+      return [{ text: line, color: "338B1A" }];
+    }
     const v = /^([A-Z][A-Z0-9_]*)(=.*)/.exec(line);
     if (v) return [{ text: v[1], color: "E5C07B" }, { text: v[2] }];
     return [{ text: line }];
   }
 
-  if (["ini", "properties", "cfg", "conf"].some((p) => l === p || l.endsWith("." + p))) {
+  if (
+    ["ini", "properties", "cfg", "conf"].some((p) =>
+      l === p || l.endsWith("." + p)
+    )
+  ) {
     return [{ text: line }];
   }
-  const data = DATA_HIGHLIGHTERS[l] ?? DATA_HIGHLIGHTERS[l.replace(/[^a-z]/g, "")];
+  const data = DATA_HIGHLIGHTERS[l] ??
+    DATA_HIGHLIGHTERS[l.replace(/[^a-z]/g, "")];
   if (data) return data(line);
   const kw = keywordsFor(lang);
   const re = buildRegex(lang);

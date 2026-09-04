@@ -1,7 +1,6 @@
-
 import { mermaidToSvg } from "./diagram.ts";
 import { svgToPng } from "./raster.ts";
-import { loadGlyphShaper, type GlyphShaper } from "./svg-text.ts";
+import { type GlyphShaper, loadGlyphShaper } from "./svg-text.ts";
 
 export interface MermaidPng {
   bytes: Uint8Array;
@@ -16,7 +15,6 @@ async function loadShaper(): Promise<GlyphShaper | null> {
   shaperCache = await loadGlyphShaper();
   return shaperCache;
 }
-
 
 export async function mermaidToPng(source: string): Promise<MermaidPng | null> {
   const shaper = await loadShaper();
@@ -33,11 +31,14 @@ export async function mermaidToPng(source: string): Promise<MermaidPng | null> {
   }
 }
 
-
 export async function mermaidPngDiagnose(): Promise<string> {
   const out: string[] = [];
   const shaper = await loadShaper();
-  out.push(shaper ? "shaper de texto: OK (contornos TrueType)" : "shaper de texto: NENHUM (fontes TrueType não encontradas)");
+  out.push(
+    shaper
+      ? "shaper de texto: OK (contornos TrueType)"
+      : "shaper de texto: NENHUM (fontes TrueType não encontradas)",
+  );
   if (shaper) {
     try {
       const shaped = shaper({
@@ -48,7 +49,11 @@ export async function mermaidPngDiagnose(): Promise<string> {
         anchor: "start",
         color: "#ffffff",
       });
-      out.push(`prova do shaper: ${shaped.slice(0, 90)}… (${shaped.length} caracteres)`);
+      out.push(
+        `prova do shaper: ${
+          shaped.slice(0, 90)
+        }… (${shaped.length} caracteres)`,
+      );
     } catch (e) {
       out.push(`shaper ERRO → ${String(e).slice(0, 200)}`);
     }

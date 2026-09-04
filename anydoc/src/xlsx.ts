@@ -51,12 +51,15 @@ function buildSheets(parsed: ParsedMarkdown): XlsxSheet[] {
   }
 
   const rows = parsed.blocks
-    .filter((b) => b.kind === "paragraph" || b.kind === "heading" || b.kind === "list" || b.kind === "codeblock")
+    .filter((b) =>
+      b.kind === "paragraph" || b.kind === "heading" || b.kind === "list" ||
+      b.kind === "codeblock"
+    )
     .map((b) => {
       if (b.kind === "list") return [(b.items ?? []).join("; ")];
       if (b.kind === "heading") return [b.text ?? ""];
       if (b.kind === "codeblock") return [b.text ?? ""];
-      return [((b.runs ?? []).map((r) => r.text ?? "").join(""))];
+      return [(b.runs ?? []).map((r) => r.text ?? "").join("")];
     });
   return [{
     name: safeSheetName(parsed.title ?? "Content", "Content"),
@@ -75,7 +78,9 @@ export async function createXlsx(
   wb.creator = "Pizinho";
 
   sheets.forEach((sheet, si) => {
-    const columns = Array.isArray(sheet.columns) ? sheet.columns.map(String) : [];
+    const columns = Array.isArray(sheet.columns)
+      ? sheet.columns.map(String)
+      : [];
     const rows = Array.isArray(sheet.rows) ? sheet.rows : [];
     if (columns.length === 0) return;
     const style = sheet.style ?? {};
@@ -96,10 +101,24 @@ export async function createXlsx(
       const cell = ws.getCell(1, ci + 1);
       cell.value = col;
       if (headerBackground) {
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: headerBackground } };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: headerBackground },
+        };
       }
-      cell.font = { bold: true, ...(headerColor ? { color: { argb: headerColor } } : {}) };
-      if (border) cell.border = { top: border, right: border, bottom: border, left: border };
+      cell.font = {
+        bold: true,
+        ...(headerColor ? { color: { argb: headerColor } } : {}),
+      };
+      if (border) {
+        cell.border = {
+          top: border,
+          right: border,
+          bottom: border,
+          left: border,
+        };
+      }
     });
     ws.getRow(1).height = 22;
 
@@ -109,11 +128,24 @@ export async function createXlsx(
       columns.forEach((col, ci) => {
         const cell = row.getCell(ci + 1);
         const v = (rowData as unknown[])[ci];
-        cell.value = v === null || v === undefined ? null : (v as string | number | boolean | null | Date);
+        cell.value = v === null || v === undefined
+          ? null
+          : (v as string | number | boolean | null | Date);
         if (zebra) {
-          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: zebraBackground } };
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: zebraBackground },
+          };
         }
-        if (border) cell.border = { top: border, right: border, bottom: border, left: border };
+        if (border) {
+          cell.border = {
+            top: border,
+            right: border,
+            bottom: border,
+            left: border,
+          };
+        }
         const fmt = style.formats?.[col];
         if (fmt) cell.numFmt = fmt;
       });
@@ -135,13 +167,27 @@ export async function createXlsx(
           }
         }
         cell.value = ci === 0 ? "TOTAL" : numeric ? sum : "";
-        cell.font = { bold: true, ...(headerColor ? { color: { argb: headerColor } } : {}) };
+        cell.font = {
+          bold: true,
+          ...(headerColor ? { color: { argb: headerColor } } : {}),
+        };
         if (headerBackground) {
-          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: headerBackground } };
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: headerBackground },
+          };
         }
         const fmt = style.formats?.[col];
         if (fmt && numeric) cell.numFmt = fmt;
-        if (border) cell.border = { top: border, right: border, bottom: border, left: border };
+        if (border) {
+          cell.border = {
+            top: border,
+            right: border,
+            bottom: border,
+            left: border,
+          };
+        }
       });
     }
 

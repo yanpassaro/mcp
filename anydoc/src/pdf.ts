@@ -1,10 +1,9 @@
 import { Ream, writeDocx } from "@reamkit";
-import { jsonToFlowDoc, withUtcDates, type DocumentBlock } from "./flow.ts";
+import { type DocumentBlock, jsonToFlowDoc, withUtcDates } from "./flow.ts";
 import { saveFile } from "./save.ts";
 import { loadImages, loadMermaidImages } from "./images.ts";
 import type { ParsedMarkdown } from "./markdown.ts";
 import type { CreatedDocument } from "./types.ts";
-
 
 const EMOJI_TO_GLYPH: Record<string, string> = {
   "✅": "✔",
@@ -29,11 +28,12 @@ function pdfSafeText(text: string | undefined): string {
   return s;
 }
 
-
 function pdfSafeBlocks(blocks: DocumentBlock[]): DocumentBlock[] {
   const safe = (s?: string) => (s === undefined ? undefined : pdfSafeText(s));
   return blocks.map((b) => {
-    if (b.kind === "image" || (b.kind === "codeblock" && b.text !== undefined)) {
+    if (
+      b.kind === "image" || (b.kind === "codeblock" && b.text !== undefined)
+    ) {
       return b;
     }
     const out: DocumentBlock = { ...b };
@@ -53,11 +53,16 @@ export async function createPdf(
 ): Promise<CreatedDocument> {
   const images = await loadImages(parsed.blocks);
   const mermaid = await loadMermaidImages(parsed.blocks);
-  const flow = jsonToFlowDoc({
-    title: pdfSafeText(parsed.title),
-    subtitle: pdfSafeText(parsed.subtitle),
-    blocks: pdfSafeBlocks(parsed.blocks),
-  }, images, { hardWrap: true }, mermaid);
+  const flow = jsonToFlowDoc(
+    {
+      title: pdfSafeText(parsed.title),
+      subtitle: pdfSafeText(parsed.subtitle),
+      blocks: pdfSafeBlocks(parsed.blocks),
+    },
+    images,
+    { hardWrap: true },
+    mermaid,
+  );
   const r = withUtcDates(() => writeDocx(flow));
   const converted = Ream.parse(r.bytes);
   const bytes = await converted.convert("pdf");

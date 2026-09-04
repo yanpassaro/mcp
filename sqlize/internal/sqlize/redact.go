@@ -143,12 +143,6 @@ func luhn(s string) bool {
 
 func columnEntity(name string) (string, bool) {
 	ent, ok := columnEntityMap[normalizeWord(name)]
-	if !ok {
-		return "", false
-	}
-	if ent == "PERSON" {
-		return "", false
-	}
 	return ent, ok
 }
 

@@ -1,7 +1,7 @@
 import { McpServer } from "@mcp/server";
 import { serveStdio } from "@mcp/server/stdio";
-import { dirname, basename, extname, join } from "node:path";
-import { exportFromMarkdown, type DocumentFormat } from "./src/index.ts";
+import { basename, dirname, extname, join } from "node:path";
+import { type DocumentFormat, exportFromMarkdown } from "./src/index.ts";
 import { registerConvertToMarkdown } from "./src/convert_to_markdown.ts";
 import { toMarkdownBytes } from "./src/wasm.ts";
 import { isTabular, tabularToMarkdown } from "./src/tabular.ts";
@@ -9,7 +9,6 @@ import { redactPII } from "./src/pii.ts";
 import * as z from "@zod";
 
 const EXPORT_FORMATS = ["pdf", "docx", "xlsx"] as const;
-
 
 function sourceToMarkdown(bytes: Uint8Array, ext: string): string {
   if (ext === ".md") return new TextDecoder().decode(bytes);
@@ -41,7 +40,11 @@ serveStdio(() => {
       const ext = extname(p).toLowerCase();
       const md = sourceToMarkdown(bytes, ext);
       const outPath = join(dirname(p), `${basename(p, extname(p))}.${format}`);
-      const result = await exportFromMarkdown(outPath, format as DocumentFormat, md);
+      const result = await exportFromMarkdown(
+        outPath,
+        format as DocumentFormat,
+        md,
+      );
       return {
         content: [{ type: "text", text: result.path }],
       };

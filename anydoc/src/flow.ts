@@ -94,10 +94,7 @@ function hex(color?: string): string | undefined {
   return /^[0-9a-fA-F]{6}$/.test(h) ? h.toUpperCase() : undefined;
 }
 
-
-
 function cleanText(s: string): string {
-
   return s.replace(
     /[\p{Cc}]/gu,
     (ch) => (ch === "\t" || ch === "\n" || ch === "\r" ? ch : ""),
@@ -108,13 +105,10 @@ const ZWSP = "\u200B";
 
 const BREAK_AFTER = /[\/\-_.:@?&=+#,%~]/;
 
-
 let HARD_WRAP = false;
-
 
 function allowWrapping(text: string, threshold = 48, hardEvery = 20): string {
   if (!text) return text;
-
 
   if (!HARD_WRAP) {
     let out = "";
@@ -142,7 +136,6 @@ function allowWrapping(text: string, threshold = 48, hardEvery = 20): string {
     }
     return out;
   }
-
 
   const MIN_SEG = 55;
   const MAX_SEG = 70;
@@ -231,7 +224,6 @@ function run(
   };
 }
 
-
 const ALLOWED_LINK_SCHEMES = new Set(["http", "https", "mailto"]);
 function sanitizeHref(href: string): string | undefined {
   const url = href.trim();
@@ -264,7 +256,6 @@ function paragraphWithRuns(
     if (r.link && r.url) {
       const url = r.url;
       if (url.startsWith("#")) {
-
         out.push(
           makeRun(r.text ?? "", {
             underline: true,
@@ -283,7 +274,6 @@ function paragraphWithRuns(
             }),
           );
         } else {
-
           out.push(makeRun(r.text ?? "", { color: opts.color }));
           out.push(makeRun(` (${url})`, { color: "6B7280", size: 9 }));
         }
@@ -297,9 +287,7 @@ function paragraphWithRuns(
         strike: r.strike,
         code: r.code,
         fontFamily: r.code ? "Courier New" : opts.fontFamily,
-        color: r.code
-          ? (opts.codeColor ?? "D85131")
-          : (r.color ?? opts.color),
+        color: r.code ? (opts.codeColor ?? "D85131") : (r.color ?? opts.color),
         size: opts.size,
         shading: opts.shading,
         verticalAlign: r.verticalAlign,
@@ -387,7 +375,6 @@ function tableBlock(
   });
 
   const minWidths = columns.map((_, ci) => {
-
     let floor = longestWordWidth(columns[ci] ?? "");
     for (const row of rows) {
       const w = longestWordWidth(row[ci] ?? "");
@@ -399,7 +386,6 @@ function tableBlock(
   let widths = desired.slice();
   let widthSum = widths.reduce((a, b) => a + b, 0);
   if (widthSum > PAGE_CONTENT_WIDTH) {
-
     const minSum = minWidths.reduce((a, b) => a + b, 0);
     if (minSum >= PAGE_CONTENT_WIDTH) {
       const k = PAGE_CONTENT_WIDTH / minSum;
@@ -464,7 +450,6 @@ function tableBlock(
   };
 }
 
-
 const SHELL_OPS =
   /<<<|2>>|2>|>>|&>|>&|\|&|\[\[|\]\]|<<&&\|\||<|>|\||;|&|==|!=|=|\$\(|\$\{|\$@|\$\*|\$\#|\$\?|\$\$|\$!|\[|\]|`/g;
 
@@ -483,7 +468,6 @@ function splitLongLine(line: string, maxCols: number): string[] {
   const out: string[] = [];
   let rest = line;
   while (rest.length > maxCols) {
-
     let cut = lastOperatorIndex(rest, maxCols);
     if (cut <= 0) cut = rest.lastIndexOf(" ", maxCols);
     if (cut <= 0) cut = lastDelimiterIndex(rest, maxCols);
@@ -501,7 +485,6 @@ function lastDelimiterIndex(s: string, max: number): number {
   }
   return -1;
 }
-
 
 const LANG_META: Record<string, { label: string; accent: string }> = {
   json: { label: "JSON", accent: "E5C07B" },
@@ -557,7 +540,6 @@ function langMeta(lang?: string): { label: string; accent: string } {
     { label: (lang ?? "code").toUpperCase(), accent: "8B949E" };
 }
 
-
 function shadeHex(color: string, factor: number): string {
   const h = color.replace(/^#/, "");
   if (!/^[0-9a-fA-F]{6}$/.test(h)) return color;
@@ -569,11 +551,9 @@ function shadeHex(color: string, factor: number): string {
   ));
 }
 
-
 function codeBlockShell(
   meta: { label: string; accent: string },
   content: BodyElement[],
-
   attachedBelow = false,
 ): BodyElement[] {
   const bg = "1A1D23";
@@ -589,7 +569,6 @@ function codeBlockShell(
     width: pt(2),
     colorHex: meta.accent,
   };
-
 
   const headerBorder = {
     style: "single" as const,
@@ -612,7 +591,6 @@ function codeBlockShell(
       kind: "table",
       table: {
         properties: {
-
           layout: "fixed",
           borders: {
             top: border,
@@ -624,7 +602,6 @@ function codeBlockShell(
         grid: [pt(PAGE_CONTENT_WIDTH)],
         rows: [
           {
-
             properties: { cantSplit: true },
             cells: [{
               properties: {
@@ -650,7 +627,6 @@ function codeBlockShell(
   ];
 }
 
-
 function mermaidImageBlock(
   png: MermaidImageData,
   resources: ResourceStore,
@@ -661,7 +637,6 @@ function mermaidImageBlock(
   let wPt = Math.max(MIN_W, Math.min(MAX_W, png.width));
   let hPt = (wPt * png.height) / Math.max(png.width, 1);
   if (hPt > MAX_H) {
-
     const k = MAX_H / hPt;
     wPt *= k;
     hPt = MAX_H;
@@ -691,18 +666,15 @@ function renderCodeBlock(
   const MAX_CODE_COLS = 88;
   const content: BodyElement[] = [];
 
-
   const lang = (b.language ?? "").toLowerCase();
   if (lang === "mermaid") {
     const diagram = renderMermaidDiagram(String(b.text ?? ""));
     if (diagram) {
       const n = diagram.lines.length;
       for (let k = 0; k < n; k++) {
-
         const runs = diagram.runs?.[k] ?? colorDiagram(diagram.lines[k]);
         content.push(...paragraphWithRuns(
           [{ text: " " }, ...runs],
-
           {
             fontFamily: "Courier New",
             size: 8.5,
@@ -741,10 +713,8 @@ function renderCodeBlock(
 }
 
 export interface FlowDocOptions {
-
   hardWrap?: boolean;
 }
-
 
 function headingProps(
   level: number,
@@ -765,7 +735,6 @@ function headingProps(
       return { size: 11, color: "4B5563", spacingBefore: 12, spacingAfter: 4 };
   }
 }
-
 
 export interface MermaidImageData {
   bytes: Uint8Array;
@@ -810,12 +779,16 @@ function imageSizeFor(
   if (requestedWidth) {
     return fitToPage(
       requestedWidth,
-      iw > 0 ? (requestedWidth * ih) / iw : requestedHeight ?? requestedWidth * 0.75,
+      iw > 0
+        ? (requestedWidth * ih) / iw
+        : requestedHeight ?? requestedWidth * 0.75,
     );
   }
   if (requestedHeight) {
     return fitToPage(
-      ih > 0 ? (requestedHeight * iw) / ih : requestedWidth ?? requestedHeight * 1.5,
+      ih > 0
+        ? (requestedHeight * iw) / ih
+        : requestedWidth ?? requestedHeight * 1.5,
       requestedHeight,
     );
   }
@@ -896,7 +869,6 @@ export function jsonToFlowDoc(
       }
     } else if (kind === "list") {
       for (const item of b.items ?? []) {
-
         const task = /^\[([ xX])\]\s+(.*)$/.exec(item);
         if (task) {
           const done = task[1].toLowerCase() === "x";
@@ -982,7 +954,6 @@ export function jsonToFlowDoc(
       const nextIsQuote = String(blocks[bi + 1]?.kind ?? "") === "blockquote";
       body.push(...renderCodeBlock(b, nextIsQuote));
     } else if (kind === "blockquote") {
-
       const prev = blocks[bi - 1];
       const afterCode = String(prev?.kind ?? "") === "codeblock";
 
@@ -994,14 +965,12 @@ export function jsonToFlowDoc(
       const content: BodyElement[] = [];
       const lines = (b.items ?? []).length ? (b.items ?? []) : [""];
       lines.forEach((line, idx) => {
-
         const icon = afterCode && idx === 0
           ? [{ text: "\u263C  ", color: accent ?? "E8C547", size: 11 }]
           : [];
         content.push(...paragraphWithRuns(
           [...icon, ...parseInline(line || " ")],
           {
-
             size: afterCode ? 9.5 : 10.5,
             color: textColor,
             spacingBefore: 0,

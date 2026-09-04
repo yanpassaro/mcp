@@ -1,4 +1,3 @@
-
 export const TABULAR_EXTS = [".csv", ".tsv", ".json", ".xml", ".html", ".htm"];
 
 export function isTabular(ext: string): boolean {
@@ -75,19 +74,25 @@ function parseJSONTable(text: string): string {
       const columns = Array.from(
         new Set(data.flatMap((o) => Object.keys(o as Record<string, unknown>))),
       );
-      const rows = data.map((o) => columns.map((c) => String((o as Record<string, unknown>)[c] ?? "")));
+      const rows = data.map((o) =>
+        columns.map((c) => String((o as Record<string, unknown>)[c] ?? ""))
+      );
       return mdTable(columns, rows);
     }
     if (Array.isArray(first)) {
       const columns = first.map((_: unknown, i: number) => `col${i + 1}`);
-      const rows = data.map((r) => (r as unknown[]).map((v) => String(v ?? "")));
+      const rows = data.map((r) =>
+        (r as unknown[]).map((v) => String(v ?? ""))
+      );
       return mdTable(columns, rows);
     }
     return mdTable(["value"], data.map((v) => [String(v ?? "")]));
   }
   if (typeof data === "object" && data !== null) {
     const columns = Object.keys(data);
-    return mdTable(columns, [columns.map((c) => String((data as Record<string, unknown>)[c] ?? ""))]);
+    return mdTable(columns, [
+      columns.map((c) => String((data as Record<string, unknown>)[c] ?? "")),
+    ]);
   }
   return "";
 }
@@ -135,7 +140,6 @@ function parseHTMLTables(text: string): string[] {
 }
 
 function parseXMLTable(text: string): string {
-
   const counts = new Map<string, number>();
   const tagRe = /<([A-Za-z_][\w.-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/g;
   let m: RegExpExecArray | null;

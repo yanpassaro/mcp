@@ -1,5 +1,9 @@
-
-import { computeLayers, parseMermaid, wrapLabel, type MermaidNode } from "./mermaid.ts";
+import {
+  computeLayers,
+  type MermaidNode,
+  parseMermaid,
+  wrapLabel,
+} from "./mermaid.ts";
 import type { GlyphShaper } from "./svg-text.ts";
 
 export interface DiagramSvg {
@@ -19,7 +23,6 @@ const X_GAP = 26;
 const PANEL = 20;
 const EDGE_LANE_SPACE = 40;
 
-
 const COL = {
   panel: "#1A1D23",
   panelBorder: "#2B303B",
@@ -33,7 +36,8 @@ const COL = {
 };
 
 function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 interface Sized {
@@ -44,13 +48,11 @@ interface Sized {
 }
 
 function sizeNode(n: MermaidNode): Sized {
-
   const inner = Math.floor((MAX_NODE_W - PAD_X) / CHAR_W);
   const lines = wrapLabel(n.label, Math.max(6, inner));
   const textW = Math.max(...lines.map((l) => l.length)) * CHAR_W;
 
   if (n.shape === "diamond") {
-
     const w = Math.min(MAX_NODE_W, Math.max(130, textW + PAD_X + 36));
     const h = lines.length * LINE_H + 58;
     return { lines, w, h, r: 0 };
@@ -60,7 +62,6 @@ function sizeNode(n: MermaidNode): Sized {
     return { lines, w: r * 2, h: r * 2, r };
   }
   if (n.shape === "cylinder") {
-
     const w = Math.min(MAX_NODE_W, Math.max(130, textW + PAD_X));
     const h = lines.length * LINE_H + VPAD * 2 + 18;
     return { lines, w, h, r: 0 };
@@ -76,28 +77,33 @@ interface Placed extends Sized {
   y: number;
 }
 
-
 function shadeHex(color: string, factor: number): string {
   const n = parseInt(color.replace(/^#/, ""), 16);
   const m = (shift: number) => Math.round(((n >> shift) & 255) * factor);
-  return `#${((m(16) << 16) | (m(8) << 8) | m(0)).toString(16).padStart(6, "0")}`;
+  return `#${
+    ((m(16) << 16) | (m(8) << 8) | m(0)).toString(16).padStart(6, "0")
+  }`;
 }
 
 const HEADER_H = 28;
 
-export function mermaidToSvg(source: string, shaper?: GlyphShaper): DiagramSvg | null {
+export function mermaidToSvg(
+  source: string,
+  shaper?: GlyphShaper,
+): DiagramSvg | null {
   const parsed = parseMermaid(source);
   if (!parsed) return null;
   const { nodes, edges, order, dir } = parsed;
 
   if (dir !== "TB" && dir !== "TD" && dir !== "BT") return null;
-  const es = dir === "BT" ? edges.map((e) => ({ from: e.to, to: e.from, label: e.label })) : edges;
+  const es = dir === "BT"
+    ? edges.map((e) => ({ from: e.to, to: e.from, label: e.label }))
+    : edges;
   const layers = computeLayers(es, order);
   if (!layers) return null;
 
   const sizes = new Map<string, Sized>();
   for (const [id, n] of nodes) sizes.set(id, sizeNode(n));
-
 
   const layerW = layers.map((ids) => {
     let w = 0;
@@ -109,9 +115,10 @@ export function mermaidToSvg(source: string, shaper?: GlyphShaper): DiagramSvg |
   layers.forEach((ids, i) => ids.forEach((id) => layerIdx.set(id, i)));
 
   const graphRight = Math.max(...layerW.map((lw) => (maxLayerW - lw) / 2 + lw));
-  const long = es.filter((e) => layerIdx.get(e.to)! - layerIdx.get(e.from)! > 1);
+  const long = es.filter((e) =>
+    layerIdx.get(e.to)! - layerIdx.get(e.from)! > 1
+  );
   const lanes = long.map((_, i) => graphRight + 56 + i * EDGE_LANE_SPACE);
-
 
   const rankY: number[] = [];
   let y = 0;
@@ -120,8 +127,12 @@ export function mermaidToSvg(source: string, shaper?: GlyphShaper): DiagramSvg |
     const maxH = Math.max(...layers[i].map((id) => sizes.get(id)!.h));
     y += maxH + RANK_GAP;
   }
-  const contentH = rankY[layers.length - 1] + Math.max(...layers[layers.length - 1].map((id) => sizes.get(id)!.h));
-  const artW = Math.max(maxLayerW, lanes.length ? lanes[lanes.length - 1] + EDGE_LANE_SPACE : graphRight);
+  const contentH = rankY[layers.length - 1] +
+    Math.max(...layers[layers.length - 1].map((id) => sizes.get(id)!.h));
+  const artW = Math.max(
+    maxLayerW,
+    lanes.length ? lanes[lanes.length - 1] + EDGE_LANE_SPACE : graphRight,
+  );
 
   const W = Math.max(artW + PANEL * 2, 260);
   const H = contentH + PANEL * 2 + HEADER_H;
@@ -134,25 +145,58 @@ export function mermaidToSvg(source: string, shaper?: GlyphShaper): DiagramSvg |
     const maxH = Math.max(...ids.map((id) => sizes.get(id)!.h));
     for (const id of ids) {
       const s = sizes.get(id)!;
-      placed.set(id, { id, ...s, x, y: rankY[li] + (maxH - s.h) / 2 + PANEL + HEADER_H });
+      placed.set(id, {
+        id,
+        ...s,
+        x,
+        y: rankY[li] + (maxH - s.h) / 2 + PANEL + HEADER_H,
+      });
       x += s.w + X_GAP;
     }
   });
 
-
   const parts: string[] = [];
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`);
+  parts.push(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`,
+  );
 
-  parts.push(`<rect x="1" y="1" width="${W - 2}" height="${H - 2}" rx="12" fill="${COL.panel}" stroke="${COL.panelBorder}" stroke-width="1"/>`);
+  parts.push(
+    `<rect x="1" y="1" width="${W - 2}" height="${
+      H - 2
+    }" rx="12" fill="${COL.panel}" stroke="${COL.panelBorder}" stroke-width="1"/>`,
+  );
 
   const headerTint = shadeHex(COL.accent, 0.14);
-  parts.push(`<rect x="1" y="1" width="${W - 2}" height="${HEADER_H}" fill="${headerTint}"/>`);
-  parts.push(`<rect x="1" y="${HEADER_H - 1}" width="${W - 2}" height="1" fill="${COL.accent}"/>`);
-  parts.push(`<rect x="1" y="1" width="2.5" height="${H - 2}" fill="${COL.accent}"/>`);
+  parts.push(
+    `<rect x="1" y="1" width="${
+      W - 2
+    }" height="${HEADER_H}" fill="${headerTint}"/>`,
+  );
+  parts.push(
+    `<rect x="1" y="${HEADER_H - 1}" width="${
+      W - 2
+    }" height="1" fill="${COL.accent}"/>`,
+  );
+  parts.push(
+    `<rect x="1" y="1" width="2.5" height="${H - 2}" fill="${COL.accent}"/>`,
+  );
   if (shaper) {
-    parts.push(shaper({ text: "DIAGRAMA", x: 16, y: HEADER_H / 2 + 4, size: 10.5, anchor: "start", color: COL.accent }));
+    parts.push(
+      shaper({
+        text: "DIAGRAMA",
+        x: 16,
+        y: HEADER_H / 2 + 4,
+        size: 10.5,
+        anchor: "start",
+        color: COL.accent,
+      }),
+    );
   } else {
-    parts.push(`<text x="16" y="${HEADER_H / 2 + 4}" font-size="10.5" fill="${COL.accent}">DIAGRAMA</text>`);
+    parts.push(
+      `<text x="16" y="${
+        HEADER_H / 2 + 4
+      }" font-size="10.5" fill="${COL.accent}">DIAGRAMA</text>`,
+    );
   }
 
   const shapes: string[] = [];
@@ -163,38 +207,65 @@ export function mermaidToSvg(source: string, shaper?: GlyphShaper): DiagramSvg |
     const tx = (line: string, i: number, cy: number) => {
       const base = cy - ((p.lines.length - 1) / 2) * LINE_H + i * LINE_H + 5;
       if (shaper) {
-        labels.push(shaper({ text: line, x: cx, y: base, size: FONT, anchor: "middle", color: COL.text }));
+        labels.push(
+          shaper({
+            text: line,
+            x: cx,
+            y: base,
+            size: FONT,
+            anchor: "middle",
+            color: COL.text,
+          }),
+        );
       } else {
-        labels.push(`<text x="${cx}" y="${base}" text-anchor="middle" font-size="${FONT}" fill="${COL.text}">${esc(line)}</text>`);
+        labels.push(
+          `<text x="${cx}" y="${base}" text-anchor="middle" font-size="${FONT}" fill="${COL.text}">${
+            esc(line)
+          }</text>`,
+        );
       }
     };
     if (n.shape === "diamond") {
       const cy = p.y + p.h / 2;
-      shapes.push(`<polygon points="${cx},${p.y} ${p.x + p.w},${cy} ${cx},${p.y + p.h} ${p.x},${cy}" fill="${COL.nodeFill}" stroke="${COL.orange}" stroke-width="2"/>`);
+      shapes.push(
+        `<polygon points="${cx},${p.y} ${p.x + p.w},${cy} ${cx},${
+          p.y + p.h
+        } ${p.x},${cy}" fill="${COL.nodeFill}" stroke="${COL.orange}" stroke-width="2"/>`,
+      );
       p.lines.forEach((l, i) => tx(l, i, cy));
     } else if (n.shape === "circle") {
-      shapes.push(`<circle cx="${cx}" cy="${p.y + p.r}" r="${p.r - 2}" fill="${COL.nodeFill}" stroke="${COL.cyan}" stroke-width="2"/>`);
+      shapes.push(
+        `<circle cx="${cx}" cy="${p.y + p.r}" r="${
+          p.r - 2
+        }" fill="${COL.nodeFill}" stroke="${COL.cyan}" stroke-width="2"/>`,
+      );
       p.lines.forEach((l, i) => tx(l, i, p.y + p.r));
     } else if (n.shape === "cylinder") {
-
       const ry = 8;
       const yTop = p.y + ry;
       const yBot = p.y + p.h - ry;
       shapes.push(
-        `<path d="M ${p.x} ${yTop} Q ${cx} ${p.y} ${p.x + p.w} ${yTop} L ${p.x + p.w} ${yBot} Q ${cx} ${p.y + p.h} ${p.x} ${yBot} Z" fill="${COL.nodeFill}" stroke="${COL.purple}" stroke-width="2"/>`,
+        `<path d="M ${p.x} ${yTop} Q ${cx} ${p.y} ${p.x + p.w} ${yTop} L ${
+          p.x + p.w
+        } ${yBot} Q ${cx} ${
+          p.y + p.h
+        } ${p.x} ${yBot} Z" fill="${COL.nodeFill}" stroke="${COL.purple}" stroke-width="2"/>`,
       );
 
       shapes.push(
-        `<path d="M ${p.x + 3} ${yTop} Q ${cx} ${p.y - 1} ${p.x + p.w - 3} ${yTop}" fill="none" stroke="${COL.purple}" stroke-width="2"/>`,
+        `<path d="M ${p.x + 3} ${yTop} Q ${cx} ${p.y - 1} ${
+          p.x + p.w - 3
+        } ${yTop}" fill="none" stroke="${COL.purple}" stroke-width="2"/>`,
       );
       p.lines.forEach((l, i) => tx(l, i, p.y + p.h / 2));
     } else {
       const rx = n.shape === "rounded" ? 16 : 8;
-      shapes.push(`<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${rx}" fill="${COL.nodeFill}" stroke="${COL.cyan}" stroke-width="2"/>`);
+      shapes.push(
+        `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${rx}" fill="${COL.nodeFill}" stroke="${COL.cyan}" stroke-width="2"/>`,
+      );
       p.lines.forEach((l, i) => tx(l, i, p.y + p.h / 2));
     }
   }
-
 
   const paths: string[] = [];
   const edgeLabels: string[] = [];
@@ -213,21 +284,29 @@ export function mermaidToSvg(source: string, shaper?: GlyphShaper): DiagramSvg |
     let laneX = 0;
     if (span === 1) {
       const my = (sy + ty) / 2;
-      d = sx === tx2 ? `M ${sx} ${sy} L ${sx} ${ty}` : `M ${sx} ${sy} L ${sx} ${my} L ${tx2} ${my} L ${tx2} ${ty}`;
+      d = sx === tx2
+        ? `M ${sx} ${sy} L ${sx} ${ty}`
+        : `M ${sx} ${sy} L ${sx} ${my} L ${tx2} ${my} L ${tx2} ${ty}`;
       ly = my - 11;
     } else {
       laneX = ox + lanes[laneIdx++];
 
       const y1 = sy + 18;
       const y2 = ty - 18;
-      d = `M ${sx} ${sy} L ${sx} ${y1} L ${laneX} ${y1} L ${laneX} ${y2} L ${tx2} ${y2} L ${tx2} ${ty}`;
+      d =
+        `M ${sx} ${sy} L ${sx} ${y1} L ${laneX} ${y1} L ${laneX} ${y2} L ${tx2} ${y2} L ${tx2} ${ty}`;
       ly = y2 - 11;
     }
-    parts.push(`<path d="${d}" fill="none" stroke="${COL.edge}" stroke-width="2" stroke-linejoin="round"/>`);
+    parts.push(
+      `<path d="${d}" fill="none" stroke="${COL.edge}" stroke-width="2" stroke-linejoin="round"/>`,
+    );
 
-    paths.push(`<path d="M ${tx2 - 4.5} ${ty - 9.5} L ${tx2 + 4.5} ${ty - 9.5} L ${tx2} ${ty} z" fill="${COL.edge}"/>`);
+    paths.push(
+      `<path d="M ${tx2 - 4.5} ${ty - 9.5} L ${tx2 + 4.5} ${
+        ty - 9.5
+      } L ${tx2} ${ty} z" fill="${COL.edge}"/>`,
+    );
     if (e.label) {
-
       const labelW = e.label.length * 5.8;
       let anchor: "start" | "middle" | "end";
       let lx2: number;
@@ -248,9 +327,22 @@ export function mermaidToSvg(source: string, shaper?: GlyphShaper): DiagramSvg |
         lx2 = sx - 14;
       }
       if (shaper) {
-        edgeLabels.push(shaper({ text: e.label, x: lx2, y: ly, size: 11.5, anchor, color: COL.edge }));
+        edgeLabels.push(
+          shaper({
+            text: e.label,
+            x: lx2,
+            y: ly,
+            size: 11.5,
+            anchor,
+            color: COL.edge,
+          }),
+        );
       } else {
-        edgeLabels.push(`<text x="${lx2}" y="${ly}" text-anchor="${anchor}" font-size="11.5" fill="${COL.edge}" font-style="italic">${esc(e.label)}</text>`);
+        edgeLabels.push(
+          `<text x="${lx2}" y="${ly}" text-anchor="${anchor}" font-size="11.5" fill="${COL.edge}" font-style="italic">${
+            esc(e.label)
+          }</text>`,
+        );
       }
     }
   }

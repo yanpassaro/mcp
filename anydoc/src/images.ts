@@ -31,7 +31,8 @@ export function imageDimensions(
 
   // PNG
   if (
-    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e &&
+    bytes[3] === 0x47
   ) {
     if (bytes.length < 33) return undefined;
     return { width: u32be(bytes, 16), height: u32be(bytes, 20) };
@@ -85,10 +86,17 @@ export function imageDimensions(
 
   // WebP
   if (
-    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
-    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 &&
+    bytes[11] === 0x50
   ) {
-    const kind = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15]);
+    const kind = String.fromCharCode(
+      bytes[12],
+      bytes[13],
+      bytes[14],
+      bytes[15],
+    );
     if (kind === "VP8X") {
       if (bytes.length < 30) return undefined;
       return { width: 1 + u24le(bytes, 24), height: 1 + u24le(bytes, 27) };
@@ -106,7 +114,9 @@ export function imageDimensions(
     }
     if (kind === "VP8 ") {
       if (bytes.length < 30) return undefined;
-      if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) return undefined;
+      if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) {
+        return undefined;
+      }
       return {
         width: u16le(bytes, 26) & 0x3fff,
         height: u16le(bytes, 28) & 0x3fff,
@@ -139,7 +149,9 @@ async function resolveImage(url: string): Promise<Uint8Array | undefined> {
   }
 }
 
-export async function loadImages(blocks: DocumentBlock[]): Promise<Map<string, LoadedImage>> {
+export async function loadImages(
+  blocks: DocumentBlock[],
+): Promise<Map<string, LoadedImage>> {
   const map = new Map<string, LoadedImage>();
   for (const b of blocks) {
     if (b.kind !== "image" || !b.url) continue;
@@ -152,12 +164,16 @@ export async function loadImages(blocks: DocumentBlock[]): Promise<Map<string, L
   return map;
 }
 
-
-export async function loadMermaidImages(blocks: DocumentBlock[]): Promise<Map<number, MermaidPng>> {
+export async function loadMermaidImages(
+  blocks: DocumentBlock[],
+): Promise<Map<number, MermaidPng>> {
   const map = new Map<number, MermaidPng>();
   let i = 0;
   for (const b of blocks) {
-    if (b.kind === "codeblock" && String(b.language ?? "").toLowerCase() === "mermaid") {
+    if (
+      b.kind === "codeblock" &&
+      String(b.language ?? "").toLowerCase() === "mermaid"
+    ) {
       const png = await mermaidToPng(String(b.text ?? ""));
       if (png) map.set(i, png);
     }

@@ -57,7 +57,6 @@ O `anydoc` usa só stderr. Dados persistidos: `sqlize` → `~/.local/state/sqliz
 | `sqlize` | `SQLIZE_STATE_DIR` | `~/.local/state/sqlize` | pasta do banco de estado |
 | | `{PREFIXO}_POSTGRES_URL` / `_DSN` | — | conexão Postgres read-only (por prefixo) |
 | | `{PREFIXO}_MYSQL_URL` / `_DSN` | — | conexão MySQL read-only (por prefixo) |
-| | `SQLIZE_PII_NAMES` / `SQLIZE_PII_WORDS` | — | reforços do redator PII |
 | `sandbox` | `SANDBOX_FS_DIR` | `~/.local/share/mcp/sandbox/fs` | filesystem do script |
 | | `SANDBOX_SCRIPTS_DIR` | `~/.local/share/mcp/sandbox/scripts` | scripts do agente |
 | | `SANDBOX_FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | allowlist do `std.fetch` |

@@ -1,4 +1,3 @@
-
 export interface MermaidDiagram {
   lines: string[];
 
@@ -6,10 +5,22 @@ export interface MermaidDiagram {
   width: number;
 }
 
-export type MermaidShape = "rect" | "rounded" | "circle" | "diamond" | "cylinder";
-export interface MermaidNode { id: string; label: string; shape: MermaidShape; }
-export interface MermaidEdge { from: string; to: string; label?: string; }
-
+export type MermaidShape =
+  | "rect"
+  | "rounded"
+  | "circle"
+  | "diamond"
+  | "cylinder";
+export interface MermaidNode {
+  id: string;
+  label: string;
+  shape: MermaidShape;
+}
+export interface MermaidEdge {
+  from: string;
+  to: string;
+  label?: string;
+}
 
 export interface ParsedMermaid {
   nodes: Map<string, MermaidNode>;
@@ -18,21 +29,26 @@ export interface ParsedMermaid {
   dir: string;
 }
 
-
-const SHAPE_SRC = String.raw`\[\([^\[\]]*\)\]|\(\([^()]*\)\)|\[[^\[\]]*\]|\{[^}]*\}|\([^()]*\)`;
+const SHAPE_SRC = String
+  .raw`\[\([^\[\]]*\)\]|\(\([^()]*\)\)|\[[^\[\]]*\]|\{[^}]*\}|\([^()]*\)`;
 const NODE_RE = new RegExp(`^\\s*([A-Za-z0-9_-]+)\\s*(?:(${SHAPE_SRC}))\\s*$`);
 const HEAD_RE = /^\s*(?:flowchart|graph)\s+(TB|TD|BT|LR|RL)\b/i;
 
 function shapeOf(def: string): { shape: MermaidShape; label: string } {
   const shape: MermaidShape = def.startsWith("[(")
-    ? "cylinder" : def.startsWith("((")
-      ? "circle" : def.startsWith("[")
-        ? "rect" : def.startsWith("{")
-          ? "diamond" : def.startsWith("(") ? "rounded" : "rect";
+    ? "cylinder"
+    : def.startsWith("((")
+    ? "circle"
+    : def.startsWith("[")
+    ? "rect"
+    : def.startsWith("{")
+    ? "diamond"
+    : def.startsWith("(")
+    ? "rounded"
+    : "rect";
   const body = def.slice(1, -1).replace(/^\(|\)$/g, "").trim();
   return { shape, label: body || def.trim() };
 }
-
 
 export function wrapLabel(label: string, inner: number): string[] {
   const words = label.split(/\s+/).filter(Boolean);
@@ -42,7 +58,10 @@ export function wrapLabel(label: string, inner: number): string[] {
   for (const w of words) {
     let piece = w;
     while (piece.length > inner) {
-      if (cur) { out.push(cur); cur = ""; }
+      if (cur) {
+        out.push(cur);
+        cur = "";
+      }
       const head = piece.slice(0, inner);
       const hy = Math.max(head.lastIndexOf("-"), head.lastIndexOf("_"));
       const cut = hy >= 1 && hy + 1 >= inner / 2 ? hy + 1 : inner;
@@ -51,19 +70,20 @@ export function wrapLabel(label: string, inner: number): string[] {
     }
     const cand = cur ? cur + " " + piece : piece;
     if (cand.length <= inner) cur = cand;
-    else { out.push(cur); cur = piece; }
+    else {
+      out.push(cur);
+      cur = piece;
+    }
   }
   if (cur) out.push(cur);
   return out;
 }
-
 
 function centerPad(text: string, width: number): string {
   const pad = Math.max(0, width - text.length);
   const left = Math.floor(pad / 2);
   return " ".repeat(left) + text + " ".repeat(pad - left);
 }
-
 
 export type DiagramRun = { text: string; color?: string };
 
@@ -75,7 +95,6 @@ const CYL_COLOR = "C678DD";
 function runsOf(chars: string, color?: string): DiagramRun[] {
   return chars ? [{ text: chars, color }] : [];
 }
-
 
 function boxRowRuns(
   n: MermaidNode,
@@ -99,7 +118,9 @@ function boxRowRuns(
       { text: "│", color: BOX_COLOR },
     ]);
   }
-  for (let i = 0; i < padCount; i++) rows.push(runsOf("│" + " ".repeat(inner) + "│", BOX_COLOR));
+  for (let i = 0; i < padCount; i++) {
+    rows.push(runsOf("│" + " ".repeat(inner) + "│", BOX_COLOR));
+  }
   if (stripe) rows.push(runsOf("├" + "─".repeat(inner) + "┤", CYL_COLOR));
 
   let bottom = "└" + "─".repeat(inner) + "┘";
@@ -109,7 +130,6 @@ function boxRowRuns(
   rows.push(runsOf(bottom, BOX_COLOR));
   return rows;
 }
-
 
 function wireRuns(line: string): DiagramRun[] {
   const out: DiagramRun[] = [];
@@ -132,7 +152,6 @@ function wireRuns(line: string): DiagramRun[] {
   return out.length ? out : [{ text: line }];
 }
 
-
 function drawGap(
   k: number,
   nxtIds: string[],
@@ -148,11 +167,13 @@ function drawGap(
 
   const nxtWidth = nxtIds.length * W + (nxtIds.length - 1) * GAP;
   const nxtLeft = Math.max(0, Math.floor((artboard - nxtWidth) / 2));
-  const portNext = (id: string) => nxtLeft + nxtIds.indexOf(id) * (W + GAP) + Math.floor(W / 2);
+  const portNext = (id: string) =>
+    nxtLeft + nxtIds.indexOf(id) * (W + GAP) + Math.floor(W / 2);
   const ekey = (e: MermaidEdge) => `${e.from}\u0001${e.to}`;
 
-
-  const active = edges.filter((e) => layerOf.get(e.from)! <= k && layerOf.get(e.to)! >= k + 1);
+  const active = edges.filter((e) =>
+    layerOf.get(e.from)! <= k && layerOf.get(e.to)! >= k + 1
+  );
 
   const r0 = new Array<string>(artboard).fill(" ");
   const r1 = new Array<string>(artboard).fill(" ");
@@ -175,7 +196,6 @@ function drawGap(
 
     put(r0, su, "│");
     if (!finishes) {
-
       if (r1[su] === "─") put(r1, su, "┼");
       else if (r1[su] === " ") put(r1, su, "│");
       put(r2, su, "│");
@@ -184,7 +204,6 @@ function drawGap(
 
     endings.push({ su, sv });
     if (su === sv) {
-
       if (r1[su] === "─") put(r1, su, "┼");
       else if (r1[su] === " ") put(r1, su, "│");
       put(r2, su, "▼");
@@ -208,11 +227,13 @@ function drawGap(
     }
   }
 
-
   const destInfo = new Map<number, { n: number; rail: boolean }>();
   for (const { su, sv } of endings) {
     let d = destInfo.get(sv);
-    if (!d) { d = { n: 0, rail: false }; destInfo.set(sv, d); }
+    if (!d) {
+      d = { n: 0, rail: false };
+      destInfo.set(sv, d);
+    }
     d.n++;
     if (su !== sv) d.rail = true;
   }
@@ -225,11 +246,13 @@ function drawGap(
     put(r2, sv, "▼");
   }
 
-
   const dirs = new Map<number, { l: boolean; r: boolean; v: boolean }>();
   for (const { su, sv } of endings) {
     let d = dirs.get(su);
-    if (!d) { d = { l: false, r: false, v: false }; dirs.set(su, d); }
+    if (!d) {
+      d = { l: false, r: false, v: false };
+      dirs.set(su, d);
+    }
     if (sv < su) d.l = true;
     else if (sv > su) d.r = true;
     else d.v = true;
@@ -239,7 +262,15 @@ function drawGap(
 
     if (cur === "┼" || cur === "┬" || cur === "┴") continue;
     const three = d.l && d.r;
-    const ch = d.v && !d.l && !d.r ? "│" : three ? "┴" : d.l && !d.r ? "┤" : d.r && !d.l ? "├" : "┬";
+    const ch = d.v && !d.l && !d.r
+      ? "│"
+      : three
+      ? "┴"
+      : d.l && !d.r
+      ? "┤"
+      : d.r && !d.l
+      ? "├"
+      : "┬";
     put(r1, su, ch);
   }
 
@@ -247,7 +278,9 @@ function drawGap(
   if (labels.size > 0) {
     const line = new Array<string>(artboard).fill(" ");
     for (const [col, txt] of labels) {
-      for (let i = 0; i < txt.length && col + i < artboard; i++) line[col + i] = txt[i];
+      for (let i = 0; i < txt.length && col + i < artboard; i++) {
+        line[col + i] = txt[i];
+      }
     }
     rows.push(wireRuns(line.join("")));
   }
@@ -256,8 +289,11 @@ function drawGap(
   return rows;
 }
 
-
-function treeText(nodes: Map<string, MermaidNode>, edges: MermaidEdge[], reverse: boolean): MermaidDiagram {
+function treeText(
+  nodes: Map<string, MermaidNode>,
+  edges: MermaidEdge[],
+  reverse: boolean,
+): MermaidDiagram {
   const rows: string[] = [];
   const seen = new Set<string>();
   const src = (e: MermaidEdge) => (reverse ? e.to : e.from);
@@ -272,7 +308,10 @@ function treeText(nodes: Map<string, MermaidNode>, edges: MermaidEdge[], reverse
     out.forEach((e, i) => {
       const last = i === out.length - 1;
       const t = nodes.get(tgt(e));
-      rows.push(`  `.repeat(depth) + `${last ? "└" : "├"}──> [${t?.label ?? tgt(e)}]${suffix(e)}`);
+      rows.push(
+        `  `.repeat(depth) +
+          `${last ? "└" : "├"}──> [${t?.label ?? tgt(e)}]${suffix(e)}`,
+      );
 
       if (!seen.has(tgt(e))) {
         seen.add(tgt(e));
@@ -296,8 +335,10 @@ function treeText(nodes: Map<string, MermaidNode>, edges: MermaidEdge[], reverse
   return { lines: rows, width: Math.max(...rows.map((r) => r.length), 0) };
 }
 
-
-export function computeLayers(edges: MermaidEdge[], order: string[]): string[][] | null {
+export function computeLayers(
+  edges: MermaidEdge[],
+  order: string[],
+): string[][] | null {
   const layer = new Map<string, number>();
   for (const id of order) layer.set(id, 0);
   let changed = true;
@@ -307,7 +348,10 @@ export function computeLayers(edges: MermaidEdge[], order: string[]): string[][]
     for (const e of edges) {
       const a = layer.get(e.from)!;
       const b = layer.get(e.to)!;
-      if (b < a + 1) { layer.set(e.to, a + 1); changed = true; }
+      if (b < a + 1) {
+        layer.set(e.to, a + 1);
+        changed = true;
+      }
     }
   }
   if (guard > order.length) return null;
@@ -321,29 +365,29 @@ export function computeLayers(edges: MermaidEdge[], order: string[]): string[][]
   return layers;
 }
 
-
 function layoutTD(
   nodes: Map<string, MermaidNode>,
   edges: MermaidEdge[],
   order: string[],
   maxCols: number,
 ): MermaidDiagram | null {
-
   const layers = computeLayers(edges, order);
   if (!layers) return null;
 
   const layer = new Map<string, number>();
   layers.forEach((ids, li) => ids.forEach((id) => layer.set(id, li)));
 
-
-  const maxLabel = Math.max(...[...nodes.values()].map((n) => n.label.length), 1);
+  const maxLabel = Math.max(
+    ...[...nodes.values()].map((n) => n.label.length),
+    1,
+  );
   const GAP = 6;
   let W = Math.max(14, Math.min(34, maxLabel + 2));
-  const fit = () => Math.max(...layers.map((l) => l.length * W + (l.length - 1) * GAP), W);
+  const fit = () =>
+    Math.max(...layers.map((l) => l.length * W + (l.length - 1) * GAP), W);
   while (fit() > maxCols && W > 14) W -= 2;
   const artboard = fit();
   if (artboard > maxCols + 8) return null;
-
 
   const outEdges = new Set(edges.map((e) => e.from));
   const threads = new Map<string, number>();
@@ -355,10 +399,10 @@ function layoutTD(
     const x = new Map<string, number>();
     ids.forEach((id, i) => x.set(id, left + i * (W + GAP)));
 
-
     const heights = ids.map((id) => {
       const n = nodes.get(id)!;
-      return wrapLabel(n.label, W - 3).length + (n.shape === "cylinder" ? 3 : 2);
+      return wrapLabel(n.label, W - 3).length +
+        (n.shape === "cylinder" ? 3 : 2);
     });
     const h = Math.max(...heights);
 
@@ -389,20 +433,44 @@ function layoutTD(
     }
 
     if (li < layers.length - 1) {
-      for (const rr of drawGap(li, layers[li + 1], edges, x, layer, threads, W, artboard)) {
+      for (
+        const rr of drawGap(
+          li,
+          layers[li + 1],
+          edges,
+          x,
+          layer,
+          threads,
+          W,
+          artboard,
+        )
+      ) {
         allLines.push(rr.map((r) => r.text).join(""));
         allRuns.push(rr);
       }
     }
   });
 
-  return { lines: allLines, runs: allRuns, width: Math.max(...allLines.map((r) => r.length), 0) };
+  return {
+    lines: allLines,
+    runs: allRuns,
+    width: Math.max(...allLines.map((r) => r.length), 0),
+  };
 }
-
 
 export function colorDiagram(line: string): DiagramRun[] {
   const boxChars = new Set([
-    "│", "─", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼",
+    "│",
+    "─",
+    "┌",
+    "┐",
+    "└",
+    "┘",
+    "├",
+    "┤",
+    "┬",
+    "┴",
+    "┼",
   ]);
   const arrowChars = new Set(["▼", "►", ">"]);
   const out: DiagramRun[] = [];
@@ -414,7 +482,11 @@ export function colorDiagram(line: string): DiagramRun[] {
     cur = "";
   };
   for (const ch of line) {
-    const c = boxChars.has(ch) ? BOX_COLOR : arrowChars.has(ch) ? WIRE_COLOR : undefined;
+    const c = boxChars.has(ch)
+      ? BOX_COLOR
+      : arrowChars.has(ch)
+      ? WIRE_COLOR
+      : undefined;
     if (c !== color) {
       flush();
       color = c;
@@ -425,8 +497,9 @@ export function colorDiagram(line: string): DiagramRun[] {
   return out.length ? out : [{ text: line }];
 }
 
-
-export function splitEdge(line: string): { fromPart: string; toPart: string; label?: string } | null {
+export function splitEdge(
+  line: string,
+): { fromPart: string; toPart: string; label?: string } | null {
   let idx = line.indexOf("-->");
   let arrowLen = 3;
   if (idx < 0) {
@@ -438,19 +511,16 @@ export function splitEdge(line: string): { fromPart: string; toPart: string; lab
   let toPart = line.slice(idx + arrowLen).trim();
   let label: string | undefined;
 
-
   let m = /^\|([^|]*)\|\s*/.exec(toPart);
   if (m) {
     label = m[1].trim();
     toPart = toPart.slice(m[0].length);
   } else {
-
     m = /\s*\|([^|]*)\|\s*$/.exec(fromPart);
     if (m) {
       label = m[1].trim();
       fromPart = fromPart.slice(0, m.index);
     } else {
-
       m = /^(.*?)\s*--\s+(.+?)\s*$/.exec(fromPart);
       if (m && !m[2].startsWith("-")) {
         label = m[2].trim();
@@ -460,7 +530,6 @@ export function splitEdge(line: string): { fromPart: string; toPart: string; lab
   }
   return { fromPart, toPart, label };
 }
-
 
 export function parseMermaid(text: string): ParsedMermaid | null {
   const lines = text.split("\n");
@@ -490,12 +559,17 @@ export function parseMermaid(text: string): ParsedMermaid | null {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line || line.startsWith("%%")) continue;
-    if (/^\s*(?:subgraph|style|classDef|class\b|linkStyle|direction|click|end)\b/.test(line)) continue;
+    if (
+      /^\s*(?:subgraph|style|classDef|class\b|linkStyle|direction|click|end)\b/
+        .test(line)
+    ) continue;
     if (line.includes("-->") || line.includes("->")) {
       const side = splitEdge(line);
       if (!side) continue;
-      const lm = new RegExp(`^\\s*([A-Za-z0-9_-]+)\\s*(?:(${SHAPE_SRC}))?\\s*$`).exec(side.fromPart);
-      const rm = new RegExp(`^\\s*([A-Za-z0-9_-]+)\\s*(?:(${SHAPE_SRC}))?\\s*$`).exec(side.toPart);
+      const lm = new RegExp(`^\\s*([A-Za-z0-9_-]+)\\s*(?:(${SHAPE_SRC}))?\\s*$`)
+        .exec(side.fromPart);
+      const rm = new RegExp(`^\\s*([A-Za-z0-9_-]+)\\s*(?:(${SHAPE_SRC}))?\\s*$`)
+        .exec(side.toPart);
       if (!lm || !rm) continue;
       defNode(lm[1], lm[2]);
       defNode(rm[1], rm[2]);
@@ -509,13 +583,14 @@ export function parseMermaid(text: string): ParsedMermaid | null {
   return { nodes, edges, order, dir };
 }
 
-
 export function renderMermaidDiagram(text: string): MermaidDiagram | null {
   const parsed = parseMermaid(text);
   if (!parsed) return null;
   const { nodes, edges, order, dir } = parsed;
 
-  const es = dir === "BT" ? edges.map((e) => ({ from: e.to, to: e.from, label: e.label })) : edges;
+  const es = dir === "BT"
+    ? edges.map((e) => ({ from: e.to, to: e.from, label: e.label }))
+    : edges;
   if (dir === "LR" || dir === "RL") return treeText(nodes, edges, dir === "RL");
   return layoutTD(nodes, es, order, 76) ?? treeText(nodes, es, false);
 }

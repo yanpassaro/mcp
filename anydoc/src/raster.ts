@@ -1,4 +1,3 @@
-
 import { zlibSync } from "@fflate";
 
 export interface RasterImage {
@@ -10,8 +9,12 @@ export interface RasterImage {
 const SS = 4;
 const DS = 2;
 
-
-interface RGBA { r: number; g: number; b: number; a: number; }
+interface RGBA {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
 
 function hexColor(s: string): RGBA | null {
   const m = /^#([0-9a-fA-F]{6})$/.exec(s.trim());
@@ -20,13 +23,22 @@ function hexColor(s: string): RGBA | null {
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255, a: 255 };
 }
 
-interface Stop { t: number; c: RGBA; }
-interface Grad { a: Stop[]; b: Stop[]; }
-
+interface Stop {
+  t: number;
+  c: RGBA;
+}
+interface Grad {
+  a: Stop[];
+  b: Stop[];
+}
 
 interface RectInstr {
   kind: "rect";
-  x: number; y: number; w: number; h: number; rx: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rx: number;
   color: RGBA | Grad;
   opacity: number;
   stroke: RGBA | null;
@@ -35,8 +47,23 @@ interface RectInstr {
 
 type Instr =
   | RectInstr
-  | { kind: "shape"; contours: { x: number; y: number }[][]; color: RGBA | Grad; opacity: number; stroke: RGBA | null; strokeWidth: number }
-  | { kind: "path"; contours: { x: number; y: number }[][]; close: boolean[]; fill: RGBA | Grad | null; stroke: RGBA | null; strokeWidth: number; opacity: number };
+  | {
+    kind: "shape";
+    contours: { x: number; y: number }[][];
+    color: RGBA | Grad;
+    opacity: number;
+    stroke: RGBA | null;
+    strokeWidth: number;
+  }
+  | {
+    kind: "path";
+    contours: { x: number; y: number }[][];
+    close: boolean[];
+    fill: RGBA | Grad | null;
+    stroke: RGBA | null;
+    strokeWidth: number;
+    opacity: number;
+  };
 
 function attrMap(tag: string): Map<string, string> {
   const m = new Map<string, string>();
@@ -46,11 +73,14 @@ function attrMap(tag: string): Map<string, string> {
   return m;
 }
 
-interface Pt { x: number; y: number; }
-
+interface Pt {
+  x: number;
+  y: number;
+}
 
 function flattenPathD(d: string): { contours: Pt[][]; closed: boolean[] } {
-  const tokens = d.match(/[MLQZmlqz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) ?? [];
+  const tokens =
+    d.match(/[MLQZmlqz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) ?? [];
   const contours: Pt[][] = [];
   const closed: boolean[] = [];
   let open: Pt[] = [];
@@ -116,23 +146,41 @@ function flattenPathD(d: string): { contours: Pt[][]; closed: boolean[] } {
   return { contours, closed };
 }
 
-function parseTransform(s: string | undefined): { a: number; b: number; c: number; d: number; e: number; f: number } | null {
+function parseTransform(
+  s: string | undefined,
+): { a: number; b: number; c: number; d: number; e: number; f: number } | null {
   if (!s) return null;
-  const m = /translate\(\s*([-\d.]+)\s*[, ]\s*([-\d.]+)\s*\)\s*scale\(\s*([-\d.]+)\s*[, ]\s*([-\d.]+)\s*\)/.exec(s);
+  const m =
+    /translate\(\s*([-\d.]+)\s*[, ]\s*([-\d.]+)\s*\)\s*scale\(\s*([-\d.]+)\s*[, ]\s*([-\d.]+)\s*\)/
+      .exec(s);
   if (!m) return null;
-  return { a: parseFloat(m[3]), b: 0, c: 0, d: parseFloat(m[4]), e: parseFloat(m[1]), f: parseFloat(m[2]) };
+  return {
+    a: parseFloat(m[3]),
+    b: 0,
+    c: 0,
+    d: parseFloat(m[4]),
+    e: parseFloat(m[1]),
+    f: parseFloat(m[2]),
+  };
 }
 
-function applyTransform(pts: Pt[], tf: { a: number; b: number; c: number; d: number; e: number; f: number } | null): Pt[] {
+function applyTransform(
+  pts: Pt[],
+  tf:
+    | { a: number; b: number; c: number; d: number; e: number; f: number }
+    | null,
+): Pt[] {
   if (!tf) return pts;
   const out: Pt[] = new Array(pts.length);
   for (let k = 0; k < pts.length; k++) {
     const p = pts[k];
-    out[k] = { x: tf.a * p.x + tf.c * p.y + tf.e, y: tf.b * p.x + tf.d * p.y + tf.f };
+    out[k] = {
+      x: tf.a * p.x + tf.c * p.y + tf.e,
+      y: tf.b * p.x + tf.d * p.y + tf.f,
+    };
   }
   return out;
 }
-
 
 function gradAt(g: Grad, t: number): RGBA {
   t = Math.max(0, Math.min(1, t));
@@ -155,13 +203,17 @@ function gradAt(g: Grad, t: number): RGBA {
   return stops[stops.length - 1].c;
 }
 
-
-export function renderSvg(svg: string, designW: number, designH: number): RasterImage | null {
+export function renderSvg(
+  svg: string,
+  designW: number,
+  designH: number,
+): RasterImage | null {
   const W = Math.round(designW * SS);
   const H = Math.round(designH * SS);
   if (W <= 0 || H <= 0) return null;
 
-  const panelHex = /<rect[^>]*fill="#([0-9a-fA-F]{6})"/.exec(svg)?.[1] ?? "1A1D23";
+  const panelHex = /<rect[^>]*fill="#([0-9a-fA-F]{6})"/.exec(svg)?.[1] ??
+    "1A1D23";
   const panelBg = hexColor("#" + panelHex) ?? { r: 26, g: 29, b: 35, a: 255 };
   const buf = new Uint8Array(W * H * 3);
   for (let i = 0; i < buf.length; i += 3) {
@@ -178,7 +230,6 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
     buf[o + 1] = c.g * a + buf[o + 1] * (1 - a);
     buf[o + 2] = c.b * a + buf[o + 2] * (1 - a);
   };
-
 
   const fillScanlines = (contours: Pt[][], colorFn: (y: number) => RGBA) => {
     let ymin = Infinity;
@@ -218,7 +269,9 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
     }
   };
 
-  const isFlat = (c: unknown): c is RGBA => typeof c === "object" && c !== null && "r" in (c as Record<string, unknown>);
+  const isFlat = (c: unknown): c is RGBA =>
+    typeof c === "object" && c !== null &&
+    "r" in (c as Record<string, unknown>);
 
   const fillRect = (ri: RectInstr) => {
     const x0 = ri.x;
@@ -236,7 +289,6 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
       let left = x0;
       let right = x1 - 1;
       if (rx > 0) {
-
         for (const cy of [y0 + rx, y1 - rx]) {
           const v = yy - cy;
           if (Math.abs(v) <= rx) {
@@ -254,16 +306,28 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
     }
   };
 
-
-  const fillShape = (ptsArr: Pt[][], color: RGBA | Grad, opacity: number, anchorY: number, anchorH: number) => {
+  const fillShape = (
+    ptsArr: Pt[][],
+    color: RGBA | Grad,
+    opacity: number,
+    anchorY: number,
+    anchorH: number,
+  ) => {
     const c0: RGBA | null = isFlat(color) ? color : null;
     fillScanlines(ptsArr, (yy) => {
-      const cc: RGBA = c0 ?? gradAt(color as Grad, (yy - anchorY) / Math.max(1, anchorH));
+      const cc: RGBA = c0 ??
+        gradAt(color as Grad, (yy - anchorY) / Math.max(1, anchorH));
       return { ...cc, a: Math.round(cc.a * opacity) };
     });
   };
 
-  const strokeContour = (pts: Pt[], color: RGBA, opacity: number, width: number, closed: boolean) => {
+  const strokeContour = (
+    pts: Pt[],
+    color: RGBA,
+    opacity: number,
+    width: number,
+    closed: boolean,
+  ) => {
     const r = width / 2;
     const cc = { ...color, a: Math.round(color.a * opacity) };
 
@@ -289,11 +353,31 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
       if (len < 1e-9) continue;
       const nx = (-dy / len) * r;
       const ny = (dx / len) * r;
-      fillQuad(p.x + nx, p.y + ny, q.x + nx, q.y + ny, q.x - nx, q.y - ny, p.x - nx, p.y - ny, cc);
+      fillQuad(
+        p.x + nx,
+        p.y + ny,
+        q.x + nx,
+        q.y + ny,
+        q.x - nx,
+        q.y - ny,
+        p.x - nx,
+        p.y - ny,
+        cc,
+      );
     }
   };
 
-  const fillQuad = (ax: number, ay: number, bx: number, by: number, cx2: number, cy2: number, dx2: number, dy2: number, c: RGBA) => {
+  const fillQuad = (
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+    cx2: number,
+    cy2: number,
+    dx2: number,
+    dy2: number,
+    c: RGBA,
+  ) => {
     const ymin = Math.min(ay, by, cy2, dy2);
     const ymax = Math.max(ay, by, cy2, dy2);
     const ys = Math.max(0, Math.floor(ymin));
@@ -323,11 +407,11 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
     }
   };
 
-
   const instrs: Instr[] = [];
   const grads = new Map<string, Grad>();
   let curGrad: { id: string; a: Stop[]; b: Stop[] } | null = null;
-  const tagRe = /<(\/)?(svg|defs|linearGradient|stop|rect|circle|ellipse|polygon|line|path|text)([^>]*)>/g;
+  const tagRe =
+    /<(\/)?(svg|defs|linearGradient|stop|rect|circle|ellipse|polygon|line|path|text)([^>]*)>/g;
   let m: RegExpExecArray | null;
   while ((m = tagRe.exec(svg))) {
     const close = !!m[1];
@@ -364,7 +448,11 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
       if (grads.has(fill.slice(5, -1))) {
         instrs.push({
           kind: "rect",
-          x, y, w, h, rx,
+          x,
+          y,
+          w,
+          h,
+          rx,
           color: grads.get(fill.slice(5, -1))!,
           opacity: parseFloat(a.get("opacity") ?? "1"),
           stroke: strokeH,
@@ -373,7 +461,11 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
       } else if (color) {
         instrs.push({
           kind: "rect",
-          x, y, w, h, rx,
+          x,
+          y,
+          w,
+          h,
+          rx,
           color,
           opacity: parseFloat(a.get("opacity") ?? "1"),
           stroke: strokeH,
@@ -427,8 +519,14 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
         instrs.push({
           kind: "path",
           contours: [[
-            { x: parseFloat(a.get("x1") ?? "0") * SS, y: parseFloat(a.get("y1") ?? "0") * SS },
-            { x: parseFloat(a.get("x2") ?? "0") * SS, y: parseFloat(a.get("y2") ?? "0") * SS },
+            {
+              x: parseFloat(a.get("x1") ?? "0") * SS,
+              y: parseFloat(a.get("y1") ?? "0") * SS,
+            },
+            {
+              x: parseFloat(a.get("x2") ?? "0") * SS,
+              y: parseFloat(a.get("y2") ?? "0") * SS,
+            },
           ]],
           close: [false],
           fill: null,
@@ -445,7 +543,7 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
       const fl = flattenPathD(a.get("d") ?? "");
 
       const contours = fl.contours.map((c) =>
-        applyTransform(c, tf).map((p) => ({ x: p.x * SS, y: p.y * SS })),
+        applyTransform(c, tf).map((p) => ({ x: p.x * SS, y: p.y * SS }))
       );
       const fill = a.get("fill");
       const strokeH = a.get("stroke") ? hexColor(a.get("stroke")!) : null;
@@ -453,19 +551,28 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
         kind: "path",
         contours,
         close: fl.closed,
-        fill: fill === "none" || !fill ? null : fill.startsWith("url(#") ? (grads.get(fill.slice(5, -1)) ?? null) : hexColor(fill),
+        fill: fill === "none" || !fill
+          ? null
+          : fill.startsWith("url(#")
+          ? (grads.get(fill.slice(5, -1)) ?? null)
+          : hexColor(fill),
         stroke: strokeH,
         strokeWidth: parseFloat(a.get("stroke-width") ?? "0") * SS,
         opacity: parseFloat(a.get("opacity") ?? "1"),
       });
       continue;
     }
-
   }
 
-  function pushShape(a: Map<string, string>, contours: Pt[][], g: Map<string, Grad>): boolean {
+  function pushShape(
+    a: Map<string, string>,
+    contours: Pt[][],
+    g: Map<string, Grad>,
+  ): boolean {
     const fill = a.get("fill") ?? "";
-    const color = fill.startsWith("url(#") ? g.get(fill.slice(5, -1)) ?? null : hexColor(fill);
+    const color = fill.startsWith("url(#")
+      ? g.get(fill.slice(5, -1)) ?? null
+      : hexColor(fill);
     if (!color) return false;
     const strokeH = a.get("stroke") ? hexColor(a.get("stroke")!) : null;
     instrs.push({
@@ -479,12 +586,17 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
     return true;
   }
 
-
   for (const op of instrs) {
     if (op.kind === "rect") {
       fillRect(op);
       if (op.stroke && op.strokeWidth > 0) {
-        strokeContour(roundedRectOutline(op.x, op.y, op.w, op.h, op.rx), op.stroke, op.opacity, op.strokeWidth, true);
+        strokeContour(
+          roundedRectOutline(op.x, op.y, op.w, op.h, op.rx),
+          op.stroke,
+          op.opacity,
+          op.strokeWidth,
+          true,
+        );
       }
       continue;
     }
@@ -493,29 +605,54 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
       const anchorH = Math.max(1, boundsH(op.contours[0] ?? []));
       const flatC = isFlat(op.color) ? op.color : null;
       if (flatC) {
-        fillScanlines(op.contours, () => ({ ...flatC, a: Math.round(flatC.a * op.opacity) }));
+        fillScanlines(
+          op.contours,
+          () => ({ ...flatC, a: Math.round(flatC.a * op.opacity) }),
+        );
       } else {
         fillShape(op.contours, op.color as Grad, op.opacity, anchorY, anchorH);
       }
-      if (op.stroke && op.strokeWidth > 0) strokeContour(op.contours[0], op.stroke, op.opacity, op.strokeWidth, true);
+      if (op.stroke && op.strokeWidth > 0) {
+        strokeContour(
+          op.contours[0],
+          op.stroke,
+          op.opacity,
+          op.strokeWidth,
+          true,
+        );
+      }
       continue;
     }
 
     if (op.fill) {
       const flatC = isFlat(op.fill) ? op.fill : null;
       if (flatC) {
-        fillScanlines(op.contours, () => ({ ...flatC, a: Math.round(flatC.a * op.opacity) }));
+        fillScanlines(
+          op.contours,
+          () => ({ ...flatC, a: Math.round(flatC.a * op.opacity) }),
+        );
       } else {
-        fillShape(op.contours, op.fill as Grad, op.opacity, minY(op.contours[0] ?? []), Math.max(1, boundsH(op.contours[0] ?? [])));
+        fillShape(
+          op.contours,
+          op.fill as Grad,
+          op.opacity,
+          minY(op.contours[0] ?? []),
+          Math.max(1, boundsH(op.contours[0] ?? [])),
+        );
       }
     }
     if (op.stroke && op.strokeWidth > 0) {
       for (let ci = 0; ci < op.contours.length; ci++) {
-        strokeContour(op.contours[ci], op.stroke, op.opacity, op.strokeWidth, op.close[ci] ?? false);
+        strokeContour(
+          op.contours[ci],
+          op.stroke,
+          op.opacity,
+          op.strokeWidth,
+          op.close[ci] ?? false,
+        );
       }
     }
   }
-
 
   const pw = Math.round(designW * DS);
   const ph = Math.round(designH * DS);
@@ -544,8 +681,13 @@ export function renderSvg(svg: string, designW: number, designH: number): Raster
   return { width: pw, height: ph, rgba: px };
 }
 
-
-function roundedRectOutline(x: number, y: number, w: number, h: number, rx: number): Pt[] {
+function roundedRectOutline(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  rx: number,
+): Pt[] {
   const r = Math.min(rx, w / 2, h / 2);
   const n = 28;
   const pts: Pt[] = [];
@@ -556,7 +698,10 @@ function roundedRectOutline(x: number, y: number, w: number, h: number, rx: numb
     }
   };
   if (r <= 0) {
-    pts.push({ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h });
+    pts.push({ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, {
+      x,
+      y: y + h,
+    });
     return pts;
   }
   pts.push({ x: x + r, y }, { x: x + w - r, y });
@@ -586,7 +731,6 @@ function boundsH(pts: Pt[]): number {
   return Math.max(0, maxY(pts) - minY(pts));
 }
 
-
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -599,7 +743,9 @@ const CRC_TABLE = (() => {
 
 function crc32(bytes: Uint8Array): number {
   let c = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 255] ^ (c >>> 8);
+  for (let i = 0; i < bytes.length; i++) {
+    c = CRC_TABLE[(c ^ bytes[i]) & 255] ^ (c >>> 8);
+  }
   return (c ^ 0xffffffff) >>> 0;
 }
 
@@ -610,7 +756,10 @@ function chunk(type: string, data: Uint8Array): Uint8Array {
   for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
   out.set(data, 8);
   const crc = new Uint8Array(4);
-  new DataView(crc.buffer).setUint32(0, crc32(out.subarray(4, 8 + data.length)));
+  new DataView(crc.buffer).setUint32(
+    0,
+    crc32(out.subarray(4, 8 + data.length)),
+  );
   out.set(crc, 8 + data.length);
   return out;
 }
@@ -652,8 +801,11 @@ export function encodePng(img: RasterImage): Uint8Array {
   return out;
 }
 
-
-export function svgToPng(svg: string, designW: number, designH: number): Uint8Array | null {
+export function svgToPng(
+  svg: string,
+  designW: number,
+  designH: number,
+): Uint8Array | null {
   const img = renderSvg(svg, designW, designH);
   if (!img) return null;
   return encodePng(img);

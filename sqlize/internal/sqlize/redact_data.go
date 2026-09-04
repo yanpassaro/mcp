@@ -76,7 +76,7 @@ func labelFor(entity string) string {
 	if l, ok := labels[entity]; ok {
 		return "[" + l + "]"
 	}
-	return "[" + entity + "]"
+	return "[VALOR]"
 }
 
 func contextBoost(entity, cell string, start, end int) bool {

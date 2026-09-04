@@ -1,5 +1,3 @@
-
-
 export interface GlyphTextOpts {
   text: string;
   x: number;
@@ -20,14 +18,19 @@ const FONT_CANDIDATES = [
   "/System/Library/Fonts/Supplemental/Arial.ttf",
 ];
 
-function findTable(bytes: Uint8Array, tag: string): { off: number; len: number } | null {
+function findTable(
+  bytes: Uint8Array,
+  tag: string,
+): { off: number; len: number } | null {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const numTables = dv.getUint16(4);
   for (let i = 0; i < numTables; i++) {
     const r = 12 + i * 16;
     let t = "";
     for (let k = 0; k < 4; k++) t += String.fromCharCode(bytes[r + k]);
-    if (t === tag) return { off: dv.getUint32(r + 8), len: dv.getUint32(r + 12) };
+    if (t === tag) {
+      return { off: dv.getUint32(r + 8), len: dv.getUint32(r + 12) };
+    }
   }
   return null;
 }
@@ -50,12 +53,13 @@ class Ttf {
     const hmtx = findTable(bytes, "hmtx");
     const loca = findTable(bytes, "loca");
     const glyf = findTable(bytes, "glyf");
-    if (!head || !maxp || !hhea || !hmtx || !loca || !glyf) throw new Error("fonte sem tabelas TrueType");
+    if (!head || !maxp || !hhea || !hmtx || !loca || !glyf) {
+      throw new Error("fonte sem tabelas TrueType");
+    }
     this.unitsPerEm = this.dv.getUint16(head.off + 18);
     if (!this.unitsPerEm) throw new Error("unitsPerEm inválido");
     this.numGlyphs = this.dv.getUint16(maxp.off + 4);
     this.glyfOff = glyf.off;
-
 
     const short = this.dv.getInt16(head.off + 50) === 0;
     this.glyphOffsets = new Array(this.numGlyphs + 1);
@@ -65,16 +69,16 @@ class Ttf {
         : this.dv.getUint32(loca.off + g * 4);
     }
 
-
     const numMetrics = this.dv.getUint16(hhea.off + 34);
-    const lastAdv = numMetrics ? this.dv.getUint16(hmtx.off + (numMetrics - 1) * 4) : 0;
+    const lastAdv = numMetrics
+      ? this.dv.getUint16(hmtx.off + (numMetrics - 1) * 4)
+      : 0;
     this.advances = new Array(this.numGlyphs);
     for (let g = 0; g < this.numGlyphs; g++) {
       this.advances[g] = g < numMetrics
         ? this.dv.getUint16(hmtx.off + g * 4)
         : lastAdv;
     }
-
 
     const cmap = findTable(bytes, "cmap");
     if (cmap) this.parseCmap(cmap.off, cmap.len);
@@ -92,13 +96,20 @@ class Ttf {
         sub: off + dv.getUint32(off + 8 + i * 8),
       });
     }
-    const rank = (r: { pid: number; eid: number }) =>
-      (r.pid === 3 && r.eid === 1 ? 0 : r.pid === 0 ? 1 : 9);
+    const rank = (
+      r: { pid: number; eid: number },
+    ) => (r.pid === 3 && r.eid === 1 ? 0 : r.pid === 0 ? 1 : 9);
     recs.sort((a, b) => rank(a) - rank(b));
     for (const r of recs) {
       const format = dv.getUint16(r.sub);
-      if (format === 4) { this.parseCmap4(r.sub); return; }
-      if (format === 12) { this.parseCmap12(r.sub, r.sub + dv.getUint32(r.sub + 12)); return; }
+      if (format === 4) {
+        this.parseCmap4(r.sub);
+        return;
+      }
+      if (format === 12) {
+        this.parseCmap12(r.sub, r.sub + dv.getUint32(r.sub + 12));
+        return;
+      }
     }
   }
 
@@ -154,7 +165,7 @@ class Ttf {
 
     const contours = this.contoursOf(gid, new Set());
     let d = "";
-    if (contours) for (const c of contours) d += contourToPath(c);
+    if (contours) { for (const c of contours) d += contourToPath(c); }
     this.pathCache.set(gid, d);
     return d;
   }
@@ -163,8 +174,10 @@ class Ttf {
     return gid > 0 && gid < this.numGlyphs ? this.advances[gid] : 0;
   }
 
-
-  private contoursOf(gid: number, visiting: Set<number>): GlyphPoint[][] | null {
+  private contoursOf(
+    gid: number,
+    visiting: Set<number>,
+  ): GlyphPoint[][] | null {
     if (gid <= 0 || gid >= this.numGlyphs || visiting.has(gid)) return null;
     visiting.add(gid);
     try {
@@ -173,7 +186,6 @@ class Ttf {
       if (end - start < 10) return null;
       const numContours = this.dv.getInt16(start);
       if (numContours >= 0) {
-
         const endPts: number[] = [];
         let p = start + 10;
         for (let c = 0; c < numContours; c++) {
@@ -232,7 +244,6 @@ class Ttf {
         return out;
       }
 
-
       const parts = this.compositeParts(start, end);
       const out: GlyphPoint[][] = [];
       for (const part of parts) {
@@ -252,13 +263,28 @@ class Ttf {
     }
   }
 
-
   private compositeParts(
     start: number,
     end: number,
-  ): { gid: number; a: number; b: number; c: number; d: number; dx: number; dy: number }[] {
+  ): {
+    gid: number;
+    a: number;
+    b: number;
+    c: number;
+    d: number;
+    dx: number;
+    dy: number;
+  }[] {
     const dv = this.dv;
-    const parts: { gid: number; a: number; b: number; c: number; d: number; dx: number; dy: number }[] = [];
+    const parts: {
+      gid: number;
+      a: number;
+      b: number;
+      c: number;
+      d: number;
+      dx: number;
+      dy: number;
+    }[] = [];
     let p = start + 10;
     for (let guard = 0; guard < 32 && p + 4 <= end; guard++) {
       const flags = dv.getUint16(p);
@@ -299,7 +325,10 @@ class Ttf {
       const dy = arg2;
       parts.push({
         gid: compGid,
-        a, b, c, d,
+        a,
+        b,
+        c,
+        d,
         dx: (flags & 0x0002) ? dx : 0,
         dy: (flags & 0x0002) ? dy : 0,
       });
@@ -309,8 +338,11 @@ class Ttf {
   }
 }
 
-interface GlyphPoint { x: number; y: number; on: boolean; }
-
+interface GlyphPoint {
+  x: number;
+  y: number;
+  on: boolean;
+}
 
 function contourToPath(pts: { x: number; y: number; on: boolean }[]): string {
   const n = pts.length;
@@ -326,7 +358,9 @@ function contourToPath(pts: { x: number; y: number; on: boolean }[]): string {
     const p = rot[k];
     if (p.on) {
       if (ctrl) {
-        d += `Q${ctrl.x.toFixed(1)} ${ctrl.y.toFixed(1)} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+        d += `Q${ctrl.x.toFixed(1)} ${ctrl.y.toFixed(1)} ${p.x.toFixed(1)} ${
+          p.y.toFixed(1)
+        }`;
         ctrl = null;
       } else {
         d += `L${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
@@ -334,7 +368,9 @@ function contourToPath(pts: { x: number; y: number; on: boolean }[]): string {
     } else if (ctrl) {
       const mx = (ctrl.x + p.x) / 2;
       const my = (ctrl.y + p.y) / 2;
-      d += `Q${ctrl.x.toFixed(1)} ${ctrl.y.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)}`;
+      d += `Q${ctrl.x.toFixed(1)} ${ctrl.y.toFixed(1)} ${mx.toFixed(1)} ${
+        my.toFixed(1)
+      }`;
       ctrl = p;
     } else {
       ctrl = p;
@@ -343,7 +379,9 @@ function contourToPath(pts: { x: number; y: number; on: boolean }[]): string {
   if (ctrl) {
     const mx = (ctrl.x + rot[0].x) / 2;
     const my = (ctrl.y + rot[0].y) / 2;
-    d += `Q${ctrl.x.toFixed(1)} ${ctrl.y.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)}`;
+    d += `Q${ctrl.x.toFixed(1)} ${ctrl.y.toFixed(1)} ${mx.toFixed(1)} ${
+      my.toFixed(1)
+    }`;
   }
   return d + "Z";
 }
@@ -374,13 +412,21 @@ export async function loadGlyphShaper(): Promise<GlyphShaper | null> {
       glyphs.push(gid);
       w += ttf!.advance(gid) * scale;
     }
-    let cx = opts.anchor === "middle" ? opts.x - w / 2 : opts.anchor === "end" ? opts.x - w : opts.x;
+    let cx = opts.anchor === "middle"
+      ? opts.x - w / 2
+      : opts.anchor === "end"
+      ? opts.x - w
+      : opts.x;
     const parts: string[] = [];
     for (const gid of glyphs) {
       const d = ttf!.glyphPath(gid);
       if (d) {
         parts.push(
-          `<path transform="translate(${cx.toFixed(2)},${opts.y.toFixed(2)}) scale(${scale.toFixed(5)},${(-scale).toFixed(5)})" d="${d}" fill="${opts.color}"/>`,
+          `<path transform="translate(${cx.toFixed(2)},${
+            opts.y.toFixed(2)
+          }) scale(${scale.toFixed(5)},${
+            (-scale).toFixed(5)
+          })" d="${d}" fill="${opts.color}"/>`,
         );
       }
       cx += ttf!.advance(gid) * scale;

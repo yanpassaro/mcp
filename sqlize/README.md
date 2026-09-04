@@ -20,7 +20,7 @@ sqlize/
     livedb.go                   # bancos ao vivo (Postgres/MySQL) read-only
     redact.go                   # redator PII (detecção + mascaramento)
     redact_data.go              # carrega as listas do pii.json (//go:embed)
-    names_br.go                 # normalizações + reforços via env
+    names_br.go                 # normalizações (minúsculas/sem acento)
     xml.go                      # parser XML heurístico
     server.go                   # ferramentas MCP (Register)
   internal/data/                # dados embutidos (pacote que faz o //go:embed)
@@ -135,8 +135,7 @@ redator é inspirado na arquitetura do [Presidio](https://github.com/data-privac
    — ou se a coluna confirmar.
 5. **Nomes/pessoas não são mascarados.** A detecção de pessoas (`PESSOA`) foi
    desativada nas tools (SQLite e bancos ao vivo), então `nome`, `cliente`,
-   `customer` etc. aparecem como estão. As envs `SQLIZE_PII_NAMES` e
-   `SQLIZE_PII_WORDS` deixam de ter efeito.
+   `customer` etc. aparecem como estão.
 6. **Limiar** (`score >= 0.5`) e **resolução de sobreposição** decidem o que
    é mascarado; a máscara é sempre o rótulo da entidade entre colchetes
    (`[CPF]`, `[CARTÃO]`, `[EMAIL]`...).
