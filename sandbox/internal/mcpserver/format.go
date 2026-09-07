@@ -41,6 +41,15 @@ func formatScriptList(entries []sandbox.Entry, descs map[string]string) string {
 	return b.String()
 }
 
+func formatScriptWrite(name string, n int, content string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Script `%s` gravado (%d bytes)\n\n", name, n)
+	b.WriteString("```lua\n")
+	b.WriteString(content)
+	b.WriteString("\n```\n")
+	return b.String()
+}
+
 func formatScriptRead(name, content string) string {
 	return fmt.Sprintf("## Script `%s`\n\n```lua\n%s\n```\n", name, content)
 }

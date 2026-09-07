@@ -143,7 +143,7 @@ func (s *Server) writeScript(ctx context.Context, _ *mcp.CallToolRequest, in wri
 	if _, err := s.dev.Write(name, wrapped); err != nil {
 		return nil, nil, err
 	}
-	return textResult(fmt.Sprintf("Script `%s` gravado (%d bytes).\n", name, len(wrapped)))
+	return textResult(formatScriptWrite(name, len(wrapped), wrapped))
 }
 
 func (s *Server) delScript(ctx context.Context, _ *mcp.CallToolRequest, in delScriptInput) (*mcp.CallToolResult, any, error) {

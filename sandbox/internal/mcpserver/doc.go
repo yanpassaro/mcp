@@ -163,7 +163,7 @@ std.result.ok({ received = std.args })
 | Tool | What it does |
 | --- | --- |
 | ~sandbox_read~ | Read a saved script by ~name~, or list all; ~name~ may be ~.~ or a glob (e.g. ~*.lua~). |
-| ~sandbox_write~ | Create/overwrite a script (~name~ + ~code~; ~description~ optional). Pass **only the body** — the ~function main(std)~ wrapper is added automatically. |
+| ~sandbox_write~ | Create/overwrite a script (~name~ + ~code~; ~description~ optional). Pass **only the body** — the ~function main(std)~ wrapper is added automatically. Returns the stored script. |
 | ~sandbox_del~ | Delete a saved script by ~name~. |
 | ~sandbox_run~ | Run a saved script by ~name~, with optional ~args~ (JSON or string). |
 | ~sandbox_manage~ | Filesystem actions: ~copy~ (host→mnt), ~mount~ (mnt→host), ~del~, ~stat~, ~list~ (tree). |
