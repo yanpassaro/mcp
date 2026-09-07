@@ -36,6 +36,9 @@ var docAliases = map[string]string{
 	"regexp":    "regex",
 	"fake":      "fake",
 	"faker":     "fake",
+	"pii":       "pii",
+	"mask":      "pii",
+	"redact":    "pii",
 	"xml":       "xml",
 	"excel":     "excel",
 	"data":      "data",
@@ -54,7 +57,7 @@ var docAliases = map[string]string{
 var docTopics = []string{
 	"index", "meta", "tools",
 	"io", "tmp", "fetch", "cookies", "secrets", "sql", "result", "log", "args",
-	"json", "encode", "str", "list", "num", "date", "random", "uuid", "assert", "fake", "csv", "regex", "xml", "excel", "data",
+	"json", "encode", "str", "list", "num", "date", "random", "uuid", "assert", "fake", "pii", "csv", "regex", "xml", "excel", "data",
 	"limits", "env", "examples",
 }
 
@@ -118,6 +121,7 @@ Write it with ~sandbox_write~ (name + code) and run it with ~sandbox_run~. Tools
 | ~random~ | ~seed~, ~int~, ~pick~, ~shuffle~ |
 | ~assert~ | ~ok~, ~equal~, ~throws~, ~type~, ~notNil~, ~number~, ~string~, ~boolean~, ~table~, ~contains~, ~matches~, ~between~, ~length~ |
 | ~fake~ | ~seed~, ~name~, ~email~, ~username~, ~phone~, ~int~, ~float~, ~bool~, ~uuid~, ~date~, ~words~, ~sentence~, ~paragraph~ |
+| ~pii~ | ~has~, ~detect~, ~mask~, ~maskRows~ |
 
 Call ~sandbox_doc~ with a topic for details (e.g., ~sandbox_doc~ topic=~io~). Topics: ~meta~, ~io~, ~tmp~, ~fetch~, ~cookies~, ~secrets~, ~sql~, ~uuid~, ~csv~, ~regex~, ~xml~, ~excel~, ~data~, ~result~, ~log~, ~json~, ~encode~, ~str~, ~list~, ~num~, ~date~, ~random~, ~assert~, ~fake~, ~limits~, ~env~, ~tools~, ~examples~.
 
@@ -680,14 +684,35 @@ std.data.convert("tmp:dados.json", "tmp:dados.xlsx")
 	local p = { nome = std.fake.name(), email = std.fake.email(), n = std.fake.int(1, 100) }
 	std.result.ok(p)
 	~~~`,
-		"limits": `# Limits
+		"pii": `# std.pii — detect and mask PII
+
+		Detects and masks personally identifiable information (CPF, CNPJ, email, phone, card, address, secrets, ...).
+
+		**Auto-mask:** sensitive PII (CPF, CNPJ, email, phone, card, JWT, BTC) is automatically replaced in all outputs/returns (like secrets). Dates, IPs and URLs are NOT auto-masked, to avoid breaking normal data — use ~std.pii.mask~ for a full mask.
+
+		| Function | Signature | Returns |
+		| --- | --- | --- |
+		| ~has~ | ~has(s)~ | bool |
+		| ~detect~ | ~detect(s)~ | table of { type, value } |
+		| ~mask~ | ~mask(s)~ | string (replaces with [TYPE]) |
+		| ~maskRows~ | ~maskRows(rows)~ | rows with PII columns masked |
+
+		~maskRows~ detects PII columns by header name (e.g. ~cpf~, ~email~, ~telefone~, ~senha~...) and masks their cells (secrets become ~[REDACTED]~).
+
+		~~~lua
+		local s = "Contato: joao@ex.com, CPF 123.456.789-01"
+		local masked = std.pii.mask(s)              -- "Contato: [EMAIL], CPF [CPF]"
+		local rows = std.pii.maskRows({ { cpf = "123.456.789-01", nome = "Ava" } })
+		std.result.ok({ has = std.pii.has(s), masked = masked, rows = rows })
+		~~~`,
+			"limits": `# Limits
 
 - Execution: up to 30s.
 - Output: 256 KiB (truncated).
 - File: 2 MB per file; 1 MB per write.
 - Paths are confined to the sandbox (no absolute paths, no ~..~).
 - ~std.sql.query~ returns at most 10,000 rows (~SANDBOX_SQL_MAX_ROWS~).
-- Secrets from ~SECRET_*~ are redacted from any output/return.`,
+- Secrets (~SECRET_*~) and PII (CPF, CNPJ, email, phone, card, JWT/BTC) are auto-masked in any output/return.`,
 	"env": `# Environment
 
 Secrets are available via ~std.secrets.get~ using ~SECRET_*~ variables (e.g., ~SECRET_GITHUB_TOKEN_API~ → ~std.secrets.get("github_token_api")~).
