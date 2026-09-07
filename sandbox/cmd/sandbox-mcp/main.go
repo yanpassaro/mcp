@@ -26,14 +26,23 @@ func main() {
 	mntDir := mntDir()
 	devDir := devDir(mntDir)
 	tmpDir := tmpDir()
-
-	if n, err := sandbox.CleanupTTL(tmpDir, tmpTTL()); err == nil && n > 0 {
-		log.Printf("sandbox-mcp: tmp cleanup removed %d file(s)", n)
+	tempScripts := filepath.Join(devDir, "temp")
+	if err := os.MkdirAll(tempScripts, 0o755); err != nil {
+		log.Printf("warning: failed to create %s: %v", tempScripts, err)
 	}
-	log.Printf("sandbox-mcp: mnt=%s dev=%s tmp=%s", mntDir, devDir, tmpDir)
+
+	clearStore := func(label, dir string) {
+		if n, err := sandbox.NewStore(dir).Clear(); err == nil && n > 0 {
+			log.Printf("sandbox-mcp: %s clear removed %d file(s)", label, n)
+		}
+	}
+	clearStore("tmp", tmpDir)
+	clearStore("temp-scripts", tempScripts)
+
+	log.Printf("sandbox-mcp: mnt=%s dev=%s tmp=%s temp-scripts=%s", mntDir, devDir, tmpDir, tempScripts)
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "sandbox-mcp", Version: "0.1.0"}, nil)
-	mcpserver.New(mntDir, devDir, tmpDir).Register(server)
+	mcpserver.New(mntDir, devDir, tmpDir, tempScripts).Register(server)
 
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Printf("sandbox-mcp stopped: %v", err)
@@ -82,14 +91,7 @@ func tmpDir() string {
 	return dir
 }
 
-func tmpTTL() time.Duration {
-	if v := strings.TrimSpace(os.Getenv("SANDBOX_TMP_TTL_SECONDS")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return time.Duration(n) * time.Second
-		}
-	}
-	return time.Hour
-}
+
 
 func seedMntDir(dir string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {

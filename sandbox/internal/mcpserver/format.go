@@ -19,12 +19,12 @@ func result(text string, isError bool) (*mcp.CallToolResult, any, error) {
 	}, nil, nil
 }
 
-func formatScriptList(entries []sandbox.Entry, descs map[string]string) string {
+func formatScriptList(title string, entries []sandbox.Entry, descs map[string]string) string {
 	if len(entries) == 0 {
-		return "_Nenhum script salvo ainda._"
+		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "## Scripts do sandbox · %d\n\n", len(entries))
+	fmt.Fprintf(&b, "## %s · %d\n\n", title, len(entries))
 	for i, e := range entries {
 		name := strings.TrimSuffix(e.Name, ".lua")
 		fmt.Fprintf(&b, "### `%s`\n", name)

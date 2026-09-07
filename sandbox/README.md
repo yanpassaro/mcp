@@ -14,6 +14,9 @@ Cada script tem `name`, `description` e uma função `function main(std)` que re
 | `sandbox_run` | Roda um script salvo, com `args` opcional |
 | `sandbox_manage` | Ações no filesystem do sandbox: `copy` (host→sandbox), `mount` (sandbox→host), `del`, `stat`, `list` (árvore) |
 | `sandbox_doc` | Devolve a documentação da API `std` (topic opcional: `io`, `fetch`, `secrets`, ...) |
+| `sandbox_diagnostics` | Diagnostica um script Lua (sintaxe, meta, `main`, uso de `std.*`) |
+
+Scripts em `dev/` são persistentes. Nomes com o prefixo `temp:` (ex.: `temp:meu_script`) vivem em `dev/temp/` e são **limpados a cada inicialização** do servidor (assim como a pasta `tmp/`).
 
 `std` fornece: `result`, `log`, `args`, `io` (`read`/`lines`/`json`/`write`/`append`/`del`/`exists`/`stat`/`dir`/`copy`/`move`/`mkdir`/`glob`/`walk`), `tmp` (mesmas funções do `io` + `clear`), `sql` (`exec`/`query`/`get`/`scalar`/`close`/`begin`/`commit`/`rollback`/`tables`/`columns`/`schema`), `uuid` (`v4`/`v7`), `csv` (`parse`/`stringify`), `xml` (`parse`/`stringify`), `excel` (`sheets`/`read`/`write`), `data` (`fromCSV`/`toCSV`/`fromJSON`/`toJSON`/`toXML`/`fromExcel`/`toExcel`/`sqlImport`/`sqlExport`/`convert`), `regex` (`match`/`find`/`findAll`/`replace`/`split`/`groups`/`findAllGroups`), `fake` (`seed`/`name`/`email`/`username`/`phone`/`int`/`float`/`bool`/`uuid`/`date`/`words`/`sentence`/`paragraph`), `pii` (`has`/`detect`/`mask`/`maskRows`), `random`, `date`, `str`, `list`, `num`, `json`, `assert` (`ok`/`equal`/`throws`/`type`/`notNil`/`number`/`string`/`boolean`/`table`/`contains`/`matches`/`between`/`length`), `fetch` (`get`/`post`/`json`), `encode`, `secrets` (`get`/`has`).
 
@@ -54,9 +57,9 @@ Opera sobre a pasta `mnt/` do sandbox. `path` é sempre relativo ao sandbox (exc
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
 | `SANDBOX_MNT_DIR` | `~/.local/share/mcp/sandbox/mnt` | filesystem do script (leitura e escrita) |
-| `SANDBOX_DEV_DIR` | `~/.local/share/mcp/sandbox/dev` | scripts do agente |
+| `SANDBOX_DEV_DIR` | `~/.local/share/mcp/sandbox/dev` | scripts persistentes do agente |
 | `SANDBOX_TMP_DIR` | `~/.local/share/mcp/sandbox/tmp` | pasta temporária do `std.tmp` |
-| `SANDBOX_TMP_TTL_SECONDS` | `3600` | idade limite p/ limpar arquivos de `tmp/` na inicialização |
+
 | `SANDBOX_TMP_SPACE_MB` | `64` | teto de espaço de `tmp/` |
 | `SANDBOX_MNT_SPACE_MB` | `256` | teto de espaço de `mnt/` |
 | `SANDBOX_MEM_LIMIT_MB` | `512` | teto de RAM do processo sandbox |

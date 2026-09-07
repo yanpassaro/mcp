@@ -172,6 +172,9 @@ std.result.ok({ received = std.args })
 | ~sandbox_run~ | Run a saved script by ~name~, with optional ~args~ (JSON or string). |
 | ~sandbox_manage~ | Filesystem actions: ~copy~ (host→mnt), ~mount~ (mnt→host), ~del~, ~stat~, ~list~ (tree). |
 | ~sandbox_doc~ | Return the ~std~ API documentation (optional ~topic~). |
+| ~sandbox_diagnostics~ | Diagnose a Lua script (~name~ or ~code~): syntax, meta, ~main~, ~std.*~ usage. |
+
+Script names prefixed with ~temp:~ (e.g. ~temp:meu_script~) live in ~dev/temp/~ and are **cleared on startup**.
 
 Scripts and data files are stored in separate sandbox folders; ~std.tmp~ is for temporary files.`,
 	"io": `# std.io — sandbox files (~mnt/~)

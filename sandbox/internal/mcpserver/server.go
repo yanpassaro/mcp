@@ -14,12 +14,13 @@ import (
 )
 
 type Server struct {
-	mnt *sandbox.Store
-	dev *sandbox.Store
-	tmp *sandbox.Store
+	mnt      *sandbox.Store
+	dev      *sandbox.Store
+	tmp      *sandbox.Store
+	tscripts *sandbox.Store
 }
 
-func New(mntDir, devDir, tmpDir string) *Server {
+func New(mntDir, devDir, tmpDir, tscriptsDir string) *Server {
 	dev := sandbox.NewStore(devDir)
 	dev.MaxTotalBytes = 16 * 1024 * 1024
 	dev.MaxFiles = 2000
@@ -32,7 +33,11 @@ func New(mntDir, devDir, tmpDir string) *Server {
 	mnt.MaxTotalBytes = int64(envInt("SANDBOX_MNT_SPACE_MB", 256)) * 1024 * 1024
 	mnt.MaxFiles = 5000
 
-	return &Server{mnt: mnt, dev: dev, tmp: tmp}
+	tscripts := sandbox.NewStore(tscriptsDir)
+	tscripts.MaxTotalBytes = 16 * 1024 * 1024
+	tscripts.MaxFiles = 2000
+
+	return &Server{mnt: mnt, dev: dev, tmp: tmp, tscripts: tscripts}
 }
 
 func envInt(name string, def int) int {
@@ -74,6 +79,11 @@ func (s *Server) Register(server *mcp.Server) {
 		Name:        "sandbox_doc",
 		Description: "Returns the sandbox API documentation (std.* modules, tools, limits, env vars). Pass 'topic' to get a specific section (io, fetch, secrets, ...).",
 	}, s.doc)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "sandbox_diagnostics",
+		Description: "Diagnose a Lua script: compile (syntax), meta, main, and std.* usage. Pass 'name' (saved script) or 'code' (inline).",
+	}, s.diagnostics)
 }
 
 type readScriptInput struct {
@@ -104,25 +114,29 @@ type manageInput struct {
 func (s *Server) readScript(ctx context.Context, _ *mcp.CallToolRequest, in readScriptInput) (*mcp.CallToolResult, any, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "*?") {
-		entries, err := s.dev.List()
-		if err != nil {
-			return nil, nil, err
-		}
 		pattern := ""
 		if name != "" && name != "." && name != ".." {
 			pattern = name
-			var filtered []sandbox.Entry
-			for _, e := range entries {
-				if ok, _ := filepath.Match(pattern, e.Name); ok {
-					filtered = append(filtered, e)
-				}
+		}
+		devEntries := filterScripts(s.dev, pattern)
+		tmpEntries := filterScripts(s.tscripts, pattern)
+		if len(devEntries)+len(tmpEntries) == 0 {
+			if pattern != "" {
+				return textResult(fmt.Sprintf("Nenhum script correspondeu a `%s`.\n", pattern))
 			}
-			entries = filtered
+			return textResult("_Nenhum script salvo ainda._")
 		}
-		if pattern != "" && len(entries) == 0 {
-			return textResult(fmt.Sprintf("Nenhum script correspondeu a `%s`.\n", pattern))
+		var b strings.Builder
+		if len(devEntries) > 0 {
+			b.WriteString(formatScriptList("Scripts do sandbox", devEntries, scriptDescs(s.dev, devEntries)))
 		}
-		return textResult(formatScriptList(entries, scriptDescs(s.dev, entries)))
+		if len(tmpEntries) > 0 {
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(formatScriptList("Scripts temporários (`temp:`)", tmpEntries, scriptDescs(s.tscripts, tmpEntries)))
+		}
+		return textResult(b.String())
 	}
 	content, err := s.readScriptSource(name)
 	if err != nil {
@@ -132,35 +146,48 @@ func (s *Server) readScript(ctx context.Context, _ *mcp.CallToolRequest, in read
 }
 
 func (s *Server) writeScript(ctx context.Context, _ *mcp.CallToolRequest, in writeScriptInput) (*mcp.CallToolResult, any, error) {
-	name := withLuaExt(strings.TrimSpace(in.Name))
-	if name == "" {
+	ref := strings.TrimSpace(in.Name)
+	if ref == "" {
 		return nil, nil, errors.New("'name' é obrigatório")
 	}
 	if strings.TrimSpace(in.Code) == "" {
 		return nil, nil, errors.New("'code' é obrigatório")
 	}
+	isTemp := strings.HasPrefix(ref, "temp:")
+	store, clean := s.scriptStore(ref)
+	name := withLuaExt(clean)
 	wrapped := sandbox.WrapScript(name, in.Description, in.Code)
-	if _, err := s.dev.Write(name, wrapped); err != nil {
+	if _, err := store.Write(name, wrapped); err != nil {
 		return nil, nil, err
 	}
-	return textResult(formatScriptWrite(name, len(wrapped), wrapped))
+	display := name
+	if isTemp {
+		display = "temp:" + name
+	}
+	return textResult(formatScriptWrite(display, len(wrapped), wrapped))
 }
 
 func (s *Server) delScript(ctx context.Context, _ *mcp.CallToolRequest, in delScriptInput) (*mcp.CallToolResult, any, error) {
-	name := withLuaExt(strings.TrimSpace(in.Name))
-	if name == "" {
+	ref := strings.TrimSpace(in.Name)
+	if ref == "" {
 		return nil, nil, errors.New("'name' é obrigatório")
 	}
+	store, clean := s.scriptStore(ref)
+	name := withLuaExt(clean)
 	for _, cand := range scriptNameVariants(name) {
-		err := s.dev.Delete(cand)
+		err := store.Delete(cand)
 		if err == nil {
-			return textResult(fmt.Sprintf("Script `%s` removido.\n", cand))
+			display := cand
+			if strings.HasPrefix(ref, "temp:") {
+				display = "temp:" + cand
+			}
+			return textResult(fmt.Sprintf("Script `%s` removido.\n", display))
 		}
 		if !os.IsNotExist(err) {
 			return nil, nil, err
 		}
 	}
-	return nil, nil, fmt.Errorf("script %q não encontrado na pasta de scripts.", name)
+	return nil, nil, fmt.Errorf("script %q não encontrado.", ref)
 }
 
 func (s *Server) runScript(ctx context.Context, _ *mcp.CallToolRequest, in runScriptInput) (*mcp.CallToolResult, any, error) {
@@ -219,10 +246,10 @@ func (s *Server) manage(ctx context.Context, _ *mcp.CallToolRequest, in manageIn
 	}
 }
 
-func scriptDescs(dev *sandbox.Store, entries []sandbox.Entry) map[string]string {
+func scriptDescs(store *sandbox.Store, entries []sandbox.Entry) map[string]string {
 	descs := map[string]string{}
 	for _, e := range entries {
-		if content, err := dev.Read(e.Name); err == nil {
+		if content, err := store.Read(e.Name); err == nil {
 			if _, d := sandbox.ParseMeta(content); d != "" {
 				descs[e.Name] = d
 			}
@@ -232,12 +259,37 @@ func scriptDescs(dev *sandbox.Store, entries []sandbox.Entry) map[string]string 
 }
 
 func (s *Server) readScriptSource(name string) (string, error) {
-	for _, cand := range scriptNameVariants(name) {
-		if c, err := s.dev.Read(cand); err == nil {
+	store, clean := s.scriptStore(name)
+	for _, cand := range scriptNameVariants(clean) {
+		if c, err := store.Read(cand); err == nil {
 			return c, nil
 		}
 	}
-	return "", fmt.Errorf("script %q não encontrado na pasta de scripts. Crie-o com sandbox_write (ou veja o que existe com sandbox_read).", name)
+	return "", fmt.Errorf("script %q não encontrado. Crie-o com sandbox_write (ou veja o que existe com sandbox_read).", name)
+}
+
+func (s *Server) scriptStore(ref string) (*sandbox.Store, string) {
+	if strings.HasPrefix(ref, "temp:") {
+		return s.tscripts, strings.TrimPrefix(ref, "temp:")
+	}
+	return s.dev, ref
+}
+
+func filterScripts(store *sandbox.Store, pattern string) []sandbox.Entry {
+	entries, err := store.List()
+	if err != nil {
+		return nil
+	}
+	if pattern == "" {
+		return entries
+	}
+	var out []sandbox.Entry
+	for _, e := range entries {
+		if ok, _ := filepath.Match(pattern, e.Name); ok {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func withLuaExt(name string) string {
