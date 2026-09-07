@@ -9,8 +9,6 @@ import (
 	lua "github.com/Shopify/go-lua"
 )
 
-// buildExcel exposes read/write access to .xlsx spreadsheets confined to the
-// sandbox filesystem. Paths are relative to mnt/ (or prefixed with tmp:).
 func buildExcel(L *lua.State, mnt, tmp *Store) int {
 	t := newTable(L)
 

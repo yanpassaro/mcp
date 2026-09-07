@@ -14,10 +14,6 @@ const (
 	maxScriptConcurrent = 4
 )
 
-// scriptSlots bounds simultaneous VM executions. On timeout the script is not
-// killed (go-lua has no context/interrupt API), so the slot is only released
-// when the goroutine actually finishes; runaway loops therefore cannot pile up
-// unboundedly and eventually new runs fail fast with a clear error.
 var scriptSlots = make(chan struct{}, maxScriptConcurrent)
 
 type RunRequest struct {
@@ -129,9 +125,6 @@ func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, e
 	buildStd(L, store, tmp, reg, r.Args, writeOut, &res, secrets)
 	L.SetGlobal("std")
 
-	// Route the built-in print() through the capture buffer so its output is
-	// both visible in the result and redacted (it would otherwise go to the
-	// MCP transport's stdout and leak secrets directly to the AI).
 	L.PushGoFunction(func(l *lua.State) int {
 		parts := make([]string, 0, l.Top())
 		for i := 1; i <= l.Top(); i++ {
@@ -182,9 +175,6 @@ func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, e
 	return result, nil
 }
 
-// hardenLua removes native Lua globals that can escape the sandbox (read
-// arbitrary files, load code from disk, reach the host environment) while
-// keeping safe primitives like pairs/ipairs/type/tostring/setmetatable.
 func hardenLua(l *lua.State) {
 	for _, name := range []string{
 		"dofile", "loadfile", "load", "loadstring", "require", "module",

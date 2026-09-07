@@ -15,16 +15,12 @@ import (
 
 const defaultMaxSQLRows = 10000
 
-// sqlConn is satisfied by both *sql.DB and *sql.Tx, so queries/execs honor an
-// open transaction for the same path when present.
 type sqlConn interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	Query(query string, args ...any) (*sql.Rows, error)
 	QueryRow(query string, args ...any) *sql.Row
 }
 
-// sqlRegistry holds SQLite connections and transactions for a single script
-// run, keyed by resolved path. All are closed automatically when the run ends.
 type sqlRegistry struct {
 	dbs map[string]*sql.DB
 	txs map[string]*sql.Tx
@@ -118,8 +114,6 @@ func (r *sqlRegistry) close() {
 	}
 }
 
-// buildSQL exposes read/write access to SQLite databases confined to the
-// sandbox. Paths are relative to mnt/ (or prefixed with tmp:).
 func buildSQL(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 	t := newTable(L)
 

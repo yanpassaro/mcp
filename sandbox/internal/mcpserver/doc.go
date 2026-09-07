@@ -71,7 +71,6 @@ func (s *Server) doc(ctx context.Context, _ *mcp.CallToolRequest, in docInput) (
 }
 
 func renderDoc(doc string) string {
-	// Convert tilde code fences to standard backtick fences for markdown rendering.
 	return strings.ReplaceAll(doc, "~~~", "```")
 }
 

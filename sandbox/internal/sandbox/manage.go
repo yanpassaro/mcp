@@ -10,7 +10,6 @@ import (
 	"strings"
 )
 
-// TreeNode represents one entry in an in-sandbox directory tree.
 type TreeNode struct {
 	Name     string     `json:"name"`
 	IsDir    bool       `json:"isDir"`
@@ -19,7 +18,6 @@ type TreeNode struct {
 	Children []TreeNode `json:"children,omitempty"`
 }
 
-// CopyIn copies a host file/folder into the sandbox filesystem.
 func (s *Store) CopyIn(hostSrc, dest string) (string, error) {
 	if strings.TrimSpace(hostSrc) == "" {
 		return "", errors.New("caminho de origem no host (path) é obrigatório")
@@ -40,7 +38,6 @@ func (s *Store) CopyIn(hostSrc, dest string) (string, error) {
 	return dest, nil
 }
 
-// CopyOut copies a sandbox file/folder out to the host.
 func (s *Store) CopyOut(src, hostDest string) (string, error) {
 	if strings.TrimSpace(src) == "" {
 		return "", errors.New("caminho de origem no sandbox (path) é obrigatório")
@@ -61,7 +58,6 @@ func (s *Store) CopyOut(src, hostDest string) (string, error) {
 	return hostDest, nil
 }
 
-// DeleteAll removes a file or folder (recursively) inside the sandbox.
 func (s *Store) DeleteAll(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -80,7 +76,6 @@ func (s *Store) DeleteAll(name string) error {
 	return os.RemoveAll(full)
 }
 
-// Tree returns the sandbox directory tree rooted at rel ("" = sandbox root).
 func (s *Store) Tree(rel string) (TreeNode, error) {
 	fullRoot := s.Root
 	if strings.TrimSpace(rel) != "" {
@@ -142,7 +137,6 @@ func (s *Store) buildTree(full, name string) (TreeNode, error) {
 	return node, nil
 }
 
-// CopyWithin copies a sandbox-relative source to a sandbox-relative dest.
 func (s *Store) CopyWithin(src, dst string) (string, error) {
 	fullSrc, err := s.resolve(src)
 	if err != nil {
@@ -161,7 +155,6 @@ func (s *Store) CopyWithin(src, dst string) (string, error) {
 	return dst, nil
 }
 
-// Move renames a sandbox-relative source to a sandbox-relative dest.
 func (s *Store) Move(src, dst string) (string, error) {
 	fullSrc, err := s.resolve(src)
 	if err != nil {
@@ -180,7 +173,6 @@ func (s *Store) Move(src, dst string) (string, error) {
 	return dst, nil
 }
 
-// Mkdir creates a directory inside the sandbox (and parents).
 func (s *Store) Mkdir(path string) (string, error) {
 	full, err := s.resolve(path)
 	if err != nil {
@@ -192,7 +184,6 @@ func (s *Store) Mkdir(path string) (string, error) {
 	return path, nil
 }
 
-// Glob returns sandbox-relative paths matching the pattern (relative to the root).
 func (s *Store) Glob(pattern string) ([]string, error) {
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
@@ -222,7 +213,6 @@ func (s *Store) Glob(pattern string) ([]string, error) {
 	return out, nil
 }
 
-// Clear removes everything inside the sandbox store root (keeps the root).
 func (s *Store) Clear() (int, error) {
 	entries, err := os.ReadDir(s.Root)
 	if err != nil {
@@ -247,8 +237,6 @@ func samePath(a, b string) bool {
 	return ca == cb
 }
 
-// copyPath copies a file or folder recursively, following symlinks (contents
-// are dereferenced so no link escapes the destination root).
 func copyPath(src, dst string) error {
 	fi, err := os.Stat(src)
 	if err != nil {

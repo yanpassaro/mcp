@@ -21,7 +21,6 @@ func buildUUID(L *lua.State) int {
 	return t
 }
 
-// uuidV4 returns a random RFC 4122 UUID (version 4).
 func uuidV4() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
@@ -30,8 +29,6 @@ func uuidV4() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// uuidV7 returns a time-ordered RFC 9562 UUID (version 7): 48-bit unix ms
-// timestamp followed by random bits.
 func uuidV7(now time.Time) string {
 	var b [16]byte
 	ms := uint64(now.UnixMilli())

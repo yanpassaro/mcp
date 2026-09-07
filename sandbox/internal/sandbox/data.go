@@ -12,9 +12,6 @@ import (
 	lua "github.com/Shopify/go-lua"
 )
 
-// buildData exposes a data-pipeline module (sqlize-style): rows (array of maps)
-// can move between CSV, JSON, XML, Excel and SQLite, and files can be converted
-// between formats by extension.
 func buildData(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 	t := newTable(L)
 
