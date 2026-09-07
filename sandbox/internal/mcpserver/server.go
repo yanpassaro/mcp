@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -12,15 +13,34 @@ import (
 )
 
 type Server struct {
-	fs      *sandbox.Store
-	scripts *sandbox.Store
+	mnt *sandbox.Store
+	dev *sandbox.Store
+	tmp *sandbox.Store
 }
 
-func New(fsDir, scriptsDir string) *Server {
-	return &Server{
-		fs:      sandbox.NewStore(fsDir),
-		scripts: sandbox.NewStore(scriptsDir),
+func New(mntDir, devDir, tmpDir string) *Server {
+	dev := sandbox.NewStore(devDir)
+	dev.MaxTotalBytes = 16 * 1024 * 1024
+	dev.MaxFiles = 2000
+
+	tmp := sandbox.NewStore(tmpDir)
+	tmp.MaxTotalBytes = int64(envInt("SANDBOX_TMP_SPACE_MB", 64)) * 1024 * 1024
+	tmp.MaxFiles = 1000
+
+	mnt := sandbox.NewStore(mntDir)
+	mnt.MaxTotalBytes = int64(envInt("SANDBOX_MNT_SPACE_MB", 256)) * 1024 * 1024
+	mnt.MaxFiles = 5000
+
+	return &Server{mnt: mnt, dev: dev, tmp: tmp}
+}
+
+func envInt(name string, def int) int {
+	if v := os.Getenv(name); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
 	}
+	return def
 }
 
 func (s *Server) Register(server *mcp.Server) {
@@ -41,8 +61,18 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sandbox_run",
-		Description: "Run a saved Lua script by 'name', with optional 'args'. Sandboxed: no OS/process; filesystem confined to fs/; network only via std.fetch (allowlist). Fixed 30s timeout.",
+		Description: "Run a saved Lua script by 'name', with optional 'args'. Sandboxed: no OS/process; filesystem confined to mnt/; network only via std.fetch (allowlist). Fixed 30s timeout.",
 	}, s.runScript)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "sandbox_manage",
+		Description: "Manage the sandbox filesystem: copy (host→sandbox), mount (sandbox→host), del, stat, and list (directory tree).",
+	}, s.manage)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "sandbox_doc",
+		Description: "Returns the sandbox API documentation (std.* modules, tools, limits, env vars). Pass 'topic' to get a specific section (io, fetch, secrets, ...).",
+	}, s.doc)
 }
 
 type readScriptInput struct {
@@ -64,10 +94,16 @@ type runScriptInput struct {
 	Args string `json:"args,omitempty" jsonschema:"Script args (JSON parsed, else string)."`
 }
 
+type manageInput struct {
+	Action string `json:"action" jsonschema:"Action to perform: copy (host→sandbox), mount (sandbox→host), del, stat, list."`
+	Path   string `json:"path,omitempty" jsonschema:"Host source path for copy, or sandbox-relative path for mount/del/stat/list."`
+	Dest   string `json:"dest,omitempty" jsonschema:"Destination: sandbox-relative path for copy, host path for mount."`
+}
+
 func (s *Server) readScript(ctx context.Context, _ *mcp.CallToolRequest, in readScriptInput) (*mcp.CallToolResult, any, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
-		entries, err := s.scripts.List()
+		entries, err := s.dev.List()
 		if err != nil {
 			return nil, nil, err
 		}
@@ -89,7 +125,7 @@ func (s *Server) writeScript(ctx context.Context, _ *mcp.CallToolRequest, in wri
 		return nil, nil, errors.New("'code' é obrigatório")
 	}
 	wrapped := sandbox.WrapScript(name, in.Description, in.Code)
-	if _, err := s.scripts.Write(name, wrapped); err != nil {
+	if _, err := s.dev.Write(name, wrapped); err != nil {
 		return nil, nil, err
 	}
 	return textResult(fmt.Sprintf("Script `%s` gravado (%d bytes).\n", name, len(wrapped)))
@@ -101,7 +137,7 @@ func (s *Server) delScript(ctx context.Context, _ *mcp.CallToolRequest, in delSc
 		return nil, nil, errors.New("'name' é obrigatório")
 	}
 	for _, cand := range scriptNameVariants(name) {
-		err := s.scripts.Delete(cand)
+		err := s.dev.Delete(cand)
 		if err == nil {
 			return textResult(fmt.Sprintf("Script `%s` removido.\n", cand))
 		}
@@ -122,7 +158,7 @@ func (s *Server) runScript(ctx context.Context, _ *mcp.CallToolRequest, in runSc
 		return nil, nil, err
 	}
 
-	res, err := sandbox.Run(s.fs, sandbox.RunRequest{
+	res, err := sandbox.Run(s.mnt, s.tmp, sandbox.RunRequest{
 		Code: code,
 		Args: in.Args,
 	})
@@ -132,9 +168,45 @@ func (s *Server) runScript(ctx context.Context, _ *mcp.CallToolRequest, in runSc
 	return result(formatRunResult(res, err), false)
 }
 
+func (s *Server) manage(ctx context.Context, _ *mcp.CallToolRequest, in manageInput) (*mcp.CallToolResult, any, error) {
+	switch action := strings.ToLower(strings.TrimSpace(in.Action)); action {
+	case "copy":
+		dest, err := s.mnt.CopyIn(in.Path, in.Dest)
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(fmt.Sprintf("Copiado `%s` → `%s` (sandbox).\n", in.Path, dest))
+	case "mount":
+		dest, err := s.mnt.CopyOut(in.Path, in.Dest)
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(fmt.Sprintf("Copiado `%s` (sandbox) → `%s` (host).\n", in.Path, dest))
+	case "del":
+		if err := s.mnt.DeleteAll(in.Path); err != nil {
+			return nil, nil, err
+		}
+		return textResult(fmt.Sprintf("Removido `%s` (sandbox).\n", in.Path))
+	case "stat":
+		st, err := s.mnt.Stat(in.Path)
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(formatManageStat(in.Path, st))
+	case "list":
+		t, err := s.mnt.Tree(in.Path)
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult("```text\n" + FormatTree(t) + "\n```")
+	default:
+		return nil, nil, fmt.Errorf("ação inválida %q; use copy, mount, del, stat ou list", action)
+	}
+}
+
 func (s *Server) readScriptSource(name string) (string, error) {
 	for _, cand := range scriptNameVariants(name) {
-		if c, err := s.scripts.Read(cand); err == nil {
+		if c, err := s.dev.Read(cand); err == nil {
 			return c, nil
 		}
 	}

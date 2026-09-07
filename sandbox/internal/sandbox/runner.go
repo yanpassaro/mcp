@@ -9,9 +9,16 @@ import (
 )
 
 const (
-	maxTimeout     = 30 * time.Second
-	maxOutputBytes = 256 * 1024
+	maxTimeout          = 30 * time.Second
+	maxOutputBytes      = 256 * 1024
+	maxScriptConcurrent = 4
 )
+
+// scriptSlots bounds simultaneous VM executions. On timeout the script is not
+// killed (go-lua has no context/interrupt API), so the slot is only released
+// when the goroutine actually finishes; runaway loops therefore cannot pile up
+// unboundedly and eventually new runs fail fast with a clear error.
+var scriptSlots = make(chan struct{}, maxScriptConcurrent)
 
 type RunRequest struct {
 	Code    string
@@ -37,11 +44,26 @@ type luaResult struct {
 	data any
 }
 
-func Run(fs *Store, r RunRequest) (RunResult, error) {
-	code := strings.TrimSpace(r.Code)
-	if code == "" {
-		return RunResult{}, fmt.Errorf("código vazio: informe 'code' ou um 'name' de script salvo")
+type runOutcome struct {
+	res RunResult
+	err error
+}
+
+func Run(store, tmp *Store, r RunRequest) (RunResult, error) {
+	secrets := LoadSecrets()
+
+	select {
+	case scriptSlots <- struct{}{}:
+	default:
+		return RunResult{}, fmt.Errorf("limite de %d scripts simultâneos atingido; aguarde ou encerre os que travarem", maxScriptConcurrent)
 	}
+
+	ch := make(chan runOutcome, 1)
+	go func() {
+		defer func() { <-scriptSlots }()
+		res, err := execScript(store, tmp, r, secrets)
+		ch <- runOutcome{res, err}
+	}()
 
 	timeout := r.Timeout
 	if timeout <= 0 {
@@ -51,13 +73,42 @@ func Run(fs *Store, r RunRequest) (RunResult, error) {
 		timeout = maxTimeout
 	}
 
+	select {
+	case o := <-ch:
+		o.res.Output = secrets.Redact(o.res.Output)
+		o.res.Data = secrets.Redact(o.res.Data)
+		o.res.Error = secrets.Redact(o.res.Error)
+		o.res.Description = secrets.Redact(o.res.Description)
+		if o.err != nil {
+			return o.res, fmt.Errorf("%s", secrets.Redact(o.err.Error()))
+		}
+		return o.res, nil
+	case <-time.After(timeout):
+		return RunResult{
+			Error:    fmt.Sprintf("tempo de execução excedido (%s)", timeout),
+			Duration: timeout,
+			Ok:       false,
+		}, nil
+	}
+}
+
+func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, error) {
+	code := strings.TrimSpace(r.Code)
+	if code == "" {
+		return RunResult{}, fmt.Errorf("código vazio: informe 'code' ou um 'name' de script salvo")
+	}
+
 	name, desc := parseMeta(code)
+
+	reg := newSQLRegistry()
+	defer reg.close()
 
 	L := lua.NewState()
 	lua.Require(L, "base", lua.BaseOpen, true)
 	lua.Require(L, "table", lua.TableOpen, true)
 	lua.Require(L, "string", lua.StringOpen, true)
 	lua.Require(L, "math", lua.MathOpen, true)
+	hardenLua(L)
 
 	var outBuf strings.Builder
 	truncated := false
@@ -75,8 +126,21 @@ func Run(fs *Store, r RunRequest) (RunResult, error) {
 	}
 
 	var res *luaResult
-	buildStd(L, fs, r.Args, writeOut, &res)
+	buildStd(L, store, tmp, reg, r.Args, writeOut, &res, secrets)
 	L.SetGlobal("std")
+
+	// Route the built-in print() through the capture buffer so its output is
+	// both visible in the result and redacted (it would otherwise go to the
+	// MCP transport's stdout and leak secrets directly to the AI).
+	L.PushGoFunction(func(l *lua.State) int {
+		parts := make([]string, 0, l.Top())
+		for i := 1; i <= l.Top(); i++ {
+			parts = append(parts, argString(l, i))
+		}
+		writeOut(strings.Join(parts, " ") + "\n")
+		return 0
+	})
+	L.SetGlobal("print")
 
 	start := time.Now()
 	if err := L.Load(strings.NewReader(code), "@script", "t"); err != nil {
@@ -108,14 +172,28 @@ func Run(fs *Store, r RunRequest) (RunResult, error) {
 	if res != nil {
 		result.Ok = res.ok
 		if res.ok {
-			result.Data, result.DataJSON = renderData(res.data)
+			result.Data, result.DataJSON = renderData(secrets.RedactValue(res.data))
 		} else {
 			result.Error = res.msg
 		}
 	} else if !L.IsNil(ret) {
-		result.Data, result.DataJSON = renderData(luaToAny(L, ret))
+		result.Data, result.DataJSON = renderData(secrets.RedactValue(luaToAny(L, ret)))
 	}
 	return result, nil
+}
+
+// hardenLua removes native Lua globals that can escape the sandbox (read
+// arbitrary files, load code from disk, reach the host environment) while
+// keeping safe primitives like pairs/ipairs/type/tostring/setmetatable.
+func hardenLua(l *lua.State) {
+	for _, name := range []string{
+		"dofile", "loadfile", "load", "loadstring", "require", "module",
+		"collectgarbage", "gcinfo", "getfenv", "setfenv", "newproxy",
+		"os", "io", "debug", "package", "coroutine", "cjson",
+	} {
+		l.PushNil()
+		l.SetGlobal(name)
+	}
 }
 
 func callError(l *lua.State, err error) string {
@@ -153,7 +231,7 @@ func WrapScript(name, desc, body string) string {
 	return fmt.Sprintf("-- name=%q\n-- desc=%q\n\nfunction main(std)\n%s\nend\n", name, desc, strings.TrimSpace(body))
 }
 
-func buildStd(L *lua.State, fs *Store, args string, writeOut func(string), res **luaResult) {
+func buildStd(L *lua.State, store, tmp *Store, reg *sqlRegistry, args string, writeOut func(string), res **luaResult, secrets *Secrets) {
 	L.NewTable()
 	std := L.Top()
 
@@ -170,7 +248,8 @@ func buildStd(L *lua.State, fs *Store, args string, writeOut func(string), res *
 		build()
 		L.SetField(std, name)
 	}
-	setModule("fs", func() int { return buildFS(L, fs) })
+	setModule("io", func() int { return buildIO(L, store) })
+	setModule("tmp", func() int { return buildTmp(L, tmp) })
 	setModule("date", func() int { return buildDate(L) })
 	setModule("random", func() int { return buildRandom(L) })
 	setModule("str", func() int { return buildStr(L) })
@@ -180,6 +259,15 @@ func buildStd(L *lua.State, fs *Store, args string, writeOut func(string), res *
 	setModule("json", func() int { return buildJson(L) })
 	setModule("assert", func() int { return buildAssert(L) })
 	setModule("fetch", func() int { return buildFetch(L) })
+	setModule("secrets", func() int { return buildSecrets(L, secrets) })
+	setModule("sql", func() int { return buildSQL(L, reg, store, tmp) })
+	setModule("uuid", func() int { return buildUUID(L) })
+	setModule("csv", func() int { return buildCSV(L) })
+	setModule("xml", func() int { return buildXML(L) })
+	setModule("excel", func() int { return buildExcel(L, store, tmp) })
+	setModule("data", func() int { return buildData(L, reg, store, tmp) })
+	setModule("regex", func() int { return buildRegex(L) })
+	setModule("fake", func() int { return buildFake(L) })
 
 	buildLog(L, writeOut)
 	L.SetGlobal("console")

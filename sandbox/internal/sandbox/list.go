@@ -81,7 +81,146 @@ func buildList(L *lua.State) int {
 		pushAny(l, arr[len(arr)-n:])
 		return 1
 	})
+
+	setGoFunc(L, t, "map", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
+		fn := l.AbsIndex(2)
+		out := make([]any, 0, len(arr))
+		for _, x := range arr {
+			res, err := luaCall(l, fn, x)
+			if err != nil {
+				panic(err)
+			}
+			out = append(out, res)
+		}
+		pushAny(l, out)
+		return 1
+	})
+
+	setGoFunc(L, t, "filter", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
+		fn := l.AbsIndex(2)
+		out := make([]any, 0, len(arr))
+		for _, x := range arr {
+			ok, err := luaCall(l, fn, x)
+			if err != nil {
+				panic(err)
+			}
+			if truthy(ok) {
+				out = append(out, x)
+			}
+		}
+		pushAny(l, out)
+		return 1
+	})
+
+	setGoFunc(L, t, "reduce", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
+		fn := l.AbsIndex(2)
+		if len(arr) == 0 {
+			if l.Top() >= 3 {
+				pushAny(l, luaToAny(l, 3))
+				return 1
+			}
+			l.PushNil()
+			return 1
+		}
+		start := 0
+		var acc any
+		if l.Top() >= 3 {
+			acc = luaToAny(l, 3)
+		} else {
+			acc = arr[0]
+			start = 1
+		}
+		for i := start; i < len(arr); i++ {
+			v, err := luaCall(l, fn, acc, arr[i])
+			if err != nil {
+				panic(err)
+			}
+			acc = v
+		}
+		pushAny(l, acc)
+		return 1
+	})
+
+	setGoFunc(L, t, "find", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
+		fn := l.AbsIndex(2)
+		for _, x := range arr {
+			ok, err := luaCall(l, fn, x)
+			if err != nil {
+				panic(err)
+			}
+			if truthy(ok) {
+				pushAny(l, x)
+				return 1
+			}
+		}
+		l.PushNil()
+		return 1
+	})
+
+	setGoFunc(L, t, "some", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
+		fn := l.AbsIndex(2)
+		for _, x := range arr {
+			ok, err := luaCall(l, fn, x)
+			if err != nil {
+				panic(err)
+			}
+			if truthy(ok) {
+				l.PushBoolean(true)
+				return 1
+			}
+		}
+		l.PushBoolean(false)
+		return 1
+	})
+
+	setGoFunc(L, t, "every", func(l *lua.State) int {
+		arr := luaArrayAny(l, 1)
+		fn := l.AbsIndex(2)
+		for _, x := range arr {
+			ok, err := luaCall(l, fn, x)
+			if err != nil {
+				panic(err)
+			}
+			if !truthy(ok) {
+				l.PushBoolean(false)
+				return 1
+			}
+		}
+		l.PushBoolean(true)
+		return 1
+	})
 	return t
+}
+
+func luaCall(l *lua.State, fn int, args ...any) (any, error) {
+	l.PushValue(fn)
+	for _, a := range args {
+		pushAny(l, a)
+	}
+	if err := l.ProtectedCall(len(args), 1, 0); err != nil {
+		return nil, err
+	}
+	if l.Top() > 0 {
+		v := luaToAny(l, l.Top())
+		l.Pop(1)
+		return v, nil
+	}
+	return nil, nil
+}
+
+func truthy(v any) bool {
+	if v == nil {
+		return false
+	}
+	if b, ok := v.(bool); ok {
+		return b
+	}
+	return true
 }
 
 func luaArrayAny(l *lua.State, index int) []any {

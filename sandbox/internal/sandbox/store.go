@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,7 +23,9 @@ type Entry struct {
 }
 
 type Store struct {
-	Root string
+	Root          string
+	MaxTotalBytes int64 // 0 = sem limite
+	MaxFiles      int   // 0 = sem limite
 }
 
 func NewStore(root string) *Store {
@@ -101,6 +104,9 @@ func (s *Store) Write(name, content string) (int, error) {
 	if len(content) > maxWriteBytes {
 		return 0, fmt.Errorf("conteúdo excede %d bytes", maxWriteBytes)
 	}
+	if err := s.enforceLimits(full, len(content)); err != nil {
+		return 0, err
+	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return 0, err
 	}
@@ -128,6 +134,9 @@ func (s *Store) Append(name, content string) (int, error) {
 	}
 	if len(buf)+len(content) > maxWriteBytes {
 		return 0, fmt.Errorf("conteúdo excede %d bytes", maxWriteBytes)
+	}
+	if err := s.enforceLimits(full, len(content)); err != nil {
+		return 0, err
 	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return 0, err
@@ -200,6 +209,48 @@ func (s *Store) resolve(name string) (string, error) {
 		return "", fmt.Errorf("arquivo fora da pasta do sandbox: %s", name)
 	}
 	return full, nil
+}
+
+func (s *Store) enforceLimits(full string, extraBytes int) error {
+	if s.MaxTotalBytes <= 0 && s.MaxFiles <= 0 {
+		return nil
+	}
+	var total int64
+	count := 0
+	var targetSize int64
+	targetExists := false
+	cleaned := filepath.Clean(full)
+	err := filepath.WalkDir(s.Root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, e := d.Info()
+		if e != nil {
+			return nil
+		}
+		total += info.Size()
+		count++
+		if filepath.Clean(path) == cleaned {
+			targetSize = info.Size()
+			targetExists = true
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	totalAfter := total - targetSize + int64(extraBytes)
+	countAfter := count
+	if !targetExists {
+		countAfter++
+	}
+	if s.MaxTotalBytes > 0 && totalAfter > s.MaxTotalBytes {
+		return fmt.Errorf("limite de espaço do sandbox excedido (%d MiB)", s.MaxTotalBytes/(1024*1024))
+	}
+	if s.MaxFiles > 0 && countAfter > s.MaxFiles {
+		return fmt.Errorf("limite de arquivos do sandbox excedido (%d)", s.MaxFiles)
+	}
+	return nil
 }
 
 func countLines(path string) (int, error) {

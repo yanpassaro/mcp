@@ -83,6 +83,54 @@ func formatRunResult(res sandbox.RunResult, runErr error) string {
 	return b.String()
 }
 
+func formatManageStat(name string, st sandbox.FileStat) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Stat `%s`\n\n", name)
+	fmt.Fprintf(&b, "- **exists:** %v\n", st.Exists)
+	if !st.Exists {
+		b.WriteString("_não encontrado_")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "- **isDir:** %v\n", st.IsDir)
+	fmt.Fprintf(&b, "- **size:** %s\n", humanSize(st.Size))
+	if !st.IsDir {
+		fmt.Fprintf(&b, "- **lines:** %d\n", st.Lines)
+	}
+	return b.String()
+}
+
+func FormatTree(root sandbox.TreeNode) string {
+	var b strings.Builder
+	writeTreeNode(&b, root, "", true, true)
+	return b.String()
+}
+
+func writeTreeNode(b *strings.Builder, n sandbox.TreeNode, prefix string, isLast, isRoot bool) {
+	name := n.Name
+	if n.IsDir {
+		name += "/"
+	} else {
+		name += fmt.Sprintf("  (%s, %d linhas)", humanSize(n.Size), n.Lines)
+	}
+	if isRoot {
+		b.WriteString(name)
+		b.WriteString("\n")
+	} else {
+		branch, next := "├── ", prefix+"│   "
+		if isLast {
+			branch, next = "└── ", prefix+"    "
+		}
+		b.WriteString(prefix)
+		b.WriteString(branch)
+		b.WriteString(name)
+		b.WriteString("\n")
+		prefix = next
+	}
+	for i, c := range n.Children {
+		writeTreeNode(b, c, prefix, i == len(n.Children)-1, false)
+	}
+}
+
 func humanSize(n int64) string {
 	switch {
 	case n >= 1024*1024:

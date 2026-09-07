@@ -129,6 +129,23 @@ func buildFetch(L *lua.State) int {
 		pushAny(l, res)
 		return 1
 	})
+	setGoFunc(L, t, "json", func(l *lua.State) int {
+		opts := toAnyMap(l, 2)
+		opts["method"] = "GET"
+		res, err := doFetch(&cfg, argString(l, 1), opts)
+		if err != nil {
+			panic(err)
+		}
+		body, _ := res["body"].(string)
+		var parsed any
+		if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+			panic(fmt.Errorf("resposta não é JSON: %w", err))
+		}
+		res["data"] = parsed
+		delete(res, "body")
+		pushAny(l, res)
+		return 1
+	})
 
 	cookies := newTable(L)
 	setGoFunc(L, cookies, "list", func(l *lua.State) int {
