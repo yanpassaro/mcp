@@ -2,7 +2,6 @@ package sandbox
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -50,7 +49,12 @@ func buildStr(L *lua.State) int {
 		return 1
 	})
 	setGoFunc(L, t, "format", func(l *lua.State) int {
-		l.PushString(renderTemplate(argString(l, 1), toAnyMap(l, 2)))
+		f := argString(l, 1)
+		args := make([]any, 0, l.Top()-1)
+		for i := 2; i <= l.Top(); i++ {
+			args = append(args, luaToAny(l, i))
+		}
+		l.PushString(fmt.Sprintf(f, luafmtArgs(f, args)...))
 		return 1
 	})
 	setGoFunc(L, t, "count", func(l *lua.State) int {
@@ -121,6 +125,63 @@ func joinWords(sep, s string) string {
 		ws[i] = strings.ToLower(ws[i])
 	}
 	return strings.Join(ws, sep)
+}
+
+func luafmtArgs(f string, args []any) []any {
+	out := make([]any, 0, len(args))
+	idx := 0
+	for i := 0; i < len(f); i++ {
+		if f[i] != '%' {
+			continue
+		}
+		j := i + 1
+		for j < len(f) && strings.ContainsRune("+-# 0.123456789", rune(f[j])) {
+			j++
+		}
+		if j >= len(f) {
+			continue
+		}
+		switch verb := f[j]; verb {
+		case '%':
+		case 'd', 'i', 'x', 'X', 'o', 'b', 'c':
+			if idx < len(args) {
+				if fl, ok := args[idx].(float64); ok {
+					out = append(out, int64(fl))
+				} else {
+					out = append(out, args[idx])
+				}
+			}
+			idx++
+		case 's':
+			if idx < len(args) {
+				out = append(out, fmtStrArg(args[idx]))
+			}
+			idx++
+		default:
+			if idx < len(args) {
+				out = append(out, args[idx])
+			}
+			idx++
+		}
+		i = j
+	}
+	return out
+}
+
+func fmtStrArg(v any) any {
+	switch x := v.(type) {
+	case float64:
+		return fmt.Sprint(x)
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	case nil:
+		return "nil"
+	default:
+		return x
+	}
 }
 
 func upperFirst(w string) string {
@@ -201,15 +262,4 @@ func summarize(s string, max int) string {
 	return string(r[:max-3]) + "..."
 }
 
-var tplRe = regexp.MustCompile(`\{\{\s*([^{}]+?)\s*\}\}`)
 
-func renderTemplate(tpl string, ctx map[string]any) string {
-	return tplRe.ReplaceAllStringFunc(tpl, func(m string) string {
-		if sub := tplRe.FindStringSubmatch(m); len(sub) == 2 {
-			if v, ok := ctx[strings.TrimSpace(sub[1])]; ok {
-				return fmt.Sprint(v)
-			}
-		}
-		return m
-	})
-}

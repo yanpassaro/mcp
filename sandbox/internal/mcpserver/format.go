@@ -19,16 +19,24 @@ func result(text string, isError bool) (*mcp.CallToolResult, any, error) {
 	}, nil, nil
 }
 
-func formatScriptList(entries []sandbox.Entry) string {
-	var b strings.Builder
-	b.WriteString("## Scripts do sandbox\n\n")
+func formatScriptList(entries []sandbox.Entry, descs map[string]string) string {
 	if len(entries) == 0 {
-		b.WriteString("_Nenhum script salvo ainda._")
-		return b.String()
+		return "_Nenhum script salvo ainda._"
 	}
-	b.WriteString("| Script | Lines | Size |\n|---|---|---|\n")
-	for _, e := range entries {
-		fmt.Fprintf(&b, "| `%s` | %d | %s |\n", e.Name, e.Lines, humanSize(e.Size))
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Scripts do sandbox · %d\n\n", len(entries))
+	for i, e := range entries {
+		name := strings.TrimSuffix(e.Name, ".lua")
+		fmt.Fprintf(&b, "### `%s`\n", name)
+		if d := descs[e.Name]; d != "" {
+			fmt.Fprintf(&b, "> %s\n\n", strings.ReplaceAll(d, "\n", " "))
+		} else {
+			b.WriteString("> _sem descrição_\n\n")
+		}
+		fmt.Fprintf(&b, "· `%d` linhas · `%s`\n\n", e.Lines, humanSize(e.Size))
+		if i != len(entries)-1 {
+			b.WriteString("---\n")
+		}
 	}
 	return b.String()
 }

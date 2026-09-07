@@ -2,6 +2,8 @@ package sandbox
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -104,6 +106,9 @@ func excelWriteRows(path, sheet string, rows [][]string) error {
 		if err := f.SetSheetRow(sheetName, fmt.Sprintf("A%d", i+1), &vals); err != nil {
 			return fmt.Errorf("excel: %w", err)
 		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("excel: %w", err)
 	}
 	if err := f.SaveAs(path); err != nil {
 		return fmt.Errorf("excel: %w", err)

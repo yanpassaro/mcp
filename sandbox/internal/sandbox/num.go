@@ -20,11 +20,11 @@ func buildNum(L *lua.State) int {
 	})
 	setGoFunc(L, t, "percent", func(l *lua.State) int {
 		a, b := argNum(l, 1), argNum(l, 2)
-		if b == 0 {
-			l.PushNumber(0)
-		} else {
-			l.PushNumber(a / b * 100)
+		v := 0.0
+		if b != 0 {
+			v = a / b * 100
 		}
+		l.PushNumber(cleanFloat(v))
 		return 1
 	})
 	setGoFunc(L, t, "sum", func(l *lua.State) int {
@@ -33,11 +33,11 @@ func buildNum(L *lua.State) int {
 	})
 	setGoFunc(L, t, "avg", func(l *lua.State) int {
 		arr := luaArrayAny(l, 1)
-		if len(arr) == 0 {
-			l.PushNumber(0)
-		} else {
-			l.PushNumber(sumNums(l, 1) / float64(len(arr)))
+		v := 0.0
+		if len(arr) > 0 {
+			v = sumNums(l, 1) / float64(len(arr))
 		}
+		l.PushNumber(cleanFloat(v))
 		return 1
 	})
 	setGoFunc(L, t, "parse", func(l *lua.State) int {
@@ -80,6 +80,10 @@ func sumNums(l *lua.State, index int) float64 {
 		}
 	}
 	return s
+}
+
+func cleanFloat(v float64) float64 {
+	return math.Round(v*1e10) / 1e10
 }
 
 func round(v float64, digits int) float64 {

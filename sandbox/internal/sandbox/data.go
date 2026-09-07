@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -108,7 +109,7 @@ func buildData(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 	})
 	setGoFunc(L, t, "convert", func(l *lua.State) int {
 		if err := dataConvert(mnt, tmp, argString(l, 1), argString(l, 2)); err != nil {
-			panic(err)
+			panic(fmt.Errorf("convert: %w", err))
 		}
 		l.PushBoolean(true)
 		return 1
@@ -325,35 +326,37 @@ func dataConvert(mnt, tmp *Store, src, dst string) error {
 	extSrc := strings.ToLower(strings.TrimPrefix(filepath.Ext(src), "."))
 	extDst := strings.ToLower(strings.TrimPrefix(filepath.Ext(dst), "."))
 
-	srcStore, srcName := dataStore(mnt, tmp, src)
-	dstStore, dstName := dataStore(mnt, tmp, dst)
+	fullSrc, err := dataPath(mnt, tmp, src)
+	if err != nil {
+		return err
+	}
+	fullDst, err := dataPath(mnt, tmp, dst)
+	if err != nil {
+		return err
+	}
 
 	var value any
 	switch extSrc {
 	case "csv":
-		content, err := srcStore.Read(srcName)
+		content, err := os.ReadFile(fullSrc)
 		if err != nil {
 			return err
 		}
-		value, err = dataRowsFromCSV(content, "")
+		value, err = dataRowsFromCSV(string(content), "")
 		if err != nil {
 			return err
 		}
 	case "json":
-		content, err := srcStore.Read(srcName)
+		content, err := os.ReadFile(fullSrc)
 		if err != nil {
 			return err
 		}
-		value, err = dataFromJSON(content)
+		value, err = dataFromJSON(string(content))
 		if err != nil {
 			return err
 		}
 	case "xlsx", "xls":
-		full, err := srcStore.resolve(srcName)
-		if err != nil {
-			return err
-		}
-		value, err = dataRowsFromExcel(full, "")
+		value, err = dataRowsFromExcel(fullSrc, "")
 		if err != nil {
 			return err
 		}
@@ -371,42 +374,42 @@ func dataConvert(mnt, tmp *Store, src, dst string) error {
 		if err != nil {
 			return err
 		}
-		_, err = dstStore.Write(dstName, content)
-		return err
+		return osWriteFile(fullDst, content)
 	case "json":
 		content, err := dataToJSON(value)
 		if err != nil {
 			return err
 		}
-		_, err = dstStore.Write(dstName, content)
-		return err
+		return osWriteFile(fullDst, content)
 	case "xml":
 		rows, ok := value.([]any)
 		if !ok {
 			return fmt.Errorf("origem não é um conjunto de linhas")
 		}
-		_, err := dstStore.Write(dstName, dataRowsToXML(rows, "", ""))
-		return err
+		return osWriteFile(fullDst, dataRowsToXML(rows, "", ""))
 	case "xlsx":
 		rows, ok := value.([]any)
 		if !ok {
 			return fmt.Errorf("origem não é um conjunto de linhas")
 		}
-		full, err := dstStore.resolve(dstName)
-		if err != nil {
-			return err
-		}
-		return dataRowsToExcel(rows, full, "")
+		return dataRowsToExcel(rows, fullDst, "")
 	default:
 		return fmt.Errorf("formato de destino não suportado: %s", extDst)
 	}
 }
 
-func dataStore(mnt, tmp *Store, p string) (*Store, string) {
-	if strings.HasPrefix(p, "tmp:") {
-		return tmp, strings.TrimPrefix(p, "tmp:")
+func osWriteFile(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
 	}
-	return mnt, p
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+func dataPath(mnt, tmp *Store, p string) (string, error) {
+	if strings.HasPrefix(p, "tmp:") {
+		return tmp.resolve(strings.TrimPrefix(p, "tmp:"))
+	}
+	return mnt.resolve(p)
 }
 
 func dataRowKeys(rows []any) []string {

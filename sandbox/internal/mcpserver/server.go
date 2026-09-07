@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -46,7 +47,7 @@ func envInt(name string, def int) int {
 func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sandbox_read",
-		Description: "Read a saved Lua script by name, or list all saved scripts when 'name' is omitted.",
+		Description: "Read a saved Lua script by name, or list saved scripts when 'name' is omitted. 'name' may be '.' or a glob (e.g. '*.lua') to list matching scripts.",
 	}, s.readScript)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -102,12 +103,26 @@ type manageInput struct {
 
 func (s *Server) readScript(ctx context.Context, _ *mcp.CallToolRequest, in readScriptInput) (*mcp.CallToolResult, any, error) {
 	name := strings.TrimSpace(in.Name)
-	if name == "" {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "*?") {
 		entries, err := s.dev.List()
 		if err != nil {
 			return nil, nil, err
 		}
-		return textResult(formatScriptList(entries))
+		pattern := ""
+		if name != "" && name != "." && name != ".." {
+			pattern = name
+			var filtered []sandbox.Entry
+			for _, e := range entries {
+				if ok, _ := filepath.Match(pattern, e.Name); ok {
+					filtered = append(filtered, e)
+				}
+			}
+			entries = filtered
+		}
+		if pattern != "" && len(entries) == 0 {
+			return textResult(fmt.Sprintf("Nenhum script correspondeu a `%s`.\n", pattern))
+		}
+		return textResult(formatScriptList(entries, scriptDescs(s.dev, entries)))
 	}
 	content, err := s.readScriptSource(name)
 	if err != nil {
@@ -202,6 +217,18 @@ func (s *Server) manage(ctx context.Context, _ *mcp.CallToolRequest, in manageIn
 	default:
 		return nil, nil, fmt.Errorf("ação inválida %q; use copy, mount, del, stat ou list", action)
 	}
+}
+
+func scriptDescs(dev *sandbox.Store, entries []sandbox.Entry) map[string]string {
+	descs := map[string]string{}
+	for _, e := range entries {
+		if content, err := dev.Read(e.Name); err == nil {
+			if _, d := sandbox.ParseMeta(content); d != "" {
+				descs[e.Name] = d
+			}
+		}
+	}
+	return descs
 }
 
 func (s *Server) readScriptSource(name string) (string, error) {

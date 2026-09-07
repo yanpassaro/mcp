@@ -162,7 +162,7 @@ std.result.ok({ received = std.args })
 
 | Tool | What it does |
 | --- | --- |
-| ~sandbox_read~ | Read a saved script by ~name~; without ~name~ it lists all. |
+| ~sandbox_read~ | Read a saved script by ~name~, or list all; ~name~ may be ~.~ or a glob (e.g. ~*.lua~). |
 | ~sandbox_write~ | Create/overwrite a script (~name~ + ~code~; ~description~ optional). Pass **only the body** — the ~function main(std)~ wrapper is added automatically. |
 | ~sandbox_del~ | Delete a saved script by ~name~. |
 | ~sandbox_run~ | Run a saved script by ~name~, with optional ~args~ (JSON or string). |
@@ -374,7 +374,7 @@ local back = std.encode.base64(b, "decode")
 | ~kebab~ | ~kebab(s)~ | string |
 | ~wrap~ | ~wrap(s, width?)~ | table (lines) |
 | ~summarize~ | ~summarize(s, max)~ | string |
-| ~format~ | ~format(tpl, ctx)~ | string (substitutes {{key}}) |
+| ~format~ | ~format(fmt, ...)~ | string (printf-style) |
 | ~count~ | ~count(s, sub)~ | number |
 | ~split~ | ~split(s, sep, limit?)~ | table |
 
@@ -382,7 +382,7 @@ local back = std.encode.base64(b, "decode")
 std.result.ok({
   slug = std.str.slug("Hello World"),
   title = std.str.title("hello world"),
-  fmt = std.str.format("Hi {{name}}", { name = "Ava" }),
+  fmt = std.str.format("Hi %s / %d", "Ava", 42),
 })
 ~~~`,
 	"list": `# std.list
@@ -440,7 +440,7 @@ std.result.ok({
 | --- | --- | --- |
 | ~now~ | ~now()~ | number (ms) |
 | ~iso~ | ~iso(ts?)~ | string RFC3339 |
-| ~format~ | ~format(ts?, layout)~ | string (YYYY,MM,DD,HH,mm,ss) |
+| ~format~ | ~format(layout, ts?)~ | string (YYYY,MM,DD,HH,mm,ss) |
 | ~parse~ | ~parse(s)~ | number (ms) |
 | ~add~ | ~add(ts, amount, unit)~ | number (ms) |
 | ~unix~ | ~unix(ts?)~ | number (s) |

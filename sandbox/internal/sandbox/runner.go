@@ -201,6 +201,10 @@ func callError(l *lua.State, err error) string {
 	return msg
 }
 
+func ParseMeta(code string) (name, desc string) {
+	return parseMeta(code)
+}
+
 func parseMeta(code string) (string, string) {
 	var name, desc string
 	for _, line := range strings.Split(code, "\n") {
