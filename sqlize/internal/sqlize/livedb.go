@@ -384,12 +384,12 @@ func (c *liveDB) tables(ctx context.Context) (string, error) {
 		q = "SELECT table_schema, table_name FROM information_schema.tables " +
 			"WHERE table_schema = DATABASE() AND table_type='BASE TABLE' ORDER BY table_name"
 	}
-	cols, rows, err := c.query(ctx, q, nil, false, false)
+	_, rows, err := c.query(ctx, q, nil, false, false)
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
-	for _, r := range RedactRows(cols, rows) {
+	for _, r := range rows {
 		schema, name := "", ""
 		if len(r) > 0 {
 			schema = r[0]
@@ -422,7 +422,13 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 	var args []string
 	if c.driver == "pgx" {
 		schemaExpr := "COALESCE(NULLIF($2,''), 'public')"
-		colsQ = "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = $1 AND table_schema = " + schemaExpr + " ORDER BY ordinal_position"
+		colsQ = "SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, " +
+			"EXISTS (SELECT 1 FROM information_schema.table_constraints tc " +
+			"JOIN information_schema.key_column_usage kcu " +
+			"ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name " +
+			"WHERE tc.table_name = c.table_name AND tc.table_schema = c.table_schema " +
+			"AND tc.constraint_type = 'PRIMARY KEY' AND kcu.column_name = c.column_name) AS is_pk " +
+			"FROM information_schema.columns c WHERE c.table_name = $1 AND c.table_schema = " + schemaExpr + " ORDER BY c.ordinal_position"
 		fkQ = "SELECT att.attname AS col, fns.nspname AS ref_schema, ft.relname AS ref_table, fatt.attname AS ref_col " +
 			"FROM pg_constraint con " +
 			"JOIN pg_class rel ON rel.oid = con.conrelid " +
@@ -436,7 +442,8 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 		args = []string{table, schema}
 	} else {
 		schemaExpr := "COALESCE(NULLIF(?,''), DATABASE())"
-		colsQ = "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ? AND table_schema = " + schemaExpr + " ORDER BY ordinal_position"
+		colsQ = "SELECT column_name, data_type, is_nullable, column_default, (column_key = 'PRI') AS is_pk " +
+			"FROM information_schema.columns WHERE table_name = ? AND table_schema = " + schemaExpr + " ORDER BY ordinal_position"
 		fkQ = "SELECT column_name AS col, referenced_table_schema AS ref_schema, referenced_table_name AS ref_table, referenced_column_name AS ref_col " +
 			"FROM information_schema.key_column_usage WHERE table_name = ? AND table_schema = " + schemaExpr + " AND referenced_table_name IS NOT NULL " +
 			"ORDER BY constraint_name, ordinal_position"
@@ -447,28 +454,38 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "### %s\n", table)
-	cols, rows, err := c.query(ctx, colsQ, args, false, false)
+	_, rows, err := c.query(ctx, colsQ, args, false, false)
 	if err != nil {
 		return "", err
 	}
 	if len(rows) == 0 {
 		return fmt.Sprintf("Tabela %q não encontrada.", table), nil
 	}
-	for _, r := range RedactRows(cols, rows) {
-		name, typ := "", ""
+	for _, r := range rows {
+		name, typ, nullable, def, pk := "", "", "", "", ""
 		if len(r) > 0 {
 			name = r[0]
 		}
 		if len(r) > 1 {
 			typ = r[1]
 		}
-		fmt.Fprintf(&b, "- %s: %s\n", short(name), short(typ))
+		if len(r) > 2 {
+			nullable = r[2]
+		}
+		if len(r) > 3 {
+			def = r[3]
+		}
+		if len(r) > 4 {
+			pk = r[4]
+		}
+		b.WriteString(columnLine(name, typ, nullable, def, pk))
+		b.WriteString("\n")
 	}
 
-	if cols, rows, err := c.query(ctx, fkQ, args, false, false); err == nil && len(rows) > 0 {
+	if _, rows, err := c.query(ctx, fkQ, args, false, false); err == nil && len(rows) > 0 {
 		b.WriteString("\nFks:\n")
 		seen := map[string]bool{}
-		for _, r := range RedactRows(cols, rows) {
+		for _, r := range rows {
 			if len(r) == 0 {
 				continue
 			}
@@ -498,9 +515,9 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 		}
 	}
 
-	if cols, rows, err := c.query(ctx, idxQ, args, false, false); err == nil && len(rows) > 0 {
+	if _, rows, err := c.query(ctx, idxQ, args, false, false); err == nil && len(rows) > 0 {
 		b.WriteString("\nÍndices:\n")
-		for _, r := range RedactRows(cols, rows) {
+		for _, r := range rows {
 			if len(r) == 0 {
 				continue
 			}

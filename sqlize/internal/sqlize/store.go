@@ -21,8 +21,11 @@ type tableInfo struct {
 }
 
 type columnInfo struct {
-	Name string
-	Type string
+	Name    string
+	Type    string
+	NotNull string
+	Default string
+	PK      string
 }
 
 type fkInfo struct {
@@ -277,7 +280,7 @@ func (s *store) listTables(ctx context.Context) ([]tableInfo, error) {
 }
 
 func (s *store) tableColumns(ctx context.Context, schema, name string) ([]columnInfo, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, type FROM pragma_table_info(?, ?)`, name, schema)
+	rows, err := s.db.QueryContext(ctx, `SELECT name, type, CAST("notnull" AS TEXT), COALESCE(dflt_value, ''), CAST(pk AS TEXT) FROM pragma_table_info(?, ?)`, name, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +288,7 @@ func (s *store) tableColumns(ctx context.Context, schema, name string) ([]column
 	var out []columnInfo
 	for rows.Next() {
 		var c columnInfo
-		if err := rows.Scan(&c.Name, &c.Type); err != nil {
+		if err := rows.Scan(&c.Name, &c.Type, &c.NotNull, &c.Default, &c.PK); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

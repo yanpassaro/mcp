@@ -54,7 +54,9 @@ func main() {
 
 func mntDir() string {
 	dir := filepath.Join(userStateDir(), "mnt")
-	seedMntDir(dir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("warning: failed to create %s: %v", dir, err)
+	}
 	return dir
 }
 
@@ -80,28 +82,6 @@ func tmpDir() string {
 
 
 
-func seedMntDir(dir string) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		log.Printf("warning: failed to create %s: %v", dir, err)
-		return
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil || len(entries) > 0 {
-		return
-	}
-	seeds := map[string]string{
-		"first.txt":  "Ava\nLiam\nMaya\nNoah\nZoe\nKai\nElena\nTheo\nIsla\nHugo\nNora\nFinn\nLena\nOmar\nChloe\n",
-		"last.txt":   "Silva\nSantos\nOliveira\nSouza\nCosta\nPereira\nAlmeida\nFerreira\nRodrigues\nGomes\nMartins\nBarbosa\n",
-		"prefix.txt": "Ae\nBa\nCa\nDe\nEo\nFa\nGa\nHe\nIo\nJo\nKa\nLe\n",
-		"suffix.txt": "ron\nal\nin\neth\nara\nova\niel\no\nys\n",
-	}
-	for name, content := range seeds {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-			log.Printf("warning: failed to create %s: %v", name, err)
-		}
-	}
-	log.Printf("sandbox-mcp: folder %s empty; samples created", dir)
-}
 
 func setupLog(server string) {
 	dir := filepath.Join(userLocalDir(), "mcp", server, "logs")

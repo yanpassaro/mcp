@@ -267,10 +267,6 @@ func applyColumnMask(colName, cell string, spans []match) string {
 	return b.String()
 }
 
-func RedactValue(s string) string {
-	return applyColumnMask("", s, analyzeCell("", s))
-}
-
 func RedactRows(cols []string, rows [][]string) [][]string {
 	out := make([][]string, len(rows))
 	for i, row := range rows {

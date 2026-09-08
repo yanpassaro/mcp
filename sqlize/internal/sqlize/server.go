@@ -122,7 +122,8 @@ func (s *Server) structureTool(ctx context.Context, _ *mcp.CallToolRequest, in s
 			}
 			fmt.Fprintf(&b, "### %s (esquema %s)\n", t.Name, schemaLabel(t.Schema))
 			for _, c := range cols {
-				fmt.Fprintf(&b, "- %s: %s\n", short(c.Name), short(c.Type))
+				b.WriteString(columnLine(c.Name, c.Type, c.NotNull, c.Default, c.PK))
+				b.WriteString("\n")
 			}
 			if fks, e := s.store.tableForeignKeys(ctx, t.Schema, t.Name); e == nil && len(fks) > 0 {
 				b.WriteString("\nFks:\n")
@@ -332,6 +333,40 @@ func short(s string) string {
 		return s
 	}
 	return string(rs[:maxCellLen]) + "…"
+}
+
+func isTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "t", "true", "1", "yes", "y":
+		return true
+	}
+	return false
+}
+
+func notNull(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "no", "1", "true", "y", "yes":
+		return true
+	}
+	return false
+}
+
+func columnLine(name, typ, nullable, def, pk string) string {
+	line := "- " + short(name) + ": " + short(typ)
+	var flags []string
+	if isTruthy(pk) {
+		flags = append(flags, "PK")
+	}
+	if notNull(nullable) {
+		flags = append(flags, "NOT NULL")
+	}
+	if def != "" {
+		line += " DEFAULT " + short(strings.TrimSpace(def))
+	}
+	if len(flags) > 0 {
+		line += " · " + strings.Join(flags, " · ")
+	}
+	return line
 }
 
 func cleanCell(s string) string {
