@@ -71,12 +71,12 @@ func Run(store, tmp *Store, r RunRequest) (RunResult, error) {
 
 	select {
 	case o := <-ch:
-		o.res.Output = piiMaskText(secrets.Redact(o.res.Output))
-		o.res.Data = piiMaskText(secrets.Redact(o.res.Data))
-		o.res.Error = piiMaskText(secrets.Redact(o.res.Error))
-		o.res.Description = piiMaskText(secrets.Redact(o.res.Description))
+		o.res.Output = secrets.Redact(o.res.Output)
+		o.res.Data = secrets.Redact(o.res.Data)
+		o.res.Error = secrets.Redact(o.res.Error)
+		o.res.Description = secrets.Redact(o.res.Description)
 		if o.err != nil {
-			return o.res, fmt.Errorf("%s", piiMaskText(secrets.Redact(o.err.Error())))
+			return o.res, fmt.Errorf("%s", secrets.Redact(o.err.Error()))
 		}
 		return o.res, nil
 	case <-time.After(timeout):
@@ -262,7 +262,6 @@ func buildStd(L *lua.State, store, tmp *Store, reg *sqlRegistry, args string, wr
 	setModule("data", func() int { return buildData(L, reg, store, tmp) })
 	setModule("regex", func() int { return buildRegex(L) })
 	setModule("fake", func() int { return buildFake(L) })
-	setModule("pii", func() int { return buildPII(L) })
 
 	buildLog(L, writeOut)
 	L.SetGlobal("console")

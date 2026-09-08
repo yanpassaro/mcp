@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -51,67 +52,123 @@ func envInt(name string, def int) int {
 
 func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sandbox_read",
-		Description: "Read a saved Lua script by name, or list saved scripts when 'name' is omitted. 'name' may be '.' or a glob (e.g. '*.lua') to list matching scripts.",
-	}, s.readScript)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sandbox_write",
-		Description: "Create/overwrite a Lua script. Pass 'name', optional 'description', and 'code' (the body, auto-wrapped in function main(std)).",
-	}, s.writeScript)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sandbox_del",
-		Description: "Delete a saved Lua script by name (.lua extension optional).",
-	}, s.delScript)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sandbox_run",
-		Description: "Run a saved Lua script by 'name', with optional 'args'. Sandboxed: no OS/process; filesystem confined to mnt/; network only via std.fetch (allowlist). Fixed 30s timeout.",
-	}, s.runScript)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sandbox_manage",
-		Description: "Manage the sandbox filesystem: copy (host→sandbox), mount (sandbox→host), del, stat, and list (directory tree).",
-	}, s.manage)
-
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sandbox_doc",
 		Description: "Returns the sandbox API documentation (std.* modules, tools, limits, env vars). Pass 'topic' to get a specific section (io, fetch, secrets, ...).",
 	}, s.doc)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sandbox_diagnostics",
-		Description: "Diagnose a Lua script: compile (syntax), meta, main, and std.* usage. Pass 'name' (saved script) or 'code' (inline).",
-	}, s.diagnostics)
+		Name:        "sandbox_run",
+		Description: "Run a Lua script (saved by 'name' or inline 'code'). Action: 'run' (default). Sandboxed: no OS/process; filesystem confined to mnt/; network only via std.fetch (allowlist). Fixed 30s timeout.",
+	}, s.run)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "sandbox_scripts",
+		Description: "Manage saved Lua scripts: 'list' (default), 'read', 'write', 'diagnose', 'edit', 'del'. Names may take a 'temp:' prefix for temp scripts.",
+	}, s.scripts)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "sandbox_filesystem",
+		Description: "Manage the sandbox filesystem: copy (host→sandbox), mount (sandbox→host), del, stat, and list (directory tree).",
+	}, s.filesystem)
 }
 
-type readScriptInput struct {
-	Name string `json:"name,omitempty" jsonschema:"Script name to read (.lua extension optional). If omitted, lists all saved scripts."`
+type runInput struct {
+	Action string `json:"action,omitempty" jsonschema:"Action: 'run' (default)."`
+	Name   string `json:"name,omitempty" jsonschema:"Saved script name (in the scripts folder) to run (.lua extension optional)."`
+	Code   string `json:"code,omitempty" jsonschema:"Inline Lua code to run (used when 'name' is not given)."`
+	Args   string `json:"args,omitempty" jsonschema:"Script args (JSON parsed, else string) — used by 'run'."`
 }
 
-type writeScriptInput struct {
-	Name        string `json:"name" jsonschema:"Script file name (inside the scripts folder). The .lua extension is optional."`
-	Description string `json:"description,omitempty" jsonschema:"One-line description of what the script does (optional)."`
-	Code        string `json:"code" jsonschema:"Body of main(std) (wrapped automatically)."`
+type scriptsInput struct {
+	Action      string `json:"action,omitempty" jsonschema:"Action: 'list' (default), 'read', 'write', 'diagnose', 'edit', or 'del'."`
+	Name        string `json:"name,omitempty" jsonschema:"Script name (.lua extension optional; 'temp:' prefix for temp scripts). For 'list' may be a glob (e.g. '*.lua')."`
+	Description string `json:"description,omitempty" jsonschema:"One-line description of what the script does (for 'write')."`
+	Code        any    `json:"code,omitempty" jsonschema:"For 'write'/'diagnose': body of main(std) (string). For 'edit': array of { line, code } to replace/remove lines."`
 }
 
-type delScriptInput struct {
-	Name string `json:"name" jsonschema:"Script name to delete (.lua extension optional)."`
+type lineEdit struct {
+	Line int    `json:"line" jsonschema:"1-based line to replace/remove."`
+	Code string `json:"code" jsonschema:"Replacement content (multi-line). Empty removes the line."`
 }
 
-type runScriptInput struct {
-	Name string `json:"name" jsonschema:"Saved script name (in the scripts folder) to run (.lua extension optional)."`
-	Args string `json:"args,omitempty" jsonschema:"Script args (JSON parsed, else string)."`
-}
-
-type manageInput struct {
+type filesystemInput struct {
 	Action string `json:"action" jsonschema:"Action to perform: copy (host→sandbox), mount (sandbox→host), del, stat, list."`
 	Path   string `json:"path,omitempty" jsonschema:"Host source path for copy, or sandbox-relative path for mount/del/stat/list."`
 	Dest   string `json:"dest,omitempty" jsonschema:"Destination: sandbox-relative path for copy, host path for mount."`
 }
 
-func (s *Server) readScript(ctx context.Context, _ *mcp.CallToolRequest, in readScriptInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (*mcp.CallToolResult, any, error) {
+	switch action := strings.ToLower(strings.TrimSpace(in.Action)); action {
+	case "", "run":
+		return s.runScript(in)
+	default:
+		return nil, nil, fmt.Errorf("ação inválida %q; use 'run'", action)
+	}
+}
+
+func (s *Server) runScript(in runInput) (*mcp.CallToolResult, any, error) {
+	code := strings.TrimSpace(in.Code)
+	if code == "" {
+		name := strings.TrimSpace(in.Name)
+		if name == "" {
+			return nil, nil, errors.New("informe 'name' (script salvo) ou 'code' (inline)")
+		}
+		var err error
+		code, err = s.readScriptSource(name)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	res, err := sandbox.Run(s.mnt, s.tmp, sandbox.RunRequest{
+		Code: code,
+		Args: in.Args,
+	})
+	if strings.TrimSpace(res.Name) == "" && strings.TrimSpace(in.Name) != "" {
+		res.Name = in.Name
+	}
+	return result(formatRunResult(res, err), false)
+}
+
+func (s *Server) diagnostics(in scriptsInput) (*mcp.CallToolResult, any, error) {
+	code, err := codeString(in.Code)
+	if err != nil {
+		return nil, nil, err
+	}
+	code = strings.TrimSpace(code)
+	name := strings.TrimSpace(in.Name)
+	if code == "" && name == "" {
+		return nil, nil, errors.New("informe 'name' (script salvo) ou 'code' (inline)")
+	}
+	if code == "" {
+		var err error
+		code, err = s.readScriptSource(name)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	scrName, desc, diags := sandbox.Diagnose(code)
+	return textResult(formatDiagnostics(scrName, desc, diags))
+}
+
+func (s *Server) scripts(ctx context.Context, _ *mcp.CallToolRequest, in scriptsInput) (*mcp.CallToolResult, any, error) {
+	switch action := strings.ToLower(strings.TrimSpace(in.Action)); action {
+	case "", "list", "read":
+		return s.listOrReadScript(in)
+	case "write":
+		return s.writeScript(in)
+	case "diagnose":
+		return s.diagnostics(in)
+	case "edit":
+		return s.editScript(in)
+	case "del":
+		return s.delScript(in)
+	default:
+		return nil, nil, fmt.Errorf("ação inválida %q; use 'list', 'read', 'write', 'diagnose', 'edit' ou 'del'", action)
+	}
+}
+
+func (s *Server) listOrReadScript(in scriptsInput) (*mcp.CallToolResult, any, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "*?") {
 		pattern := ""
@@ -145,18 +202,22 @@ func (s *Server) readScript(ctx context.Context, _ *mcp.CallToolRequest, in read
 	return textResult(formatScriptRead(name, content))
 }
 
-func (s *Server) writeScript(ctx context.Context, _ *mcp.CallToolRequest, in writeScriptInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) writeScript(in scriptsInput) (*mcp.CallToolResult, any, error) {
 	ref := strings.TrimSpace(in.Name)
 	if ref == "" {
 		return nil, nil, errors.New("'name' é obrigatório")
 	}
-	if strings.TrimSpace(in.Code) == "" {
+	code, err := codeString(in.Code)
+	if err != nil {
+		return nil, nil, err
+	}
+	if strings.TrimSpace(code) == "" {
 		return nil, nil, errors.New("'code' é obrigatório")
 	}
 	isTemp := strings.HasPrefix(ref, "temp:")
 	store, clean := s.scriptStore(ref)
 	name := withLuaExt(clean)
-	wrapped := sandbox.WrapScript(name, in.Description, in.Code)
+	wrapped := sandbox.WrapScript(name, in.Description, code)
 	if _, err := store.Write(name, wrapped); err != nil {
 		return nil, nil, err
 	}
@@ -167,7 +228,7 @@ func (s *Server) writeScript(ctx context.Context, _ *mcp.CallToolRequest, in wri
 	return textResult(formatScriptWrite(display, len(wrapped), wrapped))
 }
 
-func (s *Server) delScript(ctx context.Context, _ *mcp.CallToolRequest, in delScriptInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) delScript(in scriptsInput) (*mcp.CallToolResult, any, error) {
 	ref := strings.TrimSpace(in.Name)
 	if ref == "" {
 		return nil, nil, errors.New("'name' é obrigatório")
@@ -190,27 +251,99 @@ func (s *Server) delScript(ctx context.Context, _ *mcp.CallToolRequest, in delSc
 	return nil, nil, fmt.Errorf("script %q não encontrado.", ref)
 }
 
-func (s *Server) runScript(ctx context.Context, _ *mcp.CallToolRequest, in runScriptInput) (*mcp.CallToolResult, any, error) {
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		return nil, nil, errors.New("informe 'name' (script salvo)")
+func (s *Server) editScript(in scriptsInput) (*mcp.CallToolResult, any, error) {
+	ref := strings.TrimSpace(in.Name)
+	if ref == "" {
+		return nil, nil, errors.New("'name' é obrigatório")
 	}
-	code, err := s.readScriptSource(name)
+	edits, err := parseLineEdits(in.Code)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	res, err := sandbox.Run(s.mnt, s.tmp, sandbox.RunRequest{
-		Code: code,
-		Args: in.Args,
-	})
-	if strings.TrimSpace(res.Name) == "" {
-		res.Name = name
+	content, err := s.readScriptSource(ref)
+	if err != nil {
+		return nil, nil, err
 	}
-	return result(formatRunResult(res, err), false)
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+
+	sort.SliceStable(edits, func(i, j int) bool { return edits[i].Line > edits[j].Line })
+	for _, e := range edits {
+		l := e.Line
+		if l < 1 {
+			continue
+		}
+		repl := []string{}
+		if strings.TrimSuffix(e.Code, "\n") != "" {
+			repl = strings.Split(strings.TrimSuffix(e.Code, "\n"), "\n")
+		}
+		if l > len(lines) {
+			if len(repl) > 0 {
+				lines = append(lines, repl...)
+			}
+			continue
+		}
+		idx := l - 1
+		if len(repl) == 0 {
+			lines = append(lines[:idx], lines[idx+1:]...)
+			continue
+		}
+		out := append([]string{}, lines[:idx]...)
+		out = append(out, repl...)
+		out = append(out, lines[idx+1:]...)
+		lines = out
+	}
+	updated := strings.Join(lines, "\n")
+
+	store, clean := s.scriptStore(ref)
+	name := withLuaExt(clean)
+	if _, err := store.Write(name, updated); err != nil {
+		return nil, nil, err
+	}
+	display := name
+	if strings.HasPrefix(ref, "temp:") {
+		display = "temp:" + name
+	}
+	return textResult(formatScriptWrite(display, len(updated), updated))
 }
 
-func (s *Server) manage(ctx context.Context, _ *mcp.CallToolRequest, in manageInput) (*mcp.CallToolResult, any, error) {
+func codeString(v any) (string, error) {
+	switch x := v.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return x, nil
+	default:
+		return "", fmt.Errorf("'code' deve ser uma string")
+	}
+}
+
+func parseLineEdits(v any) ([]lineEdit, error) {
+	if v == nil {
+		return nil, nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("'code' para 'edit' deve ser um array de { line, code }")
+	}
+	out := make([]lineEdit, 0, len(arr))
+	for _, e := range arr {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		le := lineEdit{}
+		if f, ok := m["line"].(float64); ok {
+			le.Line = int(f)
+		}
+		if s, ok := m["code"].(string); ok {
+			le.Code = s
+		}
+		out = append(out, le)
+	}
+	return out, nil
+}
+
+func (s *Server) filesystem(ctx context.Context, _ *mcp.CallToolRequest, in filesystemInput) (*mcp.CallToolResult, any, error) {
 	switch action := strings.ToLower(strings.TrimSpace(in.Action)); action {
 	case "copy":
 		dest, err := s.mnt.CopyIn(in.Path, in.Dest)
@@ -265,7 +398,7 @@ func (s *Server) readScriptSource(name string) (string, error) {
 			return c, nil
 		}
 	}
-	return "", fmt.Errorf("script %q não encontrado. Crie-o com sandbox_write (ou veja o que existe com sandbox_read).", name)
+	return "", fmt.Errorf("script %q não encontrado. Crie-o com sandbox_scripts (write) ou veja o que existe com sandbox_scripts (list/read).", name)
 }
 
 func (s *Server) scriptStore(ref string) (*sandbox.Store, string) {

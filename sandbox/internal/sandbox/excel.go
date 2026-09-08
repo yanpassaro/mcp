@@ -61,8 +61,8 @@ func excelPath(mnt, tmp *Store, p string) (string, error) {
 	if p == "" {
 		return "", fmt.Errorf("caminho da planilha vazio")
 	}
-	if strings.HasPrefix(p, "tmp:") {
-		return tmp.resolve(strings.TrimPrefix(p, "tmp:"))
+	if after, ok :=strings.CutPrefix(p, "tmp:"); ok  {
+		return tmp.resolve(after)
 	}
 	return mnt.resolve(p)
 }

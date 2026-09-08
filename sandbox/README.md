@@ -6,19 +6,23 @@ Cada script tem `name`, `description` e uma função `function main(std)` que re
 
 ## Tools
 
-| Tool | O que faz |
-| --- | --- |
-| `sandbox_read` | Lê um script por `name`; sem `name`, lista todos |
-| `sandbox_write` | Cria/sobrescreve um script (`name` + `description` + `code`) |
-| `sandbox_del` | Apaga um script por `name` |
-| `sandbox_run` | Roda um script salvo, com `args` opcional |
-| `sandbox_manage` | Ações no filesystem do sandbox: `copy` (host→sandbox), `mount` (sandbox→host), `del`, `stat`, `list` (árvore) |
-| `sandbox_doc` | Devolve a documentação da API `std` (topic opcional: `io`, `fetch`, `secrets`, ...) |
-| `sandbox_diagnostics` | Diagnostica um script Lua (sintaxe, meta, `main`, uso de `std.*`) |
+| Tool | Action | O que faz |
+| --- | --- | --- |
+| `sandbox_scripts` | `list` (default) | Lista scripts salvos (`name` pode ser `.` ou glob, ex.: `*.lua`) |
+| `sandbox_scripts` | `read` | Lê um script por `name` |
+| `sandbox_scripts` | `write` | Cria/sobrescreve um script (`name` + `description` + `code`) |
+| `sandbox_scripts` | `diagnose` | Diagnostica um script Lua (sintaxe, meta, `main`, uso de `std.*`) |
+| `sandbox_scripts` | `edit` | Edita linhas de um script salvo (`name` + `code` = `[{ line, code }]`); `code` vazio remove a linha |
+| `sandbox_scripts` | `del` | Apaga um script por `name` |
+| `sandbox_run` | `run` (default) | Roda um script salvo (`name`) ou código inline (`code`), com `args` opcional |
+| `sandbox_filesystem` | `copy` | Copia do host para dentro do sandbox (`path` host → `dest` sandbox) |
+| `sandbox_filesystem` | `mount` | Copia do sandbox para o host (`path` sandbox → `dest` host) |
+| `sandbox_filesystem` | `del` / `stat` / `list` | Apaga, mostra status ou lista (árvore) um caminho do sandbox |
+| `sandbox_doc` | `topic` (opcional) | Documentação da API `std` com assinaturas (args + retorno) por módulo; `topic=<módulo>` (ex.: `io`) traz as funções detalhadas + exemplo |
 
 Scripts em `dev/` são persistentes. Nomes com o prefixo `temp:` (ex.: `temp:meu_script`) vivem em `dev/temp/` e são **limpados a cada inicialização** do servidor (assim como a pasta `tmp/`).
 
-`std` fornece: `result`, `log`, `args`, `io` (`read`/`lines`/`json`/`write`/`append`/`del`/`exists`/`stat`/`dir`/`copy`/`move`/`mkdir`/`glob`/`walk`), `tmp` (mesmas funções do `io` + `clear`), `sql` (`exec`/`query`/`get`/`scalar`/`close`/`begin`/`commit`/`rollback`/`tables`/`columns`/`schema`), `uuid` (`v4`/`v7`), `csv` (`parse`/`stringify`), `xml` (`parse`/`stringify`), `excel` (`sheets`/`read`/`write`), `data` (`fromCSV`/`toCSV`/`fromJSON`/`toJSON`/`toXML`/`fromExcel`/`toExcel`/`sqlImport`/`sqlExport`/`convert`), `regex` (`match`/`find`/`findAll`/`replace`/`split`/`groups`/`findAllGroups`), `fake` (`seed`/`name`/`email`/`username`/`phone`/`int`/`float`/`bool`/`uuid`/`date`/`words`/`sentence`/`paragraph`), `pii` (`has`/`detect`/`mask`/`maskRows`), `random`, `date`, `str`, `list`, `num`, `json`, `assert` (`ok`/`equal`/`throws`/`type`/`notNil`/`number`/`string`/`boolean`/`table`/`contains`/`matches`/`between`/`length`), `fetch` (`get`/`post`/`json`), `encode`, `secrets` (`get`/`has`).
+`std` fornece: `result`, `log`, `args`, `io` (`read`/`lines`/`json`/`write`/`append`/`del`/`exists`/`stat`/`dir`/`copy`/`move`/`mkdir`/`glob`/`walk`), `tmp` (mesmas funções do `io` + `clear`), `sql` (`exec`/`query`/`get`/`scalar`/`close`/`begin`/`commit`/`rollback`/`tables`/`columns`/`schema`), `uuid` (`v4`/`v7`), `csv` (`parse`/`stringify`), `xml` (`parse`/`stringify`), `excel` (`sheets`/`read`/`write`), `data` (`fromCSV`/`toCSV`/`fromJSON`/`toJSON`/`toXML`/`fromExcel`/`toExcel`/`sqlImport`/`sqlExport`/`convert`), `regex` (`match`/`find`/`findAll`/`replace`/`split`/`groups`/`findAllGroups`), `fake` (`seed`/`name`/`email`/`username`/`phone`/`int`/`float`/`bool`/`uuid`/`date`/`words`/`sentence`/`paragraph`), `random`, `date`, `str`, `list`, `num`, `json`, `assert` (`ok`/`equal`/`throws`/`type`/`notNil`/`number`/`string`/`boolean`/`table`/`contains`/`matches`/`between`/`length`), `fetch` (`get`/`post`/`json`), `encode`, `secrets` (`get`/`has`).
 
 **Segurança:** as libs nativas perigosas são removidas (`dofile`, `loadfile`, `load`, `require`, `collectgarbage`, `os`, `io`, `debug`, `package`, `coroutine`); só restam primitivas seguras (`pairs`, `ipairs`, `type`, `tostring`, `tonumber`, metatables, `string`, `math`, `table`).
 
@@ -40,7 +44,7 @@ A chave é o nome da variável sem o prefixo `SECRET_`, em minúsculas (`SECRET_
 
 **Redação:** os valores de qualquer `SECRET_*` são automaticamente substituídos por `[REDACTED]` em toda saída (prints, `console`, retorno de `std.result`) — nunca aparecem para a IA.
 
-## sandbox_manage
+## sandbox_filesystem
 
 Opera sobre a pasta `mnt/` do sandbox. `path` é sempre relativo ao sandbox (exceto a origem do `copy`, que é no host).
 

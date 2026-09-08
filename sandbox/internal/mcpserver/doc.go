@@ -36,9 +36,6 @@ var docAliases = map[string]string{
 	"regexp":    "regex",
 	"fake":      "fake",
 	"faker":     "fake",
-	"pii":       "pii",
-	"mask":      "pii",
-	"redact":    "pii",
 	"xml":       "xml",
 	"excel":     "excel",
 	"data":      "data",
@@ -54,23 +51,22 @@ var docAliases = map[string]string{
 	"tools":    "tools",
 }
 
-var docTopics = []string{
-	"index", "meta", "tools",
-	"io", "tmp", "fetch", "cookies", "secrets", "sql", "result", "log", "args",
-	"json", "encode", "str", "list", "num", "date", "random", "uuid", "assert", "fake", "pii", "csv", "regex", "xml", "excel", "data",
-	"limits", "env", "examples",
-}
 
 func (s *Server) doc(ctx context.Context, _ *mcp.CallToolRequest, in docInput) (*mcp.CallToolResult, any, error) {
 	topic := strings.ToLower(strings.TrimSpace(in.Topic))
+	if topic == "" || topic == "all" || topic == "overview" || topic == "help" {
+		return textResult(renderLunaIndex())
+	}
 	if alias, ok := docAliases[topic]; ok {
 		topic = alias
 	}
-	doc, ok := sandboxDocs[topic]
-	if !ok {
-		return textResult(renderDoc(sandboxDocs["index"]) + "\n\n⚠️ Topic `" + strings.TrimSpace(in.Topic) + "` not found. Available topics: " + strings.Join(docTopics, ", ") + ".\n")
+	if mod := lunaModule(topic); mod != nil {
+		return textResult(renderLunaModule(mod))
 	}
-	return textResult(renderDoc(doc))
+	if doc, ok := sandboxDocs[topic]; ok {
+		return textResult(renderDoc(doc))
+	}
+	return textResult(renderLunaIndex() + "\n\n⚠️ Topic `" + strings.TrimSpace(in.Topic) + "` not found. Available topics: " + strings.Join(lunaTopicNames(), ", ") + ".\n")
 }
 
 func renderDoc(doc string) string {
@@ -84,7 +80,7 @@ The sandbox runs isolated Lua scripts (no OS access; network only via ~std.fetch
 
 ## How to write a script
 
-When using ~sandbox_write~, pass **only the body** of ~main~. The ~-- name=~/~-- desc=~ header and the ~function main(std) ... end~ wrapper are added automatically from the ~name~/~description~ arguments.
+When using ~sandbox_scripts~ (action=write), pass **only the body** of ~main~. The ~-- name=~/~-- desc=~ header and the ~function main(std) ... end~ wrapper are added automatically from the ~name~/~description~ arguments.
 
 ~~~lua
 local data = std.io.read("data.txt")
@@ -92,7 +88,7 @@ local n = std.num.parse(data)
 std.result.ok({ lines = std.io.lines("data.txt"), total = n })
 ~~~
 
-Write it with ~sandbox_write~ (name + code) and run it with ~sandbox_run~. Tools: ~sandbox_read~, ~sandbox_write~, ~sandbox_del~, ~sandbox_run~, ~sandbox_manage~, ~sandbox_doc~.
+Write it with ~sandbox_scripts~ (action=write, name + code) and run it with ~sandbox_run~ (action=run). Tools: ~sandbox_scripts~, ~sandbox_run~, ~sandbox_filesystem~, ~sandbox_doc~.
 
 ## ~std~ modules
 
@@ -121,7 +117,6 @@ Write it with ~sandbox_write~ (name + code) and run it with ~sandbox_run~. Tools
 | ~random~ | ~seed~, ~int~, ~pick~, ~shuffle~ |
 | ~assert~ | ~ok~, ~equal~, ~throws~, ~type~, ~notNil~, ~number~, ~string~, ~boolean~, ~table~, ~contains~, ~matches~, ~between~, ~length~ |
 | ~fake~ | ~seed~, ~name~, ~email~, ~username~, ~phone~, ~int~, ~float~, ~bool~, ~uuid~, ~date~, ~words~, ~sentence~, ~paragraph~ |
-| ~pii~ | ~has~, ~detect~, ~mask~, ~maskRows~ |
 
 Call ~sandbox_doc~ with a topic for details (e.g., ~sandbox_doc~ topic=~io~). Topics: ~meta~, ~io~, ~tmp~, ~fetch~, ~cookies~, ~secrets~, ~sql~, ~uuid~, ~csv~, ~regex~, ~xml~, ~excel~, ~data~, ~result~, ~log~, ~json~, ~encode~, ~str~, ~list~, ~num~, ~date~, ~random~, ~assert~, ~fake~, ~limits~, ~env~, ~tools~, ~examples~.
 
@@ -142,7 +137,7 @@ std.result.ok({ login = res.data.login })
 	"meta": `# Script — header and return
 
 ## Submitting code
-When you call ~sandbox_write~, pass **only the body** of ~main~ — do not write ~function main(std)~ or ~end~. The header (~-- name=~/~-- desc=~) and the wrapper are added automatically from the ~name~/~description~ arguments.
+When you call ~sandbox_scripts~ (action=write), pass **only the body** of ~main~ — do not write ~function main(std)~ or ~end~. The header (~-- name=~/~-- desc=~) and the wrapper are added automatically from the ~name~/~description~ arguments.
 
 ~~~lua
 -- body only
@@ -164,15 +159,19 @@ std.result.ok({ received = std.args })
 ~~~`,
 	"tools": `# MCP tools
 
-| Tool | What it does |
-| --- | --- |
-| ~sandbox_read~ | Read a saved script by ~name~, or list all; ~name~ may be ~.~ or a glob (e.g. ~*.lua~). |
-| ~sandbox_write~ | Create/overwrite a script (~name~ + ~code~; ~description~ optional). Pass **only the body** — the ~function main(std)~ wrapper is added automatically. Returns the stored script. |
-| ~sandbox_del~ | Delete a saved script by ~name~. |
-| ~sandbox_run~ | Run a saved script by ~name~, with optional ~args~ (JSON or string). |
-| ~sandbox_manage~ | Filesystem actions: ~copy~ (host→mnt), ~mount~ (mnt→host), ~del~, ~stat~, ~list~ (tree). |
-| ~sandbox_doc~ | Return the ~std~ API documentation (optional ~topic~). |
-| ~sandbox_diagnostics~ | Diagnose a Lua script (~name~ or ~code~): syntax, meta, ~main~, ~std.*~ usage. |
+| Tool | Action | What it does |
+| --- | --- | --- |
+| ~sandbox_scripts~ | list (default) | List saved scripts (~name~ may be ~.~ or a glob, e.g. ~*.lua~). |
+| ~sandbox_scripts~ | read | Read a saved script by ~name~. |
+| ~sandbox_scripts~ | write | Create/overwrite a script (~name~ + ~code~; ~description~ optional). Pass **only the body** — the ~function main(std)~ wrapper is added automatically. Returns the stored script. |
+| ~sandbox_scripts~ | diagnose | Diagnose a Lua script (~name~ or ~code~): syntax, meta, ~main~, ~std.*~ usage. |
+| ~sandbox_scripts~ | edit | Edit lines of a saved script (~name~ + ~code~ = [{ line, code }]); empty ~code~ removes the line. |
+| ~sandbox_scripts~ | del | Delete a saved script by ~name~. |
+| ~sandbox_run~ | run (default) | Run a script by ~name~ (saved) or inline ~code~, with optional ~args~ (JSON or string). |
+| ~sandbox_filesystem~ | copy | Copy from host into the sandbox folder (~path~ host → ~dest~ sandbox). |
+| ~sandbox_filesystem~ | mount | Copy from the sandbox folder to the host (~path~ sandbox → ~dest~ host). |
+| ~sandbox_filesystem~ | del, stat, list | Delete, stat, or list (tree) a sandbox path. |
+| ~sandbox_doc~ | topic | Return the ~std~ API documentation (optional ~topic~). |
 
 Script names prefixed with ~temp:~ (e.g. ~temp:meu_script~) live in ~dev/temp/~ and are **cleared on startup**.
 
@@ -687,27 +686,7 @@ std.data.convert("tmp:dados.json", "tmp:dados.xlsx")
 	local p = { nome = std.fake.name(), email = std.fake.email(), n = std.fake.int(1, 100) }
 	std.result.ok(p)
 	~~~`,
-		"pii": `# std.pii — detect and mask PII
-
-		Detects and masks personally identifiable information (CPF, CNPJ, email, phone, card, address, secrets, ...).
-
-		**Auto-mask:** sensitive PII (CPF, CNPJ, email, phone, card, JWT, BTC) is automatically replaced in all outputs/returns (like secrets). Dates, IPs and URLs are NOT auto-masked, to avoid breaking normal data — use ~std.pii.mask~ for a full mask.
-
-		| Function | Signature | Returns |
-		| --- | --- | --- |
-		| ~has~ | ~has(s)~ | bool |
-		| ~detect~ | ~detect(s)~ | table of { type, value } |
-		| ~mask~ | ~mask(s)~ | string (replaces with [TYPE]) |
-		| ~maskRows~ | ~maskRows(rows)~ | rows with PII columns masked |
-
-		~maskRows~ detects PII columns by header name (e.g. ~cpf~, ~email~, ~telefone~, ~senha~...) and masks their cells (secrets become ~[REDACTED]~).
-
-		~~~lua
-		local s = "Contato: joao@ex.com, CPF 123.456.789-01"
-		local masked = std.pii.mask(s)              -- "Contato: [EMAIL], CPF [CPF]"
-		local rows = std.pii.maskRows({ { cpf = "123.456.789-01", nome = "Ava" } })
-		std.result.ok({ has = std.pii.has(s), masked = masked, rows = rows })
-		~~~`,
+	
 			"limits": `# Limits
 
 - Execution: up to 30s.
@@ -715,7 +694,7 @@ std.data.convert("tmp:dados.json", "tmp:dados.xlsx")
 - File: 2 MB per file; 1 MB per write.
 - Paths are confined to the sandbox (no absolute paths, no ~..~).
 - ~std.sql.query~ returns at most 10,000 rows (~SANDBOX_SQL_MAX_ROWS~).
-- Secrets (~SECRET_*~) and PII (CPF, CNPJ, email, phone, card, JWT/BTC) are auto-masked in any output/return.`,
+- Secrets (~SECRET_*~) are auto-masked in any output/return.`,
 	"env": `# Environment
 
 Secrets are available via ~std.secrets.get~ using ~SECRET_*~ variables (e.g., ~SECRET_GITHUB_TOKEN_API~ → ~std.secrets.get("github_token_api")~).

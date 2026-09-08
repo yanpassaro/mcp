@@ -32,7 +32,16 @@ func main() {
 	}
 
 	clearStore := func(label, dir string) {
-		if n, err := sandbox.NewStore(dir).Clear(); err == nil && n > 0 {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Printf("sandbox-mcp: %s clear error (mkdir): %v", label, err)
+			return
+		}
+		n, err := sandbox.NewStore(dir).Clear()
+		if err != nil {
+			log.Printf("sandbox-mcp: %s clear error: %v", label, err)
+			return
+		}
+		if n > 0 {
 			log.Printf("sandbox-mcp: %s clear removed %d file(s)", label, n)
 		}
 	}

@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	lua "github.com/Shopify/go-lua"
@@ -26,7 +27,6 @@ var stdAPI = map[string][]string{
 	"data":   {"fromCSV", "toCSV", "fromJSON", "toJSON", "toXML", "fromExcel", "toExcel", "sqlImport", "sqlExport", "convert"},
 	"regex":  {"match", "find", "findAll", "replace", "split", "groups", "findAllGroups"},
 	"fake":   {"seed", "firstName", "lastName", "name", "email", "username", "phone", "int", "float", "bool", "uuid", "date", "words", "sentence", "paragraph"},
-	"pii":    {"has", "detect", "mask", "maskRows"},
 	"json":   {"parse", "stringify", "format", "minify", "path"},
 	"encode": {"crc32", "md5", "sha256", "base64", "hex"},
 	"str":    {"normalize", "slug", "title", "camel", "pascal", "snake", "kebab", "wrap", "summarize", "format", "count", "split"},
@@ -72,10 +72,5 @@ func Diagnose(code string) (name, desc string, diags []Diag) {
 }
 
 func containsStr(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, s)
 }

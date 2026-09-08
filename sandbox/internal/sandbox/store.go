@@ -24,8 +24,8 @@ type Entry struct {
 
 type Store struct {
 	Root          string
-	MaxTotalBytes int64 // 0 = sem limite
-	MaxFiles      int   // 0 = sem limite
+	MaxTotalBytes int64
+	MaxFiles      int
 }
 
 func NewStore(root string) *Store {

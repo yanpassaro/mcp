@@ -114,8 +114,8 @@ func formatNum(n float64, dec int, loc string) string {
 	neg := n < 0 || (n == 0 && math.Signbit(n))
 	s := strconv.FormatFloat(math.Abs(n), 'f', dec, 64)
 	var intPart, decPart string
-	if i := strings.IndexByte(s, '.'); i >= 0 {
-		intPart, decPart = s[:i], s[i+1:]
+	if before, after, ok := strings.Cut(s, "."); ok {
+		intPart, decPart = before, after
 	} else {
 		intPart = s
 	}

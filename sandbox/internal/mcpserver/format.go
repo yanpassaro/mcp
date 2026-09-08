@@ -8,6 +8,30 @@ import (
 	"ntdsk.com/mcp/sandbox/internal/sandbox"
 )
 
+func formatDiagnostics(name, desc string, diags []sandbox.Diag) string {
+	var b strings.Builder
+	b.WriteString("## Diagnóstico do script\n\n")
+	if name != "" {
+		fmt.Fprintf(&b, "- **nome:** `%s`\n", name)
+	}
+	if desc != "" {
+		fmt.Fprintf(&b, "- **descrição:** %s\n", strings.ReplaceAll(desc, "\n", " "))
+	}
+	if len(diags) == 0 {
+		b.WriteString("\n✅ Nenhum problema encontrado.\n")
+		return b.String()
+	}
+	b.WriteString("\n")
+	for _, d := range diags {
+		sym := "⚠️"
+		if d.Severity == "erro" {
+			sym = "🔴"
+		}
+		fmt.Fprintf(&b, "- %s **%s:** %s\n", sym, strings.ToUpper(d.Severity), d.Message)
+	}
+	return b.String()
+}
+
 func textResult(text string) (*mcp.CallToolResult, any, error) {
 	return result(text, false)
 }
