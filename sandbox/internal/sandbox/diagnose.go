@@ -53,10 +53,6 @@ func Diagnose(code string) (name, desc string, diags []Diag) {
 		return name, desc, diags
 	}
 
-	if !reMain.MatchString(code) {
-		diags = append(diags, Diag{"aviso", "não foi encontrado `function main(std)`; o script não roda"})
-	}
-
 	for _, m := range reStdUse.FindAllStringSubmatch(code, -1) {
 		mod, fn := m[1], m[2]
 		funcs, ok := stdAPI[mod]

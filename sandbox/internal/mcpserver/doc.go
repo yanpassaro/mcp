@@ -80,7 +80,10 @@ The sandbox runs isolated Lua scripts (no OS access; network only via ~std.fetch
 
 ## How to write a script
 
-When using ~sandbox_scripts~ (action=write), pass **only the body** of ~main~. The ~-- name=~/~-- desc=~ header and the ~function main(std) ... end~ wrapper are added automatically from the ~name~/~description~ arguments.
+Pass **only the body** of ~main~ — you do **not** write ~function main(std)~ or ~end~. The ~function main(std) ... end~ wrapper is added automatically in both cases:
+
+- ~sandbox_scripts~ (action=write): the ~-- name=~/~-- desc=~ header and the wrapper are added from the ~name~/~description~ arguments.
+- ~sandbox_run~ (action=run, inline ~code~): a bare body is wrapped for you too. You can just send ~print(...)~ / ~std.log.*~ tails without the wrapper.
 
 ~~~lua
 local data = std.io.read("data.txt")
@@ -167,7 +170,7 @@ std.result.ok({ received = std.args })
 | ~sandbox_scripts~ | diagnose | Diagnose a Lua script (~name~ or ~code~): syntax, meta, ~main~, ~std.*~ usage. |
 | ~sandbox_scripts~ | edit | Edit lines of a saved script (~name~ + ~code~ = [{ line, code }]); empty ~code~ removes the line. |
 | ~sandbox_scripts~ | del | Delete a saved script by ~name~. |
-| ~sandbox_run~ | run (default) | Run a script by ~name~ (saved) or inline ~code~, with optional ~args~ (JSON or string). |
+| ~sandbox_run~ | run (default) | Run a script by ~name~ (saved) or inline ~code~, with optional ~args~ (JSON or string). Bare ~code~ is auto-wrapped in ~function main(std)~. |
 | ~sandbox_filesystem~ | copy | Copy from host into the sandbox folder (~path~ host → ~dest~ sandbox). |
 | ~sandbox_filesystem~ | mount | Copy from the sandbox folder to the host (~path~ sandbox → ~dest~ host). |
 | ~sandbox_filesystem~ | del, stat, list | Delete, stat, or list (tree) a sandbox path. |

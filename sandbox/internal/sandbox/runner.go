@@ -93,6 +93,7 @@ func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, e
 	if code == "" {
 		return RunResult{}, fmt.Errorf("código vazio: informe 'code' ou um 'name' de script salvo")
 	}
+	code = ensureMain(code)
 
 	name, desc := parseMeta(code)
 
@@ -156,11 +157,13 @@ func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, e
 	if err := L.ProtectedCall(1, 1, 0); err != nil {
 		result.Ok = false
 		result.Error = callError(L, err)
+		result.Output = outBuf.String()
 		result.Duration = time.Since(start)
 		return result, nil
 	}
 	ret := L.Top()
 	result.Duration = time.Since(start)
+	result.Output = outBuf.String()
 
 	if res != nil {
 		result.Ok = res.ok
@@ -223,6 +226,13 @@ func parseMeta(code string) (string, string) {
 
 func WrapScript(name, desc, body string) string {
 	return fmt.Sprintf("-- name=%q\n-- desc=%q\n\nfunction main(std)\n%s\nend\n", name, desc, strings.TrimSpace(body))
+}
+
+func ensureMain(code string) string {
+	if reMain.MatchString(code) {
+		return code
+	}
+	return "function main(std)\n" + code + "\nend\n"
 }
 
 func buildStd(L *lua.State, store, tmp *Store, reg *sqlRegistry, args string, writeOut func(string), res **luaResult, secrets *Secrets) {

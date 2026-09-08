@@ -47,7 +47,7 @@ func lunaTopicNames() []string {
 func renderLunaIndex() string {
 	var b strings.Builder
 	b.WriteString("# Sandbox Lua — std (lunadoc)\n\n")
-	b.WriteString("> Isolated Lua sandbox: no OS/process; files confined to `mnt/`; network only via `std.fetch` (allowlist). Write `function main(std)` and return with `std.result.ok(...)`/`err(...)`. Objects/arrays become JSON in the output.\n\n")
+	b.WriteString("> Isolated Lua sandbox: no OS/process; files confined to `mnt/`; network only via `std.fetch` (allowlist). Each script defines `function main(std)` and returns with `std.result.ok(...)`/`err(...)`. Inline `code`/written bodies are auto-wrapped in `function main(std)` when missing — pass only the body. Objects/arrays become JSON in the output.\n\n")
 	b.WriteString("## Modules\n\n| Module | Description |\n| --- | --- |\n")
 	for _, m := range lunaOrder {
 		fn := ""

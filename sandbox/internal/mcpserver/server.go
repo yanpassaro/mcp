@@ -58,7 +58,7 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sandbox_run",
-		Description: "Run a Lua script (saved by 'name' or inline 'code'). Action: 'run' (default). Sandboxed: no OS/process; filesystem confined to mnt/; network only via std.fetch (allowlist). Fixed 30s timeout.",
+		Description: "Run a Lua script (saved by 'name' or inline 'code'). Action: 'run' (default). Inline 'code' may be just the body — it is auto-wrapped in `function main(std)`. Sandboxed: no OS/process; filesystem confined to mnt/; network only via std.fetch (allowlist). Fixed 30s timeout.",
 	}, s.run)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -75,7 +75,7 @@ func (s *Server) Register(server *mcp.Server) {
 type runInput struct {
 	Action string `json:"action,omitempty" jsonschema:"Action: 'run' (default)."`
 	Name   string `json:"name,omitempty" jsonschema:"Saved script name (in the scripts folder) to run (.lua extension optional)."`
-	Code   string `json:"code,omitempty" jsonschema:"Inline Lua code to run (used when 'name' is not given)."`
+	Code   string `json:"code,omitempty" jsonschema:"Inline Lua code to run (used when 'name' is not given). Pass only the body — the function main(std) wrapper is added automatically if missing."`
 	Args   string `json:"args,omitempty" jsonschema:"Script args (JSON parsed, else string) — used by 'run'."`
 }
 

@@ -4,6 +4,8 @@ Sandbox **não-destrutivo** de scripts Lua para a IA: a IA escreve, lê, apaga e
 
 Cada script tem `name`, `description` e uma função `function main(std)` que retorna `std.result.ok(...)`/`err(...)`. A saída vira Markdown (objetos/arrays viram JSON).
 
+**Só o corpo (body) basta:** tanto no `sandbox_scripts` (write) quanto no `sandbox_run` com `code` inline, o wrapper `function main(std) ... end` é adicionado automaticamente quando ausente — a IA pode enviar apenas `print(...)` / `std.log.*` sem escrever a função.
+
 ## Tools
 
 | Tool | Action | O que faz |
