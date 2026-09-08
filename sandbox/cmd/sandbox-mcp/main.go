@@ -24,12 +24,7 @@ func main() {
 	}
 
 	mntDir := mntDir()
-	devDir := devDir(mntDir)
 	tmpDir := tmpDir()
-	tempScripts := filepath.Join(devDir, "temp")
-	if err := os.MkdirAll(tempScripts, 0o755); err != nil {
-		log.Printf("warning: failed to create %s: %v", tempScripts, err)
-	}
 
 	clearStore := func(label, dir string) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -46,12 +41,11 @@ func main() {
 		}
 	}
 	clearStore("tmp", tmpDir)
-	clearStore("temp-scripts", tempScripts)
 
-	log.Printf("sandbox-mcp: mnt=%s dev=%s tmp=%s temp-scripts=%s", mntDir, devDir, tmpDir, tempScripts)
+	log.Printf("sandbox-mcp: mnt=%s tmp=%s", mntDir, tmpDir)
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "sandbox-mcp", Version: "0.1.0"}, nil)
-	mcpserver.New(mntDir, devDir, tmpDir, tempScripts).Register(server)
+	mcpserver.New(mntDir, tmpDir).Register(server)
 
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Printf("sandbox-mcp stopped: %v", err)
@@ -59,24 +53,11 @@ func main() {
 }
 
 func mntDir() string {
-	if d := strings.TrimSpace(os.Getenv("SANDBOX_MNT_DIR")); d != "" {
-		return d
-	}
-	dir := filepath.Join(userLocalDir(), "mcp", "sandbox", "mnt")
+	dir := filepath.Join(userStateDir(), "mnt")
 	seedMntDir(dir)
 	return dir
 }
 
-func devDir(mntDir string) string {
-	if d := strings.TrimSpace(os.Getenv("SANDBOX_DEV_DIR")); d != "" {
-		return d
-	}
-	dir := filepath.Join(filepath.Dir(mntDir), "dev")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		log.Printf("warning: failed to create %s: %v", dir, err)
-	}
-	return dir
-}
 
 func memLimitMB() int64 {
 	v := strings.TrimSpace(os.Getenv("SANDBOX_MEM_LIMIT_MB"))
@@ -90,10 +71,7 @@ func memLimitMB() int64 {
 }
 
 func tmpDir() string {
-	if d := strings.TrimSpace(os.Getenv("SANDBOX_TMP_DIR")); d != "" {
-		return d
-	}
-	dir := filepath.Join(userLocalDir(), "mcp", "sandbox", "tmp")
+	dir := filepath.Join(userStateDir(), "tmp")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		log.Printf("warning: failed to create %s: %v", dir, err)
 	}
@@ -138,6 +116,13 @@ func setupLog(server string) {
 		return
 	}
 	log.SetOutput(f)
+}
+
+func userStateDir() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".local", "state", "mcp")
+	}
+	return filepath.Join(os.Getenv("USERPROFILE"), ".local", "state", "mcp")
 }
 
 func userLocalDir() string {

@@ -142,7 +142,7 @@ func luhn(s string) bool {
 }
 
 func columnEntity(name string) (string, bool) {
-	ent, ok := columnEntityMap[normalizeWord(name)]
+	ent, ok := columnEntityMap[colKey(name)]
 	return ent, ok
 }
 

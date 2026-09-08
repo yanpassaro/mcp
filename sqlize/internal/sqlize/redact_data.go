@@ -43,7 +43,7 @@ func loadPII() {
 	labels = cfg.Labels
 	for ent, names := range cfg.Columns {
 		for _, n := range names {
-			columnEntityMap[normalizeWord(n)] = ent
+			columnEntityMap[colKey(n)] = ent
 		}
 	}
 	for ent, words := range cfg.Contexts {

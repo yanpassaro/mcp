@@ -24,7 +24,7 @@ var lunaOrder = []*lunaMod{
 	lunaResult, lunaLog, lunaArgs, lunaIO, lunaTmp, lunaFetch, lunaCookies,
 	lunaSecrets, lunaSQL, lunaUUID, lunaCSV, lunaXML, lunaExcel, lunaData,
 	lunaRegex, lunaJSON, lunaEncode, lunaStr, lunaList, lunaNum, lunaDate,
-	lunaRandom, lunaAssert, lunaFake,
+	lunaRandom, lunaAssert, lunaFake, lunaTemplate,
 }
 
 var lunaModules = map[string]*lunaMod{}
@@ -40,7 +40,7 @@ func lunaTopicNames() []string {
 	for _, m := range lunaOrder {
 		names = append(names, m.Name)
 	}
-	names = append(names, "meta", "limits", "env", "tools", "examples")
+	names = append(names, "meta", "limits", "env", "tools", "run", "scripts", "examples")
 	return names
 }
 
@@ -317,18 +317,23 @@ std.result.ok({ total = #rows, first = rows[1] })`,
 var lunaData = &lunaMod{
 	Name:   "data",
 	Prefix: "data",
-	Desc:   "data pipeline (sqlize-style): moves between CSV/JSON/XML/Excel/SQLite (rows = array of maps)",
+	Desc:   "data pipeline (sqlize-style): moves between CSV/JSON/XML/Excel/SQLite/SQL (rows = array of maps)",
 	Fns: []lunaFn{
 		{"fromCSV", "s:string, sep?:string", "rows", "CSV → rows"},
 		{"toCSV", "rows:table, sep?:string", "string", "rows → CSV"},
 		{"fromJSON", "s:string", "any", "JSON → value"},
 		{"toJSON", "v:any", "string", "value → JSON"},
 		{"toXML", "rows:table, root?:string, row?:string", "string", "rows → XML"},
+		{"fromXML", "s:string, row?:string", "rows", "XML → rows"},
+		{"fromJSONL", "s:string", "rows", "NDJSON/JSONL → rows (one JSON object per line)"},
+		{"toJSONL", "rows:table", "string", "rows → NDJSON/JSONL (one compact JSON per line)"},
 		{"fromExcel", "path:string, sheet?:string", "rows", "spreadsheet → rows"},
 		{"toExcel", "rows:table, path:string, sheet?:string", "true", "rows → spreadsheet"},
 		{"sqlImport", "db:string, table:string, rows:table, opts?:table", "table", "{ imported } — optional opts.create=true"},
 		{"sqlExport", "db:string, query:string", "rows", "query → rows"},
 		{"convert", "src:string, dst:string", "true", "converts by extension"},
+		{"toSql", "rows:table, table?:string", "string", "rows → SQL (CREATE + INSERT)"},
+		{"fromSql", "s:string", "rows", "SQL → rows (reads the toSql format)"},
 	},
 	Example: `local rows = std.data.fromCSV("nome,idade\nAva,30")
 std.data.sqlImport("app.db", "pessoas", rows, { create = true })
@@ -531,4 +536,20 @@ var lunaFake = &lunaMod{
 	},
 	Example: `std.fake.seed(42)
 std.result.ok({ nome = std.fake.name(), email = std.fake.email(), n = std.fake.int(1, 100) })`,
+}
+
+var lunaTemplate = &lunaMod{
+	Name:   "template",
+	Prefix: "template",
+	Desc:   "render text with placeholders — `{name}` or `{{name}}` (dot-path supported)",
+	Fns: []lunaFn{
+		{"render", "str:string, vars:table", "string", "replaces placeholders with vars (missing → empty)"},
+		{"compile", "str:string", "function", "pre-compiles into a reusable render(vars) function"},
+		{"loop", "fragment:string, items:table, vars?:table", "string", "renders the fragment once per item, concatenating"},
+		{"cond", "cond:any, thenStr:string, elseStr?:string, vars?:table", "string", "renders thenStr if cond truthy, else elseStr"},
+	},
+	Example: `std.result.ok({
+  saud = std.template.render("Olá {nome}, {idade} anos", { nome = "Ava", idade = 30 }),
+  lista = std.template.loop("<li>{nome}</li>", { { nome = "A" }, { nome = "B" } }),
+})`,
 }

@@ -13,6 +13,7 @@
     "DATE": "DATA",
     "SECRET": "SEGREDO",
     "USER": "USUÁRIO",
+    "NAME": "NOME",
     "RG": "RG",
     "URL": "URL",
     "IP": "IP",
@@ -82,6 +83,22 @@
     "USER": [
       "usuario", "login", "user", "username", "user id", "userid",
       "screen name", "handle", "account name"
+    ],
+    "NAME": [
+      "nome", "nome completo", "nome do cliente", "nome cliente",
+      "nome contato", "nome do contato", "nome responsavel", "nome do responsavel",
+      "nome titular", "nome do titular", "nome fantasia", "nome empresa",
+      "nome da empresa", "nome da mae", "nome do pai", "nome do fornecedor",
+      "nome do vendedor", "nome do funcionario", "nome do colaborador",
+      "razao social", "nome social", "sobrenome", "apelido",
+      "primeiro nome", "ultimo nome", "nome e sobrenome",
+      "cliente", "contato", "responsavel", "titular", "fornecedor",
+      "vendedor", "funcionario", "colaborador",
+      "name", "full name", "first name", "last name", "middle name",
+      "given name", "family name", "surname", "nickname",
+      "legal name", "company name", "business name", "trade name",
+      "contact name", "customer name", "client name", "employee name",
+      "legal representative"
     ]
   },
   "contexts": {
@@ -107,7 +124,8 @@
       "senha", "chave", "token", "secret", "password", "api key", "credential",
       "session"
     ],
-    "USER": ["usuario", "login", "user", "username", "account"]
+    "USER": ["usuario", "login", "user", "username", "account"],
+    "NAME": ["nome", "cliente", "razao social", "name", "contato", "responsavel", "titular", "sobrenome"]
   },
   "address": {
     "starts": [

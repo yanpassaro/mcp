@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +14,8 @@ const (
 	maxOutputBytes      = 256 * 1024
 	maxScriptConcurrent = 4
 )
+
+var reMain = regexp.MustCompile(`(?m)\bfunction\s+main\s*\(`)
 
 var scriptSlots = make(chan struct{}, maxScriptConcurrent)
 
@@ -91,7 +94,7 @@ func Run(store, tmp *Store, r RunRequest) (RunResult, error) {
 func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, error) {
 	code := strings.TrimSpace(r.Code)
 	if code == "" {
-		return RunResult{}, fmt.Errorf("código vazio: informe 'code' ou um 'name' de script salvo")
+		return RunResult{}, fmt.Errorf("código vazio: informe 'code'")
 	}
 	code = ensureMain(code)
 
@@ -224,10 +227,6 @@ func parseMeta(code string) (string, string) {
 	return name, desc
 }
 
-func WrapScript(name, desc, body string) string {
-	return fmt.Sprintf("-- name=%q\n-- desc=%q\n\nfunction main(std)\n%s\nend\n", name, desc, strings.TrimSpace(body))
-}
-
 func ensureMain(code string) string {
 	if reMain.MatchString(code) {
 		return code
@@ -272,6 +271,7 @@ func buildStd(L *lua.State, store, tmp *Store, reg *sqlRegistry, args string, wr
 	setModule("data", func() int { return buildData(L, reg, store, tmp) })
 	setModule("regex", func() int { return buildRegex(L) })
 	setModule("fake", func() int { return buildFake(L) })
+	setModule("template", func() int { return buildTemplate(L) })
 
 	buildLog(L, writeOut)
 	L.SetGlobal("console")

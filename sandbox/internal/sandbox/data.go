@@ -4,9 +4,11 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -48,8 +50,32 @@ func buildData(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 		l.PushString(s)
 		return 1
 	})
+	setGoFunc(L, t, "toJSONL", func(l *lua.State) int {
+		s, err := dataRowsToJSONL(luaArrayAny(l, 1))
+		if err != nil {
+			panic(err)
+		}
+		l.PushString(s)
+		return 1
+	})
+	setGoFunc(L, t, "fromJSONL", func(l *lua.State) int {
+		rows, err := dataRowsFromJSONL(argString(l, 1))
+		if err != nil {
+			panic(err)
+		}
+		pushAny(l, rows)
+		return 1
+	})
 	setGoFunc(L, t, "toXML", func(l *lua.State) int {
 		l.PushString(dataRowsToXML(luaArrayAny(l, 1), argString(l, 2), argString(l, 3)))
+		return 1
+	})
+	setGoFunc(L, t, "fromXML", func(l *lua.State) int {
+		rows, err := dataRowsFromXML(argString(l, 1), argString(l, 2))
+		if err != nil {
+			panic(err)
+		}
+		pushAny(l, rows)
 		return 1
 	})
 	setGoFunc(L, t, "fromExcel", func(l *lua.State) int {
@@ -65,11 +91,12 @@ func buildData(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 		return 1
 	})
 	setGoFunc(L, t, "toExcel", func(l *lua.State) int {
-		path, err := excelPath(mnt, tmp, argString(l, 1))
+		rows := luaArrayAny(l, 1)
+		path, err := excelPath(mnt, tmp, argString(l, 2))
 		if err != nil {
 			panic(err)
 		}
-		if err := dataRowsToExcel(luaArrayAny(l, 2), path, argString(l, 3)); err != nil {
+		if err := dataRowsToExcel(rows, path, argString(l, 3)); err != nil {
 			panic(err)
 		}
 		l.PushBoolean(true)
@@ -112,6 +139,18 @@ func buildData(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 			panic(fmt.Errorf("convert: %w", err))
 		}
 		l.PushBoolean(true)
+		return 1
+	})
+	setGoFunc(L, t, "toSql", func(l *lua.State) int {
+		l.PushString(dataRowsToSQL(luaArrayAny(l, 1), argString(l, 2)))
+		return 1
+	})
+	setGoFunc(L, t, "fromSql", func(l *lua.State) int {
+		rows, err := dataRowsFromSQL(argString(l, 1))
+		if err != nil {
+			panic(err)
+		}
+		pushAny(l, rows)
 		return 1
 	})
 
@@ -197,6 +236,76 @@ func dataToJSON(v any) (string, error) {
 		return "", fmt.Errorf("JSON inválido: %w", err)
 	}
 	return string(b), nil
+}
+
+func dataRowsFromJSONL(s string) ([]any, error) {
+	var out []any
+	for _, raw := range strings.Split(s, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		var v any
+		if err := json.Unmarshal([]byte(line), &v); err != nil {
+			return nil, fmt.Errorf("linha JSONL inválida: %w", err)
+		}
+		out = append(out, v)
+	}
+	if out == nil {
+		out = []any{}
+	}
+	return out, nil
+}
+
+func dataRowsToJSONL(rows []any) (string, error) {
+	var b strings.Builder
+	for i, r := range rows {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		line, err := json.Marshal(r)
+		if err != nil {
+			return "", err
+		}
+		b.Write(line)
+	}
+	return b.String(), nil
+}
+
+func dataRowsFromXML(s, row string) ([]any, error) {
+	root, err := parseXML(s)
+	if err != nil {
+		return nil, err
+	}
+	rowName := strings.TrimSpace(row)
+	if rowName == "" && len(root.children) > 0 {
+		rowName = root.children[0].name
+	}
+	if rowName == "" {
+		return []any{}, nil
+	}
+	var out []any
+	for _, child := range root.children {
+		if child.name != rowName {
+			continue
+		}
+		m := map[string]any{}
+		for _, leaf := range child.children {
+			if leaf.name != "" {
+				m[leaf.name] = strings.TrimSpace(leaf.chars.String())
+			}
+		}
+		if len(child.children) == 0 {
+			if txt := strings.TrimSpace(child.chars.String()); txt != "" {
+				m[rowName] = txt
+			}
+		}
+		out = append(out, m)
+	}
+	if out == nil {
+		out = []any{}
+	}
+	return out, nil
 }
 
 func dataRowsToXML(rows []any, root, row string) string {
@@ -355,6 +464,33 @@ func dataConvert(mnt, tmp *Store, src, dst string) error {
 		if err != nil {
 			return err
 		}
+	case "jsonl", "ndjson":
+		content, err := os.ReadFile(fullSrc)
+		if err != nil {
+			return err
+		}
+		value, err = dataRowsFromJSONL(string(content))
+		if err != nil {
+			return err
+		}
+	case "sql":
+		content, err := os.ReadFile(fullSrc)
+		if err != nil {
+			return err
+		}
+		value, err = dataRowsFromSQL(string(content))
+		if err != nil {
+			return err
+		}
+	case "xml":
+		content, err := os.ReadFile(fullSrc)
+		if err != nil {
+			return err
+		}
+		value, err = dataRowsFromXML(string(content), "")
+		if err != nil {
+			return err
+		}
 	case "xlsx", "xls":
 		value, err = dataRowsFromExcel(fullSrc, "")
 		if err != nil {
@@ -381,12 +517,28 @@ func dataConvert(mnt, tmp *Store, src, dst string) error {
 			return err
 		}
 		return osWriteFile(fullDst, content)
+	case "jsonl", "ndjson":
+		rows, ok := value.([]any)
+		if !ok {
+			return fmt.Errorf("origem não é um conjunto de linhas")
+		}
+		content, err := dataRowsToJSONL(rows)
+		if err != nil {
+			return err
+		}
+		return osWriteFile(fullDst, content)
 	case "xml":
 		rows, ok := value.([]any)
 		if !ok {
 			return fmt.Errorf("origem não é um conjunto de linhas")
 		}
 		return osWriteFile(fullDst, dataRowsToXML(rows, "", ""))
+	case "sql":
+		rows, ok := value.([]any)
+		if !ok {
+			return fmt.Errorf("origem não é um conjunto de linhas")
+		}
+		return osWriteFile(fullDst, dataRowsToSQL(rows, ""))
 	case "xlsx":
 		rows, ok := value.([]any)
 		if !ok {
@@ -448,4 +600,182 @@ func dataCellSQL(v any) any {
 	default:
 		return x
 	}
+}
+
+func dataRowsToSQL(rows []any, table string) string {
+	table = strings.TrimSpace(table)
+	if table == "" {
+		table = "dados"
+	}
+	keys := dataRowKeys(rows)
+	if len(keys) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("CREATE TABLE IF NOT EXISTS ")
+	b.WriteString(sqlQuote(table))
+	b.WriteString(" (")
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(sqlQuote(k))
+		b.WriteString(" TEXT")
+	}
+	b.WriteString(");\n")
+	for _, r := range rows {
+		m, _ := r.(map[string]any)
+		b.WriteString("INSERT INTO ")
+		b.WriteString(sqlQuote(table))
+		b.WriteString(" (")
+		for i, k := range keys {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(sqlQuote(k))
+		}
+		b.WriteString(") VALUES (")
+		for i, k := range keys {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(sqlValLiteral(m[k]))
+		}
+		b.WriteString(");\n")
+	}
+	return b.String()
+}
+
+func sqlValLiteral(v any) string {
+	if v == nil {
+		return "NULL"
+	}
+	s := dataCellText(v)
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+var reSQLCol = regexp.MustCompile(`"([^"]+)"`)
+
+func dataRowsFromSQL(s string) ([]any, error) {
+	var cols []string
+	var out []any
+	for _, raw := range strings.Split(s, "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(raw, ";"))
+		if line == "" {
+			continue
+		}
+		up := strings.ToUpper(line)
+		if strings.HasPrefix(up, "CREATE TABLE") {
+			cols = sqlTableColumns(line)
+		} else if strings.HasPrefix(up, "INSERT INTO") {
+			if len(cols) == 0 {
+				return nil, errors.New("INSERT sem CREATE TABLE anterior")
+			}
+			values, err := parseSQLValues(line)
+			if err != nil {
+				return nil, err
+			}
+			m := map[string]any{}
+			for i, c := range cols {
+				if i < len(values) {
+					m[c] = values[i]
+				} else {
+					m[c] = nil
+				}
+			}
+			out = append(out, m)
+		}
+	}
+	if out == nil {
+		out = []any{}
+	}
+	return out, nil
+}
+
+func sqlTableColumns(line string) []string {
+	i := strings.Index(line, "(")
+	j := strings.LastIndex(line, ")")
+	if i < 0 || j < 0 || j <= i {
+		return nil
+	}
+	var cols []string
+	for _, part := range strings.Split(line[i+1:j], ",") {
+		if m := reSQLCol.FindStringSubmatch(part); len(m) == 2 {
+			cols = append(cols, m[1])
+		}
+	}
+	return cols
+}
+
+func parseSQLValues(line string) ([]any, error) {
+	v := strings.Index(strings.ToUpper(line), "VALUES")
+	if v < 0 {
+		return nil, nil
+	}
+	rest := line[v+len("VALUES"):]
+	open := strings.Index(rest, "(")
+	close := strings.LastIndex(rest, ")")
+	if open < 0 || close < 0 || close < open {
+		return nil, errors.New("sem tupla VALUES")
+	}
+	return parseSQLTuple(rest[open+1 : close])
+}
+
+func parseSQLTuple(s string) ([]any, error) {
+	var out []any
+	i := 0
+	for {
+		for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+			i++
+		}
+		if i >= len(s) {
+			break
+		}
+		var val any
+		if s[i] == '\'' {
+			i++
+			var b strings.Builder
+			closed := false
+			for i < len(s) {
+				if s[i] == '\'' {
+					if i+1 < len(s) && s[i+1] == '\'' {
+						b.WriteByte('\'')
+						i += 2
+						continue
+					}
+					i++
+					closed = true
+					break
+				}
+				b.WriteByte(s[i])
+				i++
+			}
+			if !closed {
+				return nil, errors.New("literal não fechado nas VALUES")
+			}
+			val = b.String()
+		} else {
+			j := i
+			for j < len(s) && s[j] != ',' && s[j] != ')' {
+				j++
+			}
+			token := strings.TrimSpace(s[i:j])
+			if strings.EqualFold(token, "NULL") {
+				val = nil
+			} else {
+				val = token
+			}
+			i = j
+		}
+		out = append(out, val)
+		for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+			i++
+		}
+		if i < len(s) && s[i] == ',' {
+			i++
+			continue
+		}
+		break
+	}
+	return out, nil
 }

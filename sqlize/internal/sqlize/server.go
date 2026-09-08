@@ -43,7 +43,7 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_export",
-		Description: "Export a query or table to a file (.json, .csv, .tsv, .xlsx, .sql, .html, .xml by path extension). Values in 'args'.",
+		Description: "Export a query or table to a raw (unredacted) file inside the shared filesystem root ~/.local/state/mcp/mnt (sandbox mnt, out of the AI's reach). Only the path is returned. Formats by path extension (.json, .csv, .tsv, .xlsx, .sql, .html, .xml). Values in 'args'.",
 	}, s.exportTool)
 
 	for _, cfg := range discoverLiveDBs() {
@@ -55,7 +55,7 @@ func (s *Server) Register(server *mcp.Server) {
 		}, s.liveQueryHandler(cfg))
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        prefix + "_export",
-			Description: fmt.Sprintf("Run a read-only query (SELECT/WITH) on the live %s database (%s) and write the full result to a file; the extension sets the format (.csv, .html, .xlsx, .tsv, .json, .xml, .sql).", cfg.Engine, env),
+			Description: fmt.Sprintf("Run a read-only query (SELECT/WITH) on the live %s database (%s) and write the full (raw, unredacted) result to a file inside the shared ~/.local/state/mcp/mnt; the extension sets the format (.csv, .html, .xlsx, .tsv, .json, .xml, .sql).", cfg.Engine, env),
 		}, s.liveExportHandler(cfg))
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        prefix + "_structure",
@@ -188,12 +188,11 @@ func (s *Server) queryTool(ctx context.Context, _ *mcp.CallToolRequest, in query
 }
 
 type exportInput struct {
-	Path   string   `json:"path" jsonschema:"Output file path (.json, .csv, .tsv, .xlsx, .sql, .html, .xml)."`
+	Path   string   `json:"path" jsonschema:"Output file name (.json, .csv, .tsv, .xlsx, .sql, .html, .xml). Always saved inside the shared ~/.local/state/mcp/mnt."`
 	Query  string   `json:"query,omitempty" jsonschema:"Source SQL (optional if 'table' given)."`
 	Args   []string `json:"args,omitempty" jsonschema:"Bound parameters for the query."`
 	Table  string   `json:"table,omitempty" jsonschema:"Source table (optional if 'query' given)."`
 	Target string   `json:"target_table,omitempty" jsonschema:"Table name in exported .sql (default 'exported')."`
-	Redact *bool    `json:"redact,omitempty" jsonschema:"Mask sensitive data (default true). Set false to export raw."`
 }
 
 func (s *Server) exportTool(ctx context.Context, _ *mcp.CallToolRequest, in exportInput) (*mcp.CallToolResult, any, error) {
@@ -204,8 +203,7 @@ func (s *Server) exportTool(ctx context.Context, _ *mcp.CallToolRequest, in expo
 	if strings.TrimSpace(target) == "" {
 		target = "exported"
 	}
-	doRedact := in.Redact == nil || *in.Redact
-	res, err := s.store.exportFile(ctx, in.Path, in.Query, in.Table, target, in.Args, doRedact)
+	res, err := s.store.exportFile(ctx, in.Path, in.Query, in.Table, target, in.Args)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -259,7 +257,7 @@ func (s *Server) liveQueryHandler(cfg liveDBConfig) func(context.Context, *mcp.C
 type liveExportInput struct {
 	Query       string   `json:"query" jsonschema:"Read-only SQL query (SELECT/WITH)."`
 	Args        []string `json:"args,omitempty" jsonschema:"Bound parameters."`
-	ExportTo    string   `json:"export_to" jsonschema:"Output file path (.csv, .html, .xlsx, .tsv, .json, .xml, .sql)."`
+	ExportTo    string   `json:"export_to" jsonschema:"Output file name (.csv, .html, .xlsx, .tsv, .json, .xml, .sql). Always saved inside the shared ~/.local/state/mcp/mnt."`
 	All         bool     `json:"all,omitempty" jsonschema:"Bypass the 500-row limit (only with 'export_to')."`
 	TargetTable string   `json:"target_table,omitempty" jsonschema:"Table name in exported .sql (default 'exported')."`
 }

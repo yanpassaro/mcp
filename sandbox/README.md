@@ -4,27 +4,17 @@ Sandbox **não-destrutivo** de scripts Lua para a IA: a IA escreve, lê, apaga e
 
 Cada script tem `name`, `description` e uma função `function main(std)` que retorna `std.result.ok(...)`/`err(...)`. A saída vira Markdown (objetos/arrays viram JSON).
 
-**Só o corpo (body) basta:** tanto no `sandbox_scripts` (write) quanto no `sandbox_run` com `code` inline, o wrapper `function main(std) ... end` é adicionado automaticamente quando ausente — a IA pode enviar apenas `print(...)` / `std.log.*` sem escrever a função.
+**Só o corpo (body) basta:** no `sandbox_run` com `code` inline, o wrapper `function main(std) ... end` é adicionado automaticamente quando ausente — a IA pode enviar apenas `print(...)` / `std.log.*` sem escrever a função. Scripts por `path` devem declarar `function main(std)`.
 
 ## Tools
 
 | Tool | Action | O que faz |
 | --- | --- | --- |
-| `sandbox_scripts` | `list` (default) | Lista scripts salvos (`name` pode ser `.` ou glob, ex.: `*.lua`) |
-| `sandbox_scripts` | `read` | Lê um script por `name` |
-| `sandbox_scripts` | `write` | Cria/sobrescreve um script (`name` + `description` + `code`) |
-| `sandbox_scripts` | `diagnose` | Diagnostica um script Lua (sintaxe, meta, `main`, uso de `std.*`) |
-| `sandbox_scripts` | `edit` | Edita linhas de um script salvo (`name` + `code` = `[{ line, code }]`); `code` vazio remove a linha |
-| `sandbox_scripts` | `del` | Apaga um script por `name` |
-| `sandbox_run` | `run` (default) | Roda um script salvo (`name`) ou código inline (`code`), com `args` opcional |
-| `sandbox_filesystem` | `copy` | Copia do host para dentro do sandbox (`path` host → `dest` sandbox) |
-| `sandbox_filesystem` | `mount` | Copia do sandbox para o host (`path` sandbox → `dest` host) |
-| `sandbox_filesystem` | `del` / `stat` / `list` | Apaga, mostra status ou lista (árvore) um caminho do sandbox |
-| `sandbox_doc` | `topic` (opcional) | Documentação da API `std` com assinaturas (args + retorno) por módulo; `topic=<módulo>` (ex.: `io`) traz as funções detalhadas + exemplo |
+| `sandbox_run` | `run` (default) | Roda um script por `path` (.lua no host) ou `code` inline, com `args` (array/objeto → `std.args`) |
+| `sandbox_doc` | `topic` (opcional) | Documentação da API `std` com assinaturas (args + retorno) por módulo; `topic=<módulo>` (ex.: `io`) traz as funções detalhadas + exemplo. `topic=run` tem os 2 modos com exemplos |
+| `sandbox_os` | `copy`, `mount`, `del`, `stat`, `list` | Gerencia o filesystem do sandbox: copia (host→sandbox), monta (sandbox→host), apaga, mostra status ou lista (árvore) um caminho do sandbox |
 
-Scripts em `dev/` são persistentes. Nomes com o prefixo `temp:` (ex.: `temp:meu_script`) vivem em `dev/temp/` e são **limpados a cada inicialização** do servidor (assim como a pasta `tmp/`).
-
-`std` fornece: `result`, `log`, `args`, `io` (`read`/`lines`/`json`/`write`/`append`/`del`/`exists`/`stat`/`dir`/`copy`/`move`/`mkdir`/`glob`/`walk`), `tmp` (mesmas funções do `io` + `clear`), `sql` (`exec`/`query`/`get`/`scalar`/`close`/`begin`/`commit`/`rollback`/`tables`/`columns`/`schema`), `uuid` (`v4`/`v7`), `csv` (`parse`/`stringify`), `xml` (`parse`/`stringify`), `excel` (`sheets`/`read`/`write`), `data` (`fromCSV`/`toCSV`/`fromJSON`/`toJSON`/`toXML`/`fromExcel`/`toExcel`/`sqlImport`/`sqlExport`/`convert`), `regex` (`match`/`find`/`findAll`/`replace`/`split`/`groups`/`findAllGroups`), `fake` (`seed`/`name`/`email`/`username`/`phone`/`int`/`float`/`bool`/`uuid`/`date`/`words`/`sentence`/`paragraph`), `random`, `date`, `str`, `list`, `num`, `json`, `assert` (`ok`/`equal`/`throws`/`type`/`notNil`/`number`/`string`/`boolean`/`table`/`contains`/`matches`/`between`/`length`), `fetch` (`get`/`post`/`json`), `encode`, `secrets` (`get`/`has`).
+`std` fornece: `result`, `log`, `args`, `io` (`read`/`lines`/`json`/`write`/`append`/`del`/`exists`/`stat`/`dir`/`copy`/`move`/`mkdir`/`glob`/`walk`), `tmp` (mesmas funções do `io` + `clear`), `sql` (`exec`/`query`/`get`/`scalar`/`close`/`begin`/`commit`/`rollback`/`tables`/`columns`/`schema`), `uuid` (`v4`/`v7`), `csv` (`parse`/`stringify`), `xml` (`parse`/`stringify`), `excel` (`sheets`/`read`/`write`), `data` (`fromCSV`/`toCSV`/`fromJSON`/`toJSON`/`fromJSONL`/`toJSONL`/`toXML`/`fromXML`/`fromExcel`/`toExcel`/`toSql`/`fromSql`/`sqlImport`/`sqlExport`/`convert`), `regex` (`match`/`find`/`findAll`/`replace`/`split`/`groups`/`findAllGroups`), `fake` (`seed`/`name`/`email`/`username`/`phone`/`int`/`float`/`bool`/`uuid`/`date`/`words`/`sentence`/`paragraph`), `random`, `date`, `str`, `list`, `num`, `json`, `assert` (`ok`/`equal`/`throws`/`type`/`notNil`/`number`/`string`/`boolean`/`table`/`contains`/`matches`/`between`/`length`), `fetch` (`get`/`post`/`json`), `encode`, `secrets` (`get`/`has`), `template` (`render`/`compile`/`loop`/`cond`).
 
 **Segurança:** as libs nativas perigosas são removidas (`dofile`, `loadfile`, `load`, `require`, `collectgarbage`, `os`, `io`, `debug`, `package`, `coroutine`); só restam primitivas seguras (`pairs`, `ipairs`, `type`, `tostring`, `tonumber`, metatables, `string`, `math`, `table`).
 
@@ -46,7 +36,7 @@ A chave é o nome da variável sem o prefixo `SECRET_`, em minúsculas (`SECRET_
 
 **Redação:** os valores de qualquer `SECRET_*` são automaticamente substituídos por `[REDACTED]` em toda saída (prints, `console`, retorno de `std.result`) — nunca aparecem para a IA.
 
-## sandbox_filesystem
+## sandbox_os
 
 Opera sobre a pasta `mnt/` do sandbox. `path` é sempre relativo ao sandbox (exceto a origem do `copy`, que é no host).
 
@@ -60,12 +50,10 @@ Opera sobre a pasta `mnt/` do sandbox. `path` é sempre relativo ao sandbox (exc
 
 ## Variáveis de ambiente
 
+O filesystem do sandbox é fixo (sem env): `mnt` em `~/.local/state/mcp/mnt` (compartilhado com o sqlize) e `tmp` em `~/.local/state/mcp/tmp`.
+
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
-| `SANDBOX_MNT_DIR` | `~/.local/share/mcp/sandbox/mnt` | filesystem do script (leitura e escrita) |
-| `SANDBOX_DEV_DIR` | `~/.local/share/mcp/sandbox/dev` | scripts persistentes do agente |
-| `SANDBOX_TMP_DIR` | `~/.local/share/mcp/sandbox/tmp` | pasta temporária do `std.tmp` |
-
 | `SANDBOX_TMP_SPACE_MB` | `64` | teto de espaço de `tmp/` |
 | `SANDBOX_MNT_SPACE_MB` | `256` | teto de espaço de `mnt/` |
 | `SANDBOX_MEM_LIMIT_MB` | `512` | teto de RAM do processo sandbox |

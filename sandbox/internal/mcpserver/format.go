@@ -8,30 +8,6 @@ import (
 	"ntdsk.com/mcp/sandbox/internal/sandbox"
 )
 
-func formatDiagnostics(name, desc string, diags []sandbox.Diag) string {
-	var b strings.Builder
-	b.WriteString("## Diagnóstico do script\n\n")
-	if name != "" {
-		fmt.Fprintf(&b, "- **nome:** `%s`\n", name)
-	}
-	if desc != "" {
-		fmt.Fprintf(&b, "- **descrição:** %s\n", strings.ReplaceAll(desc, "\n", " "))
-	}
-	if len(diags) == 0 {
-		b.WriteString("\n✅ Nenhum problema encontrado.\n")
-		return b.String()
-	}
-	b.WriteString("\n")
-	for _, d := range diags {
-		sym := "⚠️"
-		if d.Severity == "erro" {
-			sym = "🔴"
-		}
-		fmt.Fprintf(&b, "- %s **%s:** %s\n", sym, strings.ToUpper(d.Severity), d.Message)
-	}
-	return b.String()
-}
-
 func textResult(text string) (*mcp.CallToolResult, any, error) {
 	return result(text, false)
 }
@@ -41,41 +17,6 @@ func result(text string, isError bool) (*mcp.CallToolResult, any, error) {
 		Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		IsError: isError,
 	}, nil, nil
-}
-
-func formatScriptList(title string, entries []sandbox.Entry, descs map[string]string) string {
-	if len(entries) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "## %s · %d\n\n", title, len(entries))
-	for i, e := range entries {
-		name := strings.TrimSuffix(e.Name, ".lua")
-		fmt.Fprintf(&b, "### `%s`\n", name)
-		if d := descs[e.Name]; d != "" {
-			fmt.Fprintf(&b, "> %s\n\n", strings.ReplaceAll(d, "\n", " "))
-		} else {
-			b.WriteString("> _sem descrição_\n\n")
-		}
-		fmt.Fprintf(&b, "· `%d` linhas · `%s`\n\n", e.Lines, humanSize(e.Size))
-		if i != len(entries)-1 {
-			b.WriteString("---\n")
-		}
-	}
-	return b.String()
-}
-
-func formatScriptWrite(name string, n int, content string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "## Script `%s` gravado (%d bytes)\n\n", name, n)
-	b.WriteString("```lua\n")
-	b.WriteString(content)
-	b.WriteString("\n```\n")
-	return b.String()
-}
-
-func formatScriptRead(name, content string) string {
-	return fmt.Sprintf("## Script `%s`\n\n```lua\n%s\n```\n", name, content)
 }
 
 func formatRunResult(res sandbox.RunResult, runErr error) string {

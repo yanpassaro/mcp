@@ -112,12 +112,12 @@ func buildFake(L *lua.State) int {
 		return 1
 	})
 	setGoFunc(L, t, "words", func(l *lua.State) int {
-		n := int(argNum(l, 2))
+		n := int(argNum(l, 1))
 		l.PushString(joinFakeWords(rng, fakeWords, n))
 		return 1
 	})
 	setGoFunc(L, t, "sentence", func(l *lua.State) int {
-		n := int(argNum(l, 2))
+		n := int(argNum(l, 1))
 		s := joinFakeWords(rng, fakeWords, n)
 		if s != "" {
 			s = strings.ToUpper(s[:1]) + s[1:] + "."
@@ -126,10 +126,11 @@ func buildFake(L *lua.State) int {
 		return 1
 	})
 	setGoFunc(L, t, "paragraph", func(l *lua.State) int {
-		n := int(argNum(l, 2))
+		n := int(argNum(l, 1))
 		parts := make([]string, n)
 		for i := range parts {
-			parts[i] = strings.ToUpper(joinFakeWords(rng, fakeWords, 6)[:1]) + joinFakeWords(rng, fakeWords, 6)[1:] + "."
+			w := joinFakeWords(rng, fakeWords, 6)
+			parts[i] = strings.ToUpper(w[:1]) + w[1:] + "."
 		}
 		l.PushString(strings.Join(parts, " "))
 		return 1

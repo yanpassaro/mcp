@@ -28,3 +28,9 @@ func normalizeWord(s string) string {
 	}
 	return b.String()
 }
+
+func colKey(s string) string {
+	s = strings.ReplaceAll(normalizeWord(s), "_", " ")
+	s = strings.ReplaceAll(s, "-", " ")
+	return strings.Join(strings.Fields(s), " ")
+}

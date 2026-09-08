@@ -15,11 +15,12 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-func (s *store) exportFile(ctx context.Context, outPath, source, table, target string, args []string, redact bool) (string, error) {
-	if strings.TrimSpace(outPath) == "" {
-		return "", fmt.Errorf("caminho de saída é obrigatório")
-	}
+func (s *store) exportFile(ctx context.Context, outPath, source, table, target string, args []string) (string, error) {
 	format, err := formatFromPath(outPath)
+	if err != nil {
+		return "", err
+	}
+	dest, err := exportPath(outPath)
 	if err != nil {
 		return "", err
 	}
@@ -35,31 +36,28 @@ func (s *store) exportFile(ctx context.Context, outPath, source, table, target s
 	if err != nil {
 		return "", err
 	}
-	if redact {
-		rows = RedactRows(cols, rows)
-	}
 	switch format {
 	case "json":
-		err = writeJSON(outPath, cols, rows)
+		err = writeJSON(dest, cols, rows)
 	case "csv":
-		err = writeDelimited(outPath, cols, rows, ',')
+		err = writeDelimited(dest, cols, rows, ',')
 	case "tsv":
-		err = writeDelimited(outPath, cols, rows, '\t')
+		err = writeDelimited(dest, cols, rows, '\t')
 	case "xlsx":
-		err = writeExcel(outPath, cols, rows)
+		err = writeExcel(dest, cols, rows)
 	case "sql":
-		err = writeSQL(outPath, cols, rows, target)
+		err = writeSQL(dest, cols, rows, target)
 	case "html":
-		err = writeHTML(outPath, cols, rows)
+		err = writeHTML(dest, cols, rows)
 	case "xml":
-		err = writeXML(outPath, cols, rows)
+		err = writeXML(dest, cols, rows)
 	default:
 		return "", fmt.Errorf("formato de exportação não suportado: %s", format)
 	}
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Exportado %d linha(s) para %s (%s).", len(rows), outPath, format), nil
+	return fmt.Sprintf("Exportado %d linha(s) para %s (%s).", len(rows), dest, format), nil
 }
 
 func formatFromPath(p string) (string, error) {
@@ -82,6 +80,35 @@ func formatFromPath(p string) (string, error) {
 	default:
 		return "", fmt.Errorf("extensão não suportada para exportação: %s (use .json, .csv, .tsv, .xlsx, .sql, .html, .xml)", ext)
 	}
+}
+
+func exportPath(outPath string) (string, error) {
+	name := filepath.Base(strings.TrimSpace(outPath))
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return "", fmt.Errorf("nome de arquivo de saída inválido: %q", outPath)
+	}
+	dir, err := exportDir()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("criar diretório de exportação %s: %w", dir, err)
+	}
+	return filepath.Join(dir, name), nil
+}
+
+// exportDir unifica o filesystem do sqlize com o do sandbox: exporta dentro de
+// <home>/.local/state/mcp/mnt, exatamente a mesma pasta do mnt do sandbox,
+// para que os arquivos fiquem imediatamente acessíveis aos scripts do sandbox.
+func exportDir() (string, error) {
+	home := os.Getenv("USERPROFILE")
+	if home == "" {
+		home = os.Getenv("HOME")
+	}
+	if home == "" {
+		return "", fmt.Errorf("não foi possível determinar o diretório do usuário; defina USERPROFILE ou HOME")
+	}
+	return filepath.Join(home, ".local", "state", "mcp", "mnt"), nil
 }
 
 func valueFromStr(s string) any {
@@ -272,36 +299,36 @@ func writeXML(path string, cols []string, rows [][]string) error {
 }
 
 func exportLiveFile(path string, cols []string, rows [][]string, target string) (string, error) {
-	if strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("'export_to' é obrigatório")
-	}
 	format, err := formatFromPath(path)
 	if err != nil {
 		return "", err
 	}
-	rows = RedactRows(cols, rows)
+	dest, err := exportPath(path)
+	if err != nil {
+		return "", err
+	}
 	switch format {
 	case "json":
-		err = writeJSON(path, cols, rows)
+		err = writeJSON(dest, cols, rows)
 	case "csv":
-		err = writeDelimited(path, cols, rows, ',')
+		err = writeDelimited(dest, cols, rows, ',')
 	case "tsv":
-		err = writeDelimited(path, cols, rows, '\t')
+		err = writeDelimited(dest, cols, rows, '\t')
 	case "xlsx":
-		err = writeExcel(path, cols, rows)
+		err = writeExcel(dest, cols, rows)
 	case "html":
-		err = writeHTML(path, cols, rows)
+		err = writeHTML(dest, cols, rows)
 	case "xml":
-		err = writeXML(path, cols, rows)
+		err = writeXML(dest, cols, rows)
 	case "sql":
-		err = writeSQL(path, cols, rows, target)
+		err = writeSQL(dest, cols, rows, target)
 	default:
 		return "", fmt.Errorf("formato de exportação não suportado: %s (use .csv, .html, .xlsx, .tsv, .json, .xml, .sql)", format)
 	}
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Exportado %d linha(s) para %s (%s).", len(rows), path, format), nil
+	return fmt.Sprintf("Exportado %d linha(s) para %s (%s).", len(rows), dest, format), nil
 }
 
 func sqlLit(s string) string {

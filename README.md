@@ -16,7 +16,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 - **github**: `github_search`, `github_get_tree`, `github_read_file`, `github_repo_info`, `github_get_item`
 - **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`, `sqlize_export` (+ `postgres_*`/`mysql_*`)
 - **anydoc**: `anydoc_import`, `anydoc_export`
-- **sandbox**: `sandbox_scripts` (list/read/write/diagnose/edit/del), `sandbox_run` (run), `sandbox_filesystem` (copy/mount/del/stat/list), `sandbox_doc`
+- **sandbox**: `sandbox_run` (run por `path`/`code` + `args`), `sandbox_doc` (API `std`), `sandbox_os` (copy/mount/del/stat/list)
 
 ## Variáveis de ambiente
 
@@ -28,14 +28,13 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | `sqlize` | `SQLIZE_STATE_DIR` | `~/.local/state/sqlize` | pasta do banco de estado |
 | | `{PREFIXO}_POSTGRES_URL` / `_DSN` | — | conexão Postgres read-only |
 | | `{PREFIXO}_MYSQL_URL` / `_DSN` | — | conexão MySQL read-only |
-| `sandbox` | `SANDBOX_MNT_DIR` | `~/.local/share/mcp/sandbox/mnt` | filesystem do script |
-| | `SANDBOX_DEV_DIR` | `~/.local/share/mcp/sandbox/dev` | scripts do agente |
-| | `SANDBOX_TMP_DIR` | `~/.local/share/mcp/sandbox/tmp` | pasta temporária (`std.tmp`, limpa no start) |
-| | `SANDBOX_MEM_LIMIT_MB` | `512` | teto de RAM do processo sandbox |
+| `sandbox` | `SANDBOX_MEM_LIMIT_MB` | `512` | teto de RAM do processo sandbox |
 | | `SANDBOX_MNT_SPACE_MB` | `256` | teto de espaço em `mnt/` |
 | | `SANDBOX_SQL_MAX_ROWS` | `10000` | teto de linhas no `std.sql.query` |
 | | `SANDBOX_FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | allowlist do `std.fetch` |
 | | `SECRET_*` | — | secrets lidas via `std.secrets.get("chave")`; valores são redigidos em toda saída |
+
+O filesystem do sandbox (`mnt`) e a exportação do sqlize ficam **fixos** em `~/.local/state/mcp/mnt` (pasta compartilhada, sem env): o `mnt` do sandbox é `~/.local/state/mcp/mnt` e `tmp` é `~/.local/state/mcp/tmp`.
 
 ## Exemplo (Zed)
 

@@ -49,6 +49,11 @@ var docAliases = map[string]string{
 	"env":      "env",
 	"meta":     "meta",
 	"tools":    "tools",
+	"run":      "run",
+	"runner":   "run",
+	"execute":  "run",
+	"exec":     "run",
+	"executar": "run",
 }
 
 
@@ -73,6 +78,7 @@ func renderDoc(doc string) string {
 	return strings.ReplaceAll(doc, "~~~", "```")
 }
 
+
 var sandboxDocs = map[string]string{
 	"index": `# Sandbox Lua — Documentation
 
@@ -80,10 +86,7 @@ The sandbox runs isolated Lua scripts (no OS access; network only via ~std.fetch
 
 ## How to write a script
 
-Pass **only the body** of ~main~ — you do **not** write ~function main(std)~ or ~end~. The ~function main(std) ... end~ wrapper is added automatically in both cases:
-
-- ~sandbox_scripts~ (action=write): the ~-- name=~/~-- desc=~ header and the wrapper are added from the ~name~/~description~ arguments.
-- ~sandbox_run~ (action=run, inline ~code~): a bare body is wrapped for you too. You can just send ~print(...)~ / ~std.log.*~ tails without the wrapper.
+Pass **only the body** of ~main~ — you do **not** write ~function main(std)~ or ~end~. When you run it with ~sandbox_run~ (code=...), the ~function main(std) ... end~ wrapper is added automatically.
 
 ~~~lua
 local data = std.io.read("data.txt")
@@ -91,7 +94,7 @@ local n = std.num.parse(data)
 std.result.ok({ lines = std.io.lines("data.txt"), total = n })
 ~~~
 
-Write it with ~sandbox_scripts~ (action=write, name + code) and run it with ~sandbox_run~ (action=run). Tools: ~sandbox_scripts~, ~sandbox_run~, ~sandbox_filesystem~, ~sandbox_doc~.
+Run it with ~sandbox_run~ (code=...). Para roteiros reutilizáveis, salve um ~.lua~ no repositório e rode com ~path~. Tools: ~sandbox_run~, ~sandbox_doc~, ~sandbox_os~.
 
 ## ~std~ modules
 
@@ -140,7 +143,7 @@ std.result.ok({ login = res.data.login })
 	"meta": `# Script — header and return
 
 ## Submitting code
-When you call ~sandbox_scripts~ (action=write), pass **only the body** of ~main~ — do not write ~function main(std)~ or ~end~. The header (~-- name=~/~-- desc=~) and the wrapper are added automatically from the ~name~/~description~ arguments.
+Pass **only the body** of ~main~ — do not write ~function main(std)~ or ~end~. When run with ~sandbox_run~ (code=...), the wrapper ~function main(std) ... end~ is added automatically.
 
 ~~~lua
 -- body only
@@ -164,21 +167,71 @@ std.result.ok({ received = std.args })
 
 | Tool | Action | What it does |
 | --- | --- | --- |
-| ~sandbox_scripts~ | list (default) | List saved scripts (~name~ may be ~.~ or a glob, e.g. ~*.lua~). |
-| ~sandbox_scripts~ | read | Read a saved script by ~name~. |
-| ~sandbox_scripts~ | write | Create/overwrite a script (~name~ + ~code~; ~description~ optional). Pass **only the body** — the ~function main(std)~ wrapper is added automatically. Returns the stored script. |
-| ~sandbox_scripts~ | diagnose | Diagnose a Lua script (~name~ or ~code~): syntax, meta, ~main~, ~std.*~ usage. |
-| ~sandbox_scripts~ | edit | Edit lines of a saved script (~name~ + ~code~ = [{ line, code }]); empty ~code~ removes the line. |
-| ~sandbox_scripts~ | del | Delete a saved script by ~name~. |
-| ~sandbox_run~ | run (default) | Run a script by ~name~ (saved) or inline ~code~, with optional ~args~ (JSON or string). Bare ~code~ is auto-wrapped in ~function main(std)~. |
-| ~sandbox_filesystem~ | copy | Copy from host into the sandbox folder (~path~ host → ~dest~ sandbox). |
-| ~sandbox_filesystem~ | mount | Copy from the sandbox folder to the host (~path~ sandbox → ~dest~ host). |
-| ~sandbox_filesystem~ | del, stat, list | Delete, stat, or list (tree) a sandbox path. |
-| ~sandbox_doc~ | topic | Return the ~std~ API documentation (optional ~topic~). |
+| ~sandbox_run~ | run (default) | Run a script by ~path~ (host .lua file) or inline ~code~, with optional ~args~ (array/object → ~std.args~). Bare ~code~ is auto-wrapped in ~function main(std)~. |
+| ~sandbox_doc~ | topic | Return the ~std~ API documentation (optional ~topic~; e.g. ~run~, ~io~). |
+| ~sandbox_os~ | copy, mount, del, stat, list | Manage the sandbox filesystem: copy (host→sandbox), mount (sandbox→host), delete, stat or tree-list a sandbox path. |
 
-Script names prefixed with ~temp:~ (e.g. ~temp:meu_script~) live in ~dev/temp/~ and are **cleared on startup**.
+Scripts (via ~path~) live in the repo; ~std.tmp~ is for temporary data files.`,
+	"run": `# sandbox_run — 2 modos de executar scripts
 
-Scripts and data files are stored in separate sandbox folders; ~std.tmp~ is for temporary files.`,
+Executa um script Lua isolado (sem SO/processo; arquivos em ~mnt/~; rede via ~std.fetch~). Entre com **~path~** (arquivo .lua no host) ou **~code~** (inline).
+
+Todo script é uma função ~function main(std) ... end~. **Em todos os modos o script precisa declarar ~function main(std)~** e terminar com ~std.result.ok(...)~ ou ~std.result.err(...)~. No modo ~code~ inline, se você mandar só o corpo, o wrapper é adicionado automaticamente — mas os exemplos abaixo já trazem o wrapper completo.
+
+## Modo 1 — code (inline)
+Conteúdo do script:
+
+~~~lua
+function main(std)
+  local args = std.args or {}
+  print("Ola do sandbox!", #args)
+  std.result.ok({ ok = true, n = #args })
+end
+~~~
+
+Chamada:
+~~~jsonc
+{
+  "action": "run",
+  "code": "function main(std)\n  local args = std.args or {}\n  print(\\"Ola do sandbox!\\", #args)\n  std.result.ok({ ok = true, n = #args })\nend",
+  "args": [1, 2, 3]
+}
+~~~
+
+## Modo 2 — path (arquivo .lua no host)
+Crie o script no repositório (com ~function main(std)~):
+
+~~~lua
+-- scripts/relatorio.lua
+function main(std)
+  local mes = std.args and std.args.mes or "hoje"
+  std.result.ok({ relatorio = mes, lido = true })
+end
+~~~
+
+Chamada:
+~~~jsonc
+{
+  "action": "run",
+  "path": "scripts/relatorio.lua",
+  "args": { "mes": "2026-09" }
+}
+~~~
+
+## args → std.args
+O campo ~args~ vira ~std.args~ dentro do script. Array vira table indexada; objeto vira table com chaves; uma string que é JSON válido também é interpretada; caso contrário permanece string. Sem ~args~, ~std.args~ é ~nil~.
+
+~~~lua
+function main(std)
+  local nome = std.args and std.args.nome or "anon"
+  std.result.ok({ nome = nome, recebido = std.args })
+end
+~~~
+
+## Retorno
+- ~std.result.ok(data)~ — sucesso; o ~data~ vira o JSON de saída.
+- ~std.result.err(msg)~ — erro (~msg~ vira a mensagem).
+- Sem ~result~, o valor retornado por ~main~ é usado; ~print()~/~std.log.*~ viram a seção de output.`,
 	"io": `# std.io — sandbox files (~mnt/~)
 
 Operates on paths relative to ~mnt/~. Rejects absolute paths and ~..~ (always confined to the sandbox).
@@ -557,7 +610,7 @@ std.result.ok({ total = #rows, first = rows[1] })
 ~~~`,
 	"data": `# std.data — data pipeline (sqlize-style)
 
-	Operates on rows = array of maps. Moves data between CSV, JSON, XML, Excel and SQLite.
+	Operates on rows = array of maps. Moves data between CSV, JSON, XML, Excel, SQLite and SQL files.
 
 	| Function | Signature | Returns |
 	| --- | --- | --- |
@@ -565,14 +618,19 @@ std.result.ok({ total = #rows, first = rows[1] })
 	| ~toCSV~ | ~toCSV(rows, sep?)~ | string |
 	| ~fromJSON~ | ~fromJSON(s)~ | any |
 	| ~toJSON~ | ~toJSON(v)~ | string |
+	| ~toJSONL~ | ~toJSONL(rows)~ | string |
+	| ~fromJSONL~ | ~fromJSONL(s)~ | rows |
 	| ~toXML~ | ~toXML(rows, root?, row?)~ | string |
+	| ~fromXML~ | ~fromXML(s, row?)~ | rows |
 	| ~fromExcel~ | ~fromExcel(path, sheet?)~ | rows |
 	| ~toExcel~ | ~toExcel(rows, path, sheet?)~ | true |
+	| ~toSql~ | ~toSql(rows, table?)~ | string (CREATE + INSERT) |
+	| ~fromSql~ | ~fromSql(s)~ | rows |
 	| ~sqlImport~ | ~sqlImport(db, table, rows, opts?)~ | { imported } |
 	| ~sqlExport~ | ~sqlExport(db, query)~ | rows |
 	| ~convert~ | ~convert(src, dst)~ | true (by extension) |
 
-	Paths are relative to ~mnt/~ (or ~tmp:~). ~sqlImport~ creates the table if it doesn't exist (~opts.create=true~ to force), with TEXT columns.
+	Paths are relative to ~mnt/~ (or ~tmp:~). ~sqlImport~ creates the table if it doesn't exist (~opts.create=true~ to force), with TEXT columns. ~toSql~ emits a ~CREATE TABLE~ + one ~INSERT INTO~ per row; ~fromSql~ reads back that same format. ~convert~ also accepts the ~.sql~ extension.
 
 	## Example
 	~~~lua
