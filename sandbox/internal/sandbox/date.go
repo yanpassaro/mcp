@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	_ "time/tzdata"
+
 	lua "github.com/Shopify/go-lua"
 )
 
@@ -15,7 +17,11 @@ func buildDate(L *lua.State) int {
 		return 1
 	})
 	setGoFunc(L, t, "iso", func(l *lua.State) int {
-		l.PushString(toTime(l, 1, time.Now()).Format(time.RFC3339))
+		ref := toTime(l, 1, time.Now())
+		if l.Top() >= 2 {
+			ref = ref.In(loadLoc(argString(l, 2)))
+		}
+		l.PushString(ref.Format(time.RFC3339))
 		return 1
 	})
 	setGoFunc(L, t, "format", func(l *lua.State) int {
@@ -24,11 +30,18 @@ func buildDate(L *lua.State) int {
 		if l.Top() >= 2 {
 			ref = toTime(l, 2, ref)
 		}
+		if l.Top() >= 3 {
+			ref = ref.In(loadLoc(argString(l, 3)))
+		}
 		l.PushString(formatDate(ref, layout))
 		return 1
 	})
 	setGoFunc(L, t, "parse", func(l *lua.State) int {
-		ts, err := parseTimeStr(argString(l, 1))
+		loc := time.UTC
+		if l.Top() >= 2 {
+			loc = loadLoc(argString(l, 2))
+		}
+		ts, err := parseTimeStr(argString(l, 1), loc)
 		if err != nil {
 			panic(err)
 		}
@@ -52,6 +65,18 @@ func buildDate(L *lua.State) int {
 		return 1
 	})
 	return t
+}
+
+func loadLoc(tz string) *time.Location {
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		panic(fmt.Errorf("fuso horário inválido: %s (use IANA, ex. America/Sao_Paulo)", tz))
+	}
+	return loc
 }
 
 func formatDate(t time.Time, layout string) string {
@@ -104,10 +129,10 @@ func addDate(t time.Time, amount int64, unit string) time.Time {
 	}
 }
 
-func parseTimeStr(s string) (time.Time, error) {
+func parseTimeStr(s string, loc *time.Location) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04:05", "2006-01-02"} {
-		if t, err := time.Parse(layout, s); err == nil {
+		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
 			return t, nil
 		}
 	}
@@ -122,7 +147,7 @@ func toTime(l *lua.State, index int, def time.Time) time.Time {
 	case float64:
 		return time.UnixMilli(int64(v))
 	case string:
-		if p, err := parseTimeStr(v); err == nil {
+		if p, err := parseTimeStr(v, time.UTC); err == nil {
 			return p
 		}
 	}

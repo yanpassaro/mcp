@@ -28,21 +28,23 @@ type RunRequest struct {
 }
 
 type RunResult struct {
-	Name        string
-	Description string
-	Data        string
-	DataJSON    bool
-	Output      string
-	Ok          bool
-	Error       string
-	Duration    time.Duration
-	Truncated   bool
+	Name         string
+	Description  string
+	Data         string
+	DataJSON     bool
+	DataMarkdown bool
+	Output       string
+	Ok           bool
+	Error        string
+	Duration     time.Duration
+	Truncated    bool
 }
 
 type luaResult struct {
 	ok   bool
 	msg  string
 	data any
+	md   bool
 }
 
 type runOutcome struct {
@@ -170,15 +172,24 @@ func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, e
 	result.Duration = time.Since(start)
 	result.Output = outBuf.String()
 
+	if res == nil {
+		if !L.IsNil(ret) {
+			result.Data, result.DataJSON = renderData(secrets.RedactValue(luaToAny(L, ret)))
+		}
+	}
 	if res != nil {
 		result.Ok = res.ok
-		if res.ok {
-			result.Data, result.DataJSON = renderData(secrets.RedactValue(res.data))
-		} else {
+		if !res.ok {
 			result.Error = res.msg
 		}
-	} else if !L.IsNil(ret) {
-		result.Data, result.DataJSON = renderData(secrets.RedactValue(luaToAny(L, ret)))
+		if res.ok && res.md {
+			if s, ok := res.data.(string); ok {
+				result.Data, result.DataMarkdown = s, true
+			}
+		}
+		if res.ok && !res.md {
+			result.Data, result.DataJSON = renderData(secrets.RedactValue(res.data))
+		}
 	}
 	if len(result.Data) > maxResultBytes {
 		result.Data = safeTruncate(result.Data, maxResultBytes) + "\n... (truncado)"
@@ -314,6 +325,10 @@ func buildResult(L *lua.State, res **luaResult) int {
 	t := newTable(L)
 	setGoFunc(L, t, "ok", func(l *lua.State) int {
 		*res = &luaResult{ok: true, data: luaToAny(l, 1)}
+		return 0
+	})
+	setGoFunc(L, t, "render", func(l *lua.State) int {
+		*res = &luaResult{ok: true, data: renderTemplate(argString(l, 1), toAnyMap(l, 2)), md: true}
 		return 0
 	})
 	setGoFunc(L, t, "err", func(l *lua.State) int {

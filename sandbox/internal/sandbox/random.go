@@ -93,12 +93,12 @@ func buildRandom(L *lua.State) int {
 		from := time.Now().AddDate(0, 0, -365)
 		to := time.Now()
 		if s := strings.TrimSpace(argString(l, 1)); s != "" {
-			if ts, err := parseTimeStr(s); err == nil {
+			if ts, err := parseTimeStr(s, time.UTC); err == nil {
 				from = ts
 			}
 		}
 		if s := strings.TrimSpace(argString(l, 2)); s != "" {
-			if ts, err := parseTimeStr(s); err == nil {
+			if ts, err := parseTimeStr(s, time.UTC); err == nil {
 				to = ts
 			}
 		}

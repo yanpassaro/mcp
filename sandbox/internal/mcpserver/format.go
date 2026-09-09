@@ -45,7 +45,14 @@ func formatRunResult(res sandbox.RunResult, runErr error) string {
 		}
 	} else {
 		content := strings.TrimRight(res.Data, "\n")
-		if res.DataJSON && content != "" {
+		if res.DataMarkdown {
+			if content != "" {
+				b.WriteString(content)
+				b.WriteString("\n")
+			} else {
+				b.WriteString("_(sem resultado)_\n")
+			}
+		} else if res.DataJSON && content != "" {
 			fmt.Fprintf(&b, "```json\n%s\n```\n", content)
 		} else {
 			if content == "" {

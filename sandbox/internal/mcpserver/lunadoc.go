@@ -28,6 +28,11 @@ var lunaOrder = []*lunaMod{
 	lunaRandom, lunaAssert, lunaTemplate, lunaHuman,
 }
 
+var lunaNative = []string{
+	"print", "pairs", "ipairs", "type", "tostring", "tonumber",
+	"setmetatable", "getmetatable", "string", "math", "table",
+}
+
 var lunaModules = map[string]*lunaMod{}
 
 func init() {
@@ -48,8 +53,15 @@ func lunaTopicNames() []string {
 func renderLunaIndex() string {
 	var b strings.Builder
 	b.WriteString("# Sandbox Lua — std (lunadoc)\n\n")
-	b.WriteString("> Isolated Lua sandbox: no OS/process; files confined to `mnt/`; network only via `std.fetch` (allowlist). Each script defines `function main(std)` and returns with `std.result.ok(...)`/`err(...)`. Inline `code`/written bodies are auto-wrapped in `function main(std)` when missing — pass only the body. Objects/arrays become JSON in the output.\n\n")
-	b.WriteString("## Modules\n\n| Module | Description |\n| --- | --- |\n")
+	b.WriteString("> Isolated Lua sandbox: no OS/process; files in `mnt/`; network only via `std.fetch` (allowlist). Each script is `function main(std)` ending in `std.result.ok(...)`/`err(...)`. Inline `code` can be just the body — the wrapper is added for you.\n\n")
+	var names []string
+	for _, m := range lunaOrder {
+		names = append(names, "`"+m.Name+"`")
+	}
+	fmt.Fprintf(&b, "**Modules:** %s\n\n", strings.Join(names, ", "))
+	fmt.Fprintf(&b, "**Native (Lua):** %s\n\n", strings.Join(lunaNative, ", "))
+	b.WriteString("## How to run\n\n```\nsandbox_run\n  action: run\n  code: std.result.ok({ soma = 2 + 3 })\n```\n\n")
+	b.WriteString("## Module details\n\n| Module | Description |\n| --- | --- |\n")
 	for _, m := range lunaOrder {
 		fn := ""
 		if n := len(m.Fns); n > 0 {
@@ -344,6 +356,7 @@ var lunaResult = &lunaMod{
 	Desc:   "sets the script result (success/error); this is the `main` return value",
 	Fns: []lunaFn{
 		{"ok", "data:any", "any", "set success — `data` becomes the return (objects/arrays → JSON)"},
+		{"render", "template:string, vars:table", "string", "renders `template` (`{{x}}`, `{{#if}}`, `{{#each}}`, `{{else}}`) and returns it as Markdown (`.md`)"},
 		{"err", "msg:string", "panics", "set error — `msg` becomes the error message"},
 	},
 	Example: `local n = std.num.sum({ 1, 2, 3 })
@@ -681,12 +694,12 @@ var lunaNum = &lunaMod{
 var lunaDate = &lunaMod{
 	Name:   "date",
 	Prefix: "date",
-	Desc:   "dates in ms — `unit`: day, hour, minute, second, week, month, year",
+	Desc:   "dates in ms — `unit`: day, hour, minute, second, week, month, year; `tz` = IANA (ex. `America/Sao_Paulo`), resolve DST automaticamente",
 	Fns: []lunaFn{
 		{"now", "-", "number", "ms now"},
-		{"iso", "ts?:number", "string", "RFC3339"},
-		{"format", "layout:string, ts?:number", "string", "YYYY,MM,DD,HH,mm,ss"},
-		{"parse", "s:string", "number", "string → ms"},
+		{"iso", "ts?:number, tz?:string", "string", "RFC3339 (opcional tz)"},
+		{"format", "layout:string, ts?:number, tz?:string", "string", "YYYY,MM,DD,HH,mm,ss (opcional tz)"},
+		{"parse", "s:string, tz?:string", "number", "string → ms (opcional tz)"},
 		{"add", "ts:number, amount:number, unit:string", "number", "adds `amount` of `unit`"},
 		{"unix", "ts?:number", "number", "seconds"},
 		{"diff", "a:number, b:number, unit:string", "number", "difference in `unit`"},

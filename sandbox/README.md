@@ -1,56 +1,127 @@
 # sandbox-mcp
 
-Sandbox **não-destrutivo** de scripts Lua para a IA: a IA escreve, lê, apaga e roda scripts isolados — sem SO/processo, arquivos confinados à pasta `mnt/`, rede apenas via `std.fetch` (allowlist).
+Sandbox **não-destrutivo** de Lua para a IA: rode scripts isolados — sem SO/processo, arquivos só em `mnt/`, rede só via `std.fetch` (allowlist).
 
-Cada script tem `name`, `description` e uma função `function main(std)` que retorna `std.result.ok(...)`/`err(...)`. A saída vira Markdown (objetos/arrays viram JSON).
+## Quick start
 
-**Só o corpo (body) basta:** no `sandbox_run` com `code` inline, o wrapper `function main(std) ... end` é adicionado automaticamente quando ausente — a IA pode enviar apenas `print(...)` / `std.log.*` sem escrever a função. Scripts por `path` devem declarar `function main(std)`.
+O caminho mais curto — mande só o corpo, sem função:
 
-## Tools
+```
+sandbox_run
+  action: run
+  code: std.result.ok({ soma = 2 + 3 })
+```
 
-| Tool | Action | O que faz |
-| --- | --- | --- |
-| `sandbox_run` | `run` (default) | Roda um script por `path` (.lua no host) ou `code` inline, com `args` (array/objeto → `std.args`) |
-| `sandbox_doc` | `topic` (opcional) | Documentação da API `std` com assinaturas (args + retorno) por módulo; `topic=<módulo>` (ex.: `io`) traz as funções detalhadas + exemplo. `topic=run` tem os 2 modos com exemplos |
-| `sandbox_os` | `copy`, `mount`, `del`, `stat`, `list` | Gerencia o filesystem do sandbox: copia (host→sandbox), monta (sandbox→host), apaga, mostra status ou lista (árvore) um caminho do sandbox |
+Saída:
 
-`std` fornece: `result`, `log`, `args`, `io` (`read`/`lines`/`json`/`write`/`append`/`del`/`exists`/`stat`/`dir`/`copy`/`move`/`mkdir`/`glob`/`walk`/`zip`/`unzip`), `tmp` (mesmas funções do `io` + `clear`), `sql` (`connect` + `import`/`export`; as queries ficam no objeto de `connect`), `uuid` (`v4`/`v7`/`valid`), `csv` (`parse`/`stringify`), `xml` (`parse`/`stringify`), `excel` (`sheets`/`read`/`write`), `data` (`from`/`to`/`convert`), `regex` (`match`/`find`/`findAll`/`replace`/`split`/`groups`/`findAllGroups`), `json` (`parse`/`stringify`/`format`/`minify`/`path`), `encode` (`crc32`/`md5`/`sha256`/`base64`/`base32`/`hex`), `str` (`normalize`/`slug`/`title`/`camel`/`pascal`/`snake`/`kebab`/`wrap`/`summarize`/`format`/`count`/`split`), `list` (`chunk`/`groupBy`/`unique`/`flatten`/`sortBy`/`countBy`/`first`/`last`/`map`/`filter`/`reduce`/`find`/`some`/`every`), `num` (`round`/`clamp`/`percent`/`sum`/`avg`/`parse`/`fmt`), `human` (`bytes`/`duration`/`compact`/`money`/`ordinal`/`plural`/`list`), `date` (`now`/`iso`/`format`/`parse`/`add`/`unix`/`diff`), `random` (`seed`/`int`/`float`/`pick`/`shuffle`/`bool`/`name`/`email`/`username`/`phone`/`date`/`sentence`/`paragraph`), `assert` (`ok`/`equal`/`throws`/`type`/`number`/`string`/`boolean`/`table`/`contains`/`matches`/`between`/`length`), `fetch` (`request`/`get`/`post`/`json`/`save` + `fetch.cookies`), `secrets` (`get`/`has`), `template` (`render` — com `#if`/`#unless`/`#each`/`else` embutidos).
+```
+{ "soma": 5 }
+```
 
-**Segurança:** as libs nativas perigosas são removidas (`dofile`, `loadfile`, `load`, `require`, `collectgarbage`, `os`, `io`, `debug`, `package`, `coroutine`); só restam primitivas seguras (`pairs`, `ipairs`, `type`, `tostring`, `tonumber`, metatables, `string`, `math`, `table`).
+Todo script é `function main(std)` que termina com `std.result.ok(...)` ou `std.result.err(...)`. No `code` inline você pode mandar **só o corpo** — o wrapper `function main(std) ... end` é adicionado sozinho. Por `path`, basta um arquivo `.lua` no host.
 
-**Limites:** execução 30s (timeout real — a chamada retorna em até 30s; como a lib Lua não interrompe um loop contínuo, esse cálculo em background fica contido pelo limite de 4 execuções simultâneas), saída 256 KiB, **retorno 256 KiB (truncado com `... (truncado)`)**, arquivo 2 MB, RAM do processo (padrão 512 MiB, soft limit do Go) e espaço em `mnt/` (padrão 256 MiB / 5.000 arquivos).
+Um script típico:
 
-## Secrets
+```
+sandbox_run
+  action: run
+  code: |
+    local args = std.args or {}
+    print("oi", #args)
+    std.result.ok({ n = #args })
+  args: [1, 2, 3]
+```
 
-Secrets são expostos por variáveis de ambiente com o prefixo `SECRET_`. A IA só consegue **ler** (não há `set`):
+Opcional: `-- name=meu_script` e `-- desc=faz algo` no topo do script aparecem no cabeçalho da saída.
+
+## As 3 tools
+
+| Tool | O que faz |
+| --- | --- |
+| `sandbox_run` | Roda um script por `path` (`.lua` no host) ou `code` inline, com `args` opcional (vira `std.args`). Ação: `run` (default). |
+| `sandbox_doc` | Documentação da API `std`. `sandbox_doc topic=<módulo>` traz assinaturas + retorno + exemplo (ex.: `io`, `run`, `fetch`, `limits`). |
+| `sandbox_os` | Gerencia o filesystem: `copy` (host→sandbox), `mount` (sandbox→host), `del`, `stat`, `list`. |
+
+## A API `std`
+
+Cada módulo agrupa funções; detalhes em `sandbox_doc topic=<módulo>`.
+
+| Módulo | O que tem |
+| --- | --- |
+| `result` | `ok(data)` / `err(msg)`; `render(template, vars)` → devolve Markdown renderizado |
+| `log` | escreve na saída (`print()` também) |
+| `args` | o valor `args` da execução (`std.args`) |
+| `io` | arquivos em `mnt/`: `read`, `write`, `append`, `lines`, `json`, `del`, `exists`, `stat`, `dir`, `copy`, `move`, `mkdir`, `glob`, `walk`, `zip`, `unzip` |
+| `tmp` | arquivos temporários (`tmp/`): mesmas funções do `io` + `clear` (limpa a cada execução) |
+| `fetch` | HTTP: `get`, `post`, `json`, `save`, `request` (+ `fetch.cookies`) |
+| `secrets` | lê `SECRET_*`: `get`, `has` (só leitura) |
+| `sql` | SQLite: `connect(path)` → `exec`, `query`, `get`, `schema`… + `import`/`export` |
+| `uuid` | `v4`, `v7`, `valid` |
+| `csv` | `parse`, `stringify` |
+| `xml` | `parse`, `stringify` |
+| `excel` | `.xlsx`: `sheets`, `read`, `write` |
+| `data` | pipeline CSV/JSON/XML/HTML/Excel/SQLite/SQL: `from`, `to`, `convert` |
+| `regex` | Go RE2: `match`, `find`, `findAll`, `replace`, `split`, `groups`, `findAllGroups` |
+| `json` | `parse`, `stringify`, `format`, `minify`, `path` |
+| `encode` | `crc32`, `md5`, `sha256`, `base64`, `base32`, `hex` |
+| `str` | `normalize`, `slug`, `title`, `camel`, `pascal`, `snake`, `kebab`, `wrap`, `summarize`, `format`, `count`, `split` |
+| `list` | `chunk`, `groupBy`, `unique`, `flatten`, `sortBy`, `countBy`, `first`, `last`, `map`, `filter`, `reduce`, `find`, `some`, `every` |
+| `num` | `round`, `clamp`, `percent`, `sum`, `avg`, `parse`, `fmt` |
+| `date` | `now`, `iso`, `format`, `parse`, `add`, `unix`, `diff` |
+| `random` | `seed`, `int`, `float`, `pick`, `shuffle`, `bool`, `name`, `email`, `username`, `phone`, `date`, `sentence`, `paragraph` |
+| `assert` | `ok`, `equal`, `throws`, `type`, `number`, `string`, `boolean`, `table`, `contains`, `matches`, `between`, `length` |
+| `template` | `render` — placeholders `{nome}`/`{{nome}}` + `{{#if}}`, `{{#unless}}`, `{{#each}}`, `{{else}}` |
+| `human` | `bytes`, `duration`, `compact`, `money`, `ordinal`, `plural`, `list` (pt-BR) |
+
+## Como o script termina
+
+- `std.result.ok(data)` — sucesso; `data` (string, número, booleano ou tabela) vira a saída; objetos/arrays viram JSON.
+- `std.result.render(template, vars)` — renderiza `template` (`{{x}}`, `{{#if}}`, `{{#each}}`) e devolve o resultado como Markdown (`.md`).
+- `std.result.err(msg)` — erro; `msg` é a mensagem de erro.
+- Sem `result`, o valor retornado por `main` é usado; `print()`/`std.log.*` viram a seção de saída.
+
+## Segurança
+
+As libs nativas perigosas são removidas: `dofile`, `loadfile`, `load`, `loadstring`, `require`, `collectgarbage`, `os`, `io`, `debug`, `package`, `coroutine`, `cjson`. Ficam primitivas seguras (`pairs`, `ipairs`, `type`, `tostring`, `tonumber`, metatables, `string`, `math`, `table`).
+
+## Limites
+
+- Execução: **30s** (timeout real; a chamada retorna em até 30s).
+- Saída e retorno: **256 KiB** (truncado com `... (truncado)`).
+- Arquivo: **2 MB** por arquivo; **1 MB** por escrita.
+- RAM do processo: **512 MiB** (padrão, soft limit do Go).
+- Espaço: `mnt/` **256 MiB / 5.000 arquivos**; `tmp/` **64 MiB / 1.000 arquivos**.
+- `std.sql.query` retorna no máximo **10.000 linhas** (`SANDBOX_SQL_MAX_ROWS`).
+- Caminhos confinados ao sandbox: sem caminho absoluto, sem `..`.
+
+## Segredos
+
+Variáveis `SECRET_*` ficam disponíveis por `std.secrets.get`, sem o prefixo e em minúsculo: `SECRET_GITHUB_TOKEN_API` → `std.secrets.get("github_token_api")` (case-insensitive). Só leitura:
 
 ```lua
--- SECRET_GITHUB_TOKEN_API
-local token = std.secrets.get("github_token_api")
-if token == nil then
-    std.result.err("secret github_token_api não configurado")
+if std.secrets.has("github_token_api") then
+  local token = std.secrets.get("github_token_api")
+  std.result.ok({ ok = true })
 end
 ```
 
-A chave é o nome da variável sem o prefixo `SECRET_`, em minúsculas (`SECRET_GITHUB_TOKEN_API` → `github_token_api`), e é case-insensitive.
-
-**Redação:** os valores de qualquer `SECRET_*` são automaticamente substituídos por `[REDACTED]` em toda saída (prints, `std.log`, retorno de `std.result`) — nunca aparecem para a IA.
+O valor de qualquer `SECRET_*` é trocado por `[REDACTED]` em toda saída (prints, `std.log`, retorno) — nunca aparece para a IA.
 
 ## sandbox_os
 
-Opera sobre a pasta `mnt/` do sandbox. `path` é sempre relativo ao sandbox (exceto a origem do `copy`, que é no host).
+Opera sobre `mnt/` do sandbox. `path` é relativo ao sandbox, exceto a origem do `copy` (host).
 
-| action | args | o que faz |
+| action | args | O que faz |
 | --- | --- | --- |
-| `copy` | `path` = origem no host, `dest` = destino no sandbox | copia para dentro do sandbox |
-| `mount` | `path` = origem no sandbox, `dest` = destino no host | copia para fora |
-| `del` | `path` | apaga arquivo ou pasta (recursivo), dentro do sandbox |
-| `stat` | `path` | status (existe, é pasta, tamanho, linhas) |
+| `copy` | `path` (origem no host), `dest` (no sandbox) | copia para dentro do sandbox |
+| `mount` | `path` (no sandbox), `dest` (no host) | copia para fora |
+| `del` | `path` | apaga arquivo ou pasta (recursivo) |
+| `stat` | `path` | status: existe, é pasta, tamanho, linhas |
 | `list` | `path` (opcional; raiz se vazio) | lista diretórios em árvore |
 
 ## Variáveis de ambiente
 
-O filesystem do sandbox é fixo (sem env): `mnt` em `~/.local/state/mcp/mnt` (compartilhado com o sqlize) e `tmp` em `~/.local/state/mcp/tmp`.
+O filesystem é fixo (sem env): `mnt` em `~/.local/state/mcp/mnt` (compartilhado com o sqlize) e `tmp` em `~/.local/state/mcp/tmp`.
 
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
