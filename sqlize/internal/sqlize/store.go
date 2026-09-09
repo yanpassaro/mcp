@@ -86,6 +86,17 @@ func resolveStateDir(stateDir string) (string, error) {
 	return dir, nil
 }
 
+func mntDir() (string, error) {
+	home := os.Getenv("USERPROFILE")
+	if home == "" {
+		home = os.Getenv("HOME")
+	}
+	if home == "" {
+		return "", fmt.Errorf("não foi possível determinar o diretório do usuário; defina USERPROFILE ou HOME")
+	}
+	return filepath.Join(home, ".local", "state", "mcp", "mnt"), nil
+}
+
 func (s *store) Close() error {
 	if s.db != nil {
 		return s.db.Close()

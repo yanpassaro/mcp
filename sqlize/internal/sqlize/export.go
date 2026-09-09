@@ -101,14 +101,7 @@ func exportPath(outPath string) (string, error) {
 // <home>/.local/state/mcp/mnt, exatamente a mesma pasta do mnt do sandbox,
 // para que os arquivos fiquem imediatamente acessíveis aos scripts do sandbox.
 func exportDir() (string, error) {
-	home := os.Getenv("USERPROFILE")
-	if home == "" {
-		home = os.Getenv("HOME")
-	}
-	if home == "" {
-		return "", fmt.Errorf("não foi possível determinar o diretório do usuário; defina USERPROFILE ou HOME")
-	}
-	return filepath.Join(home, ".local", "state", "mcp", "mnt"), nil
+	return mntDir()
 }
 
 func valueFromStr(s string) any {

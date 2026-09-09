@@ -18,9 +18,15 @@ import (
 )
 
 func (s *store) importFile(ctx context.Context, path, table, sheet string) (string, error) {
-	if strings.TrimSpace(path) == "" {
+	path = strings.TrimSpace(path)
+	if path == "" {
 		return "", fmt.Errorf("caminho do arquivo é obrigatório")
 	}
+	resolved, err := resolveImportPath(path)
+	if err != nil {
+		return "", err
+	}
+	path = resolved
 	if _, err := os.Stat(path); err != nil {
 		return "", fmt.Errorf("arquivo não encontrado: %w", err)
 	}
@@ -71,16 +77,17 @@ func (s *store) importFile(ctx context.Context, path, table, sheet string) (stri
 		if err != nil {
 			return "", err
 		}
-		if strings.TrimSpace(sheet) != "" && strings.TrimSpace(table) != "" {
-			if len(sheets) != 1 {
-				return "", fmt.Errorf("sheet + table só valem para uma aba; encontradas %d", len(sheets))
-			}
+		tableName := strings.TrimSpace(table)
+		if tableName != "" && len(sheets) == 1 {
 			for name, d := range sheets {
-				if err := s.loadTable(ctx, strings.TrimSpace(table), d.cols, d.rows); err != nil {
+				if err := s.loadTable(ctx, tableName, d.cols, d.rows); err != nil {
 					return "", err
 				}
-				return fmt.Sprintf("Aba %q importada como tabela %q: %d colunas, %d linhas.", name, strings.TrimSpace(table), len(d.cols), len(d.rows)), nil
+				return fmt.Sprintf("Aba %q importada como tabela %q: %d colunas, %d linhas.", name, tableName, len(d.cols), len(d.rows)), nil
 			}
+		}
+		if tableName != "" && strings.TrimSpace(sheet) != "" {
+			return "", fmt.Errorf("sheet + table só valem para uma aba; aba(s) encontradas: %d", len(sheets))
 		}
 		created := make([]string, 0, len(sheets))
 		for name, d := range sheets {
@@ -115,6 +122,17 @@ func (s *store) importFile(ctx context.Context, path, table, sheet string) (stri
 	default:
 		return "", fmt.Errorf("formato não suportado: %s (use .json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .xlsm, .xls, .sql, .sqlite, .db, .xml)", ext)
 	}
+}
+
+func resolveImportPath(path string) (string, error) {
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	dir, err := mntDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, path), nil
 }
 
 func deriveTableName(given, path, fallback string) string {
