@@ -3,6 +3,7 @@ package sandbox
 import (
 	"crypto/md5"
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -43,6 +44,26 @@ func buildEncode(L *lua.State) int {
 			l.PushString(base64.URLEncoding.EncodeToString([]byte(s)))
 		default:
 			panic(fmt.Errorf("modo base64 inválido: %s", argString(l, 2)))
+		}
+		return 1
+	})
+	setGoFunc(L, t, "base32", func(l *lua.State) int {
+		s := argString(l, 1)
+		switch strings.ToLower(strings.TrimSpace(argString(l, 2))) {
+		case "", "encode", "std", "standard":
+			l.PushString(base32.StdEncoding.EncodeToString([]byte(s)))
+		case "decode", "dec":
+			b, err := base32.StdEncoding.DecodeString(s)
+			if err != nil {
+				panic(fmt.Errorf("modo base32 inválido: %v", err))
+			}
+			l.PushString(string(b))
+		case "hex", "hexencode", "base32hex":
+			l.PushString(base32.HexEncoding.EncodeToString([]byte(s)))
+		case "nopad", "nopadding", "raw":
+			l.PushString(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString([]byte(s)))
+		default:
+			panic(fmt.Errorf("modo base32 inválido: %s", argString(l, 2)))
 		}
 		return 1
 	})

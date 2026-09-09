@@ -6,153 +6,141 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	stdhtml "html"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	lua "github.com/Shopify/go-lua"
+	xhtml "golang.org/x/net/html"
+	atom "golang.org/x/net/html/atom"
 )
 
 func buildData(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 	t := newTable(L)
 
-	setGoFunc(L, t, "fromCSV", func(l *lua.State) int {
-		rows, err := dataRowsFromCSV(argString(l, 1), argString(l, 2))
-		if err != nil {
-			panic(err)
+	setGoFunc(L, t, "from", func(l *lua.State) int {
+		f := strings.ToLower(strings.TrimSpace(argString(l, 1)))
+		text := argString(l, 2)
+		extra := ""
+		if l.Top() >= 3 {
+			extra = argString(l, 3)
 		}
-		pushAny(l, rows)
+		switch f {
+		case "csv":
+			rows, err := dataRowsFromCSV(text, extra)
+			if err != nil {
+				panic(err)
+			}
+			pushAny(l, rows)
+		case "json":
+			v, err := dataFromJSON(text)
+			if err != nil {
+				panic(err)
+			}
+			pushAny(l, v)
+		case "jsonl", "ndjson":
+			rows, err := dataRowsFromJSONL(text)
+			if err != nil {
+				panic(err)
+			}
+			pushAny(l, rows)
+		case "xml":
+			rows, err := dataRowsFromXML(text, extra)
+			if err != nil {
+				panic(err)
+			}
+			pushAny(l, rows)
+		case "sql":
+			rows, err := dataRowsFromSQL(text)
+			if err != nil {
+				panic(err)
+			}
+			pushAny(l, rows)
+		case "excel", "xlsx", "xls":
+			path, err := excelPath(mnt, tmp, text)
+			if err != nil {
+				panic(err)
+			}
+			rows, err := dataRowsFromExcel(path, extra)
+			if err != nil {
+				panic(err)
+			}
+			pushAny(l, rows)
+		case "html":
+			rows, err := dataRowsFromHTML(text)
+			if err != nil {
+				panic(err)
+			}
+			pushAny(l, rows)
+		default:
+			panic(fmt.Errorf("formato não suportado em data.from: %s", f))
+		}
 		return 1
 	})
-	setGoFunc(L, t, "toCSV", func(l *lua.State) int {
-		s, err := dataRowsToCSV(luaArrayAny(l, 1), argString(l, 2))
-		if err != nil {
-			panic(err)
+	setGoFunc(L, t, "to", func(l *lua.State) int {
+		f := strings.ToLower(strings.TrimSpace(argString(l, 1)))
+		value := luaToAny(l, 2)
+		switch f {
+		case "csv":
+			s, err := dataRowsToCSV(luaArrayAny(l, 2), argString(l, 3))
+			if err != nil {
+				panic(err)
+			}
+			l.PushString(s)
+		case "json":
+			s, err := dataToJSON(value)
+			if err != nil {
+				panic(err)
+			}
+			l.PushString(s)
+		case "jsonl", "ndjson":
+			s, err := dataRowsToJSONL(luaArrayAny(l, 2))
+			if err != nil {
+				panic(err)
+			}
+			l.PushString(s)
+		case "xml":
+			root := ""
+			row := ""
+			if l.Top() >= 3 {
+				root = argString(l, 3)
+			}
+			if l.Top() >= 4 {
+				row = argString(l, 4)
+			}
+			l.PushString(dataRowsToXML(luaArrayAny(l, 2), root, row))
+		case "sql":
+			l.PushString(dataRowsToSQL(luaArrayAny(l, 2), argString(l, 3)))
+		case "excel", "xlsx", "xls":
+			rows := luaArrayAny(l, 2)
+			path, err := excelPath(mnt, tmp, argString(l, 3))
+			if err != nil {
+				panic(err)
+			}
+			if err := dataRowsToExcel(rows, path, argString(l, 4), toAnyMap(l, 5)); err != nil {
+				panic(err)
+			}
+			l.PushBoolean(true)
+		case "html":
+			l.PushString(dataRowsToHTML(luaArrayAny(l, 2), toAnyMap(l, 3)))
+		default:
+			panic(fmt.Errorf("formato não suportado em data.to: %s", f))
 		}
-		l.PushString(s)
 		return 1
 	})
-	setGoFunc(L, t, "fromJSON", func(l *lua.State) int {
-		v, err := dataFromJSON(argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		pushAny(l, v)
-		return 1
-	})
-	setGoFunc(L, t, "toJSON", func(l *lua.State) int {
-		s, err := dataToJSON(luaToAny(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		l.PushString(s)
-		return 1
-	})
-	setGoFunc(L, t, "toJSONL", func(l *lua.State) int {
-		s, err := dataRowsToJSONL(luaArrayAny(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		l.PushString(s)
-		return 1
-	})
-	setGoFunc(L, t, "fromJSONL", func(l *lua.State) int {
-		rows, err := dataRowsFromJSONL(argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		pushAny(l, rows)
-		return 1
-	})
-	setGoFunc(L, t, "toXML", func(l *lua.State) int {
-		l.PushString(dataRowsToXML(luaArrayAny(l, 1), argString(l, 2), argString(l, 3)))
-		return 1
-	})
-	setGoFunc(L, t, "fromXML", func(l *lua.State) int {
-		rows, err := dataRowsFromXML(argString(l, 1), argString(l, 2))
-		if err != nil {
-			panic(err)
-		}
-		pushAny(l, rows)
-		return 1
-	})
-	setGoFunc(L, t, "fromExcel", func(l *lua.State) int {
-		path, err := excelPath(mnt, tmp, argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		rows, err := dataRowsFromExcel(path, argString(l, 2))
-		if err != nil {
-			panic(err)
-		}
-		pushAny(l, rows)
-		return 1
-	})
-	setGoFunc(L, t, "toExcel", func(l *lua.State) int {
-		rows := luaArrayAny(l, 1)
-		path, err := excelPath(mnt, tmp, argString(l, 2))
-		if err != nil {
-			panic(err)
-		}
-		if err := dataRowsToExcel(rows, path, argString(l, 3)); err != nil {
-			panic(err)
-		}
-		l.PushBoolean(true)
-		return 1
-	})
-	setGoFunc(L, t, "sqlImport", func(l *lua.State) int {
-		dbPath, err := sqlPath(mnt, tmp, argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		db, err := reg.get(dbPath)
-		if err != nil {
-			panic(err)
-		}
-		n, err := dataSQLImport(db, argString(l, 2), luaArrayAny(l, 3), toAnyMap(l, 4))
-		if err != nil {
-			panic(err)
-		}
-		pushAny(l, map[string]any{"imported": n})
-		return 1
-	})
-	setGoFunc(L, t, "sqlExport", func(l *lua.State) int {
-		dbPath, err := sqlPath(mnt, tmp, argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		conn, err := reg.conn(dbPath)
-		if err != nil {
-			panic(err)
-		}
-		rows, err := dataSQLExport(conn, argString(l, 2))
-		if err != nil {
-			panic(err)
-		}
-		pushAny(l, rows)
-		return 1
-	})
+
 	setGoFunc(L, t, "convert", func(l *lua.State) int {
-		if err := dataConvert(mnt, tmp, argString(l, 1), argString(l, 2)); err != nil {
+		if err := dataConvert(mnt, tmp, argString(l, 1), argString(l, 2), toAnyMap(l, 3)); err != nil {
 			panic(fmt.Errorf("convert: %w", err))
 		}
 		l.PushBoolean(true)
 		return 1
 	})
-	setGoFunc(L, t, "toSql", func(l *lua.State) int {
-		l.PushString(dataRowsToSQL(luaArrayAny(l, 1), argString(l, 2)))
-		return 1
-	})
-	setGoFunc(L, t, "fromSql", func(l *lua.State) int {
-		rows, err := dataRowsFromSQL(argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		pushAny(l, rows)
-		return 1
-	})
+
 
 	return t
 }
@@ -357,7 +345,7 @@ func dataRowsFromExcel(path, sheet string) ([]any, error) {
 	return out, nil
 }
 
-func dataRowsToExcel(rows []any, path, sheet string) error {
+func dataRowsToExcel(rows []any, path, sheet string, opts map[string]any) error {
 	keys := dataRowKeys(rows)
 	grid := make([][]string, 0, len(rows)+1)
 	if len(keys) > 0 {
@@ -371,7 +359,7 @@ func dataRowsToExcel(rows []any, path, sheet string) error {
 		}
 		grid = append(grid, line)
 	}
-	return excelWriteRows(path, sheet, grid)
+	return excelWriteRows(path, sheet, grid, opts)
 }
 
 func dataSQLImport(db *sql.DB, table string, rows []any, opts map[string]any) (int, error) {
@@ -428,7 +416,7 @@ func dataSQLExport(conn sqlConn, query string) ([]any, error) {
 	return sqlQueryRows(conn, query, nil)
 }
 
-func dataConvert(mnt, tmp *Store, src, dst string) error {
+func dataConvert(mnt, tmp *Store, src, dst string, opts map[string]any) error {
 	if strings.TrimSpace(src) == "" || strings.TrimSpace(dst) == "" {
 		return fmt.Errorf("informe origem e destino")
 	}
@@ -496,6 +484,15 @@ func dataConvert(mnt, tmp *Store, src, dst string) error {
 		if err != nil {
 			return err
 		}
+	case "html":
+		content, err := os.ReadFile(fullSrc)
+		if err != nil {
+			return err
+		}
+		value, err = dataRowsFromHTML(string(content))
+		if err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("formato de origem não suportado: %s", extSrc)
 	}
@@ -544,7 +541,13 @@ func dataConvert(mnt, tmp *Store, src, dst string) error {
 		if !ok {
 			return fmt.Errorf("origem não é um conjunto de linhas")
 		}
-		return dataRowsToExcel(rows, fullDst, "")
+		return dataRowsToExcel(rows, fullDst, "", opts)
+	case "html":
+		rows, ok := value.([]any)
+		if !ok {
+			return fmt.Errorf("origem não é um conjunto de linhas")
+		}
+		return osWriteFile(fullDst, dataRowsToHTML(rows, opts))
 	default:
 		return fmt.Errorf("formato de destino não suportado: %s", extDst)
 	}
@@ -778,4 +781,161 @@ func parseSQLTuple(s string) ([]any, error) {
 		break
 	}
 	return out, nil
+}
+
+func dataRowsFromHTML(s string) ([]any, error) {
+	doc, err := xhtml.Parse(strings.NewReader(s))
+	if err != nil {
+		return nil, err
+	}
+	table := findFirstTable(doc)
+	if table == nil {
+		return nil, fmt.Errorf("nenhuma tabela encontrada no HTML")
+	}
+	rows := tableRows(table)
+	if len(rows) == 0 {
+		return []any{}, nil
+	}
+	header := rows[0]
+	out := make([]any, 0, len(rows)-1)
+	for _, rec := range rows[1:] {
+		m := map[string]any{}
+		for i, v := range rec {
+			key := "col" + strconv.Itoa(i)
+			if i < len(header) {
+				if h := strings.TrimSpace(header[i]); h != "" {
+					key = h
+				}
+			}
+			m[key] = v
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+func dataRowsToHTML(rows []any, opts map[string]any) string {
+	keys := dataRowKeys(rows)
+	if len(keys) == 0 {
+		return ""
+	}
+	headerColor := optColor(opts, "header", "headerColor")
+	rowColor := optColor(opts, "row", "rowColor")
+	altColor := optColor(opts, "alt", "altRowColor")
+	zebra := truthyOpt(opts, "zebra")
+	thStyle := "padding:4px 8px"
+	if headerColor != "" {
+		thStyle += ";background:" + headerColor
+	}
+	tdStyle := "padding:4px 8px"
+	if rowColor != "" {
+		tdStyle += ";background:" + rowColor
+	}
+	if zebra && altColor == "" {
+		altColor = "#f5f5f5"
+	}
+	var b strings.Builder
+	b.WriteString("<table border=\"1\" style=\"border-collapse:collapse\">\n<thead>\n<tr>")
+	for _, k := range keys {
+		b.WriteString("<th style=\"")
+		b.WriteString(thStyle)
+		b.WriteString("\">")
+		b.WriteString(stdhtml.EscapeString(k))
+		b.WriteString("</th>")
+	}
+	b.WriteString("</tr>\n</thead>\n<tbody>\n")
+	for ri, r := range rows {
+		m, _ := r.(map[string]any)
+		cellStyle := tdStyle
+		if zebra && ri%2 == 1 {
+			cellStyle += ";background:" + altColor
+		}
+		b.WriteString("<tr>")
+		for _, k := range keys {
+			b.WriteString("<td style=\"")
+			b.WriteString(cellStyle)
+			b.WriteString("\">")
+			b.WriteString(stdhtml.EscapeString(dataCellText(m[k])))
+			b.WriteString("</td>")
+		}
+		b.WriteString("</tr>\n")
+	}
+	b.WriteString("</tbody>\n</table>\n")
+	return b.String()
+}
+
+func optColor(opts map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if s, ok := opts[k].(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func truthyOpt(opts map[string]any, key string) bool {
+	switch v := opts[key].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true" || v == "1"
+	}
+	return false
+}
+
+func findFirstTable(n *xhtml.Node) *xhtml.Node {
+	if n.Type == xhtml.ElementNode && n.DataAtom == atom.Table {
+		return n
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if t := findFirstTable(c); t != nil {
+			return t
+		}
+	}
+	return nil
+}
+
+func tableRows(table *xhtml.Node) [][]string {
+	var rows [][]string
+	for c := table.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type != xhtml.ElementNode {
+			continue
+		}
+		if c.DataAtom == atom.Tr {
+			rows = append(rows, rowCells(c))
+		}
+		if c.DataAtom == atom.Tbody || c.DataAtom == atom.Thead || c.DataAtom == atom.Tfoot {
+			for cc := c.FirstChild; cc != nil; cc = cc.NextSibling {
+				if cc.Type == xhtml.ElementNode && cc.DataAtom == atom.Tr {
+					rows = append(rows, rowCells(cc))
+				}
+			}
+		}
+	}
+	return rows
+}
+
+func rowCells(tr *xhtml.Node) []string {
+	var cells []string
+	for c := tr.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == xhtml.ElementNode && (c.DataAtom == atom.Td || c.DataAtom == atom.Th) {
+			cells = append(cells, strings.TrimSpace(nodeText(c)))
+		}
+	}
+	return cells
+}
+
+func nodeText(root *xhtml.Node) string {
+	var b strings.Builder
+	var walk func(*xhtml.Node)
+	walk = func(n *xhtml.Node) {
+		if n.Type == xhtml.TextNode {
+			b.WriteString(n.Data)
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(root)
+	return b.String()
 }

@@ -116,9 +116,71 @@ func (r *sqlRegistry) close() {
 
 func buildSQL(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 	t := newTable(L)
+	setGoFunc(L, t, "connect", func(l *lua.State) int {
+		path, err := sqlPath(mnt, tmp, argString(l, 1))
+		if err != nil {
+			panic(err)
+		}
+		c := newTable(L)
+		addSQLConn(L, c, reg, path)
+		return 1
+	})
+	setGoFunc(L, t, "import", func(l *lua.State) int {
+		path, err := sqlPath(mnt, tmp, argString(l, 1))
+		if err != nil {
+			panic(err)
+		}
+		db, err := reg.get(path)
+		if err != nil {
+			panic(err)
+		}
+		n, err := dataSQLImport(db, argString(l, 2), luaArrayAny(l, 3), toAnyMap(l, 4))
+		if err != nil {
+			panic(err)
+		}
+		pushAny(l, map[string]any{"imported": n})
+		return 1
+	})
+	setGoFunc(L, t, "export", func(l *lua.State) int {
+		path, err := sqlPath(mnt, tmp, argString(l, 1))
+		if err != nil {
+			panic(err)
+		}
+		conn, err := reg.conn(path)
+		if err != nil {
+			panic(err)
+		}
+		rows, err := dataSQLExport(conn, argString(l, 2))
+		if err != nil {
+			panic(err)
+		}
+		pushAny(l, rows)
+		return 1
+	})
+	return t
+}
+
+func addSQLConn(L *lua.State, t int, reg *sqlRegistry, bound string) {
+	getPath := func(l *lua.State) string {
+		return bound
+	}
+	req := func(l *lua.State) (string, string, []any) {
+		path := getPath(l)
+		query := argString(l, 1)
+		if query == "" {
+			panic(fmt.Errorf("consulta SQL vazia"))
+		}
+		var args []any
+		if l.Top() >= 2 && !l.IsNil(2) {
+			for _, v := range luaArrayAny(l, 2) {
+				args = append(args, v)
+			}
+		}
+		return path, query, args
+	}
 
 	setGoFunc(L, t, "exec", func(l *lua.State) int {
-		path, query, args := sqlReq(l, mnt, tmp)
+		path, query, args := req(l)
 		conn, err := reg.conn(path)
 		if err != nil {
 			panic(err)
@@ -132,9 +194,8 @@ func buildSQL(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 		pushAny(l, map[string]any{"lastId": id, "rows": n})
 		return 1
 	})
-
 	setGoFunc(L, t, "query", func(l *lua.State) int {
-		path, query, args := sqlReq(l, mnt, tmp)
+		path, query, args := req(l)
 		conn, err := reg.conn(path)
 		if err != nil {
 			panic(err)
@@ -146,9 +207,8 @@ func buildSQL(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 		pushAny(l, rows)
 		return 1
 	})
-
 	setGoFunc(L, t, "get", func(l *lua.State) int {
-		path, query, args := sqlReq(l, mnt, tmp)
+		path, query, args := req(l)
 		conn, err := reg.conn(path)
 		if err != nil {
 			panic(err)
@@ -173,9 +233,8 @@ func buildSQL(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 		pushAny(l, row)
 		return 1
 	})
-
 	setGoFunc(L, t, "scalar", func(l *lua.State) int {
-		path, query, args := sqlReq(l, mnt, tmp)
+		path, query, args := req(l)
 		conn, err := reg.conn(path)
 		if err != nil {
 			panic(err)
@@ -191,58 +250,33 @@ func buildSQL(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 		pushAny(l, sqlVal(v))
 		return 1
 	})
-
 	setGoFunc(L, t, "close", func(l *lua.State) int {
-		path, err := sqlPath(mnt, tmp, argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		l.PushBoolean(reg.closePath(path))
+		l.PushBoolean(reg.closePath(getPath(l)))
 		return 1
 	})
-
 	setGoFunc(L, t, "begin", func(l *lua.State) int {
-		path, err := sqlPath(mnt, tmp, argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		if err := reg.begin(path); err != nil {
+		if err := reg.begin(getPath(l)); err != nil {
 			panic(err)
 		}
 		l.PushBoolean(true)
 		return 1
 	})
-
 	setGoFunc(L, t, "commit", func(l *lua.State) int {
-		path, err := sqlPath(mnt, tmp, argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		if err := reg.commit(path); err != nil {
+		if err := reg.commit(getPath(l)); err != nil {
 			panic(err)
 		}
 		l.PushBoolean(true)
 		return 1
 	})
-
 	setGoFunc(L, t, "rollback", func(l *lua.State) int {
-		path, err := sqlPath(mnt, tmp, argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		if err := reg.rollback(path); err != nil {
+		if err := reg.rollback(getPath(l)); err != nil {
 			panic(err)
 		}
 		l.PushBoolean(true)
 		return 1
 	})
-
 	setGoFunc(L, t, "tables", func(l *lua.State) int {
-		path, err := sqlPath(mnt, tmp, argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		conn, err := reg.conn(path)
+		conn, err := reg.conn(getPath(l))
 		if err != nil {
 			panic(err)
 		}
@@ -261,17 +295,12 @@ func buildSQL(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 		pushAny(l, names)
 		return 1
 	})
-
 	setGoFunc(L, t, "columns", func(l *lua.State) int {
-		path, err := sqlPath(mnt, tmp, argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		tbl := argString(l, 2)
+		tbl := argString(l, 1)
 		if tbl == "" {
 			panic(fmt.Errorf("nome da tabela vazio"))
 		}
-		conn, err := reg.conn(path)
+		conn, err := reg.conn(getPath(l))
 		if err != nil {
 			panic(err)
 		}
@@ -282,13 +311,8 @@ func buildSQL(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 		pushAny(l, cleanColumns(rows))
 		return 1
 	})
-
 	setGoFunc(L, t, "schema", func(l *lua.State) int {
-		path, err := sqlPath(mnt, tmp, argString(l, 1))
-		if err != nil {
-			panic(err)
-		}
-		conn, err := reg.conn(path)
+		conn, err := reg.conn(getPath(l))
 		if err != nil {
 			panic(err)
 		}
@@ -314,8 +338,30 @@ func buildSQL(L *lua.State, reg *sqlRegistry, mnt, tmp *Store) int {
 		pushAny(l, map[string]any{"tables": names, "columns": cols})
 		return 1
 	})
-
-	return t
+	setGoFunc(L, t, "import", func(l *lua.State) int {
+		db, err := reg.get(getPath(l))
+		if err != nil {
+			panic(err)
+		}
+		n, err := dataSQLImport(db, argString(l, 1), luaArrayAny(l, 2), toAnyMap(l, 3))
+		if err != nil {
+			panic(err)
+		}
+		pushAny(l, map[string]any{"imported": n})
+		return 1
+	})
+	setGoFunc(L, t, "export", func(l *lua.State) int {
+		conn, err := reg.conn(getPath(l))
+		if err != nil {
+			panic(err)
+		}
+		rows, err := dataSQLExport(conn, argString(l, 1))
+		if err != nil {
+			panic(err)
+		}
+		pushAny(l, rows)
+		return 1
+	})
 }
 
 func cleanColumns(rows []any) []any {
@@ -335,24 +381,6 @@ func cleanColumns(rows []any) []any {
 
 func sqlQuote(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-}
-
-func sqlReq(l *lua.State, mnt, tmp *Store) (string, string, []any) {
-	path, err := sqlPath(mnt, tmp, argString(l, 1))
-	if err != nil {
-		panic(err)
-	}
-	query := argString(l, 2)
-	if query == "" {
-		panic(fmt.Errorf("consulta SQL vazia"))
-	}
-	var args []any
-	if l.Top() >= 3 && !l.IsNil(3) {
-		for _, v := range luaArrayAny(l, 3) {
-			args = append(args, v)
-		}
-	}
-	return path, query, args
 }
 
 func sqlPath(mnt, tmp *Store, p string) (string, error) {

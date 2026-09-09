@@ -18,13 +18,14 @@ type lunaMod struct {
 	Desc    string
 	Fns     []lunaFn
 	Example string
+	Body    string
 }
 
 var lunaOrder = []*lunaMod{
 	lunaResult, lunaLog, lunaArgs, lunaIO, lunaTmp, lunaFetch, lunaCookies,
 	lunaSecrets, lunaSQL, lunaUUID, lunaCSV, lunaXML, lunaExcel, lunaData,
 	lunaRegex, lunaJSON, lunaEncode, lunaStr, lunaList, lunaNum, lunaDate,
-	lunaRandom, lunaAssert, lunaFake, lunaTemplate,
+	lunaRandom, lunaAssert, lunaTemplate, lunaHuman,
 }
 
 var lunaModules = map[string]*lunaMod{}
@@ -62,6 +63,10 @@ func renderLunaIndex() string {
 
 func renderLunaModule(m *lunaMod) string {
 	var b strings.Builder
+	if m.Body != "" {
+		b.WriteString(strings.ReplaceAll(m.Body, "~~~", "```"))
+		return b.String()
+	}
 	fmt.Fprintf(&b, "# std.%s\n\n", m.Name)
 	b.WriteString("> ")
 	b.WriteString(m.Desc)
@@ -122,6 +127,217 @@ func lunaModule(name string) *lunaMod {
 	return lunaModules[name]
 }
 
+var lunaMetaPages = map[string]*lunaMod{
+	"meta":     lunaMeta,
+	"tools":    lunaTools,
+	"run":      lunaRun,
+	"examples": lunaExamples,
+	"limits":   lunaLimits,
+	"env":      lunaEnv,
+}
+
+func lunaMetaTopic(name string) *lunaMod {
+	return lunaMetaPages[name]
+}
+
+var lunaMeta = &lunaMod{
+	Name: "meta",
+	Desc: "script header and return convention",
+	Body: `# Script — header and return
+
+## Submitting code
+Pass **only the body** of ~main~ — do not write ~function main(std)~ or ~end~. When run with ~sandbox_run~ (code=...), the wrapper ~function main(std) ... end~ is added automatically.
+
+~~~lua
+-- body only
+local x = std.io.read("a.txt")
+std.result.ok({ n = #x })
+~~~
+
+## Return
+- ~std.result.ok(data)~ — success. ~data~ can be a string, number, boolean or table; objects/arrays become JSON.
+- ~std.result.err(msg)~ — error (~msg~ becomes the error message).
+- If ~result~ is not called, the value returned by ~main~ is used, and ~print()~/~std.log.*~ become the output section.
+
+## Example
+~~~lua
+if std.args == nil then
+  std.result.err("pass args")
+end
+std.result.ok({ received = std.args })
+~~~`,
+}
+
+var lunaTools = &lunaMod{
+	Name: "tools",
+	Desc: "the MCP tools exposed by the sandbox server",
+	Body: `# MCP tools
+
+| Tool | Action | What it does |
+| --- | --- | --- |
+| ~sandbox_run~ | run (default) | Run a script by ~path~ (host .lua file) or inline ~code~, with optional ~args~ (array/object → ~std.args~). Bare ~code~ is auto-wrapped in ~function main(std)~. |
+| ~sandbox_doc~ | topic | Return the ~std~ API documentation (optional ~topic~; e.g. ~run~, ~io~). |
+| ~sandbox_os~ | copy, mount, del, stat, list | Manage the sandbox filesystem: copy (host→sandbox), mount (sandbox→host), delete, stat or tree-list a sandbox path. |
+
+Scripts (via ~path~) live in the repo; ~std.tmp~ is for temporary data files.`,
+}
+
+var lunaRun = &lunaMod{
+	Name: "run",
+	Desc: "how to run scripts (inline code or path)",
+	Body: `# sandbox_run — 2 modos de executar scripts
+
+Executa um script Lua isolado (sem SO/processo; arquivos em ~mnt/~; rede via ~std.fetch~). Entre com **~path~** (arquivo .lua no host) ou **~code~** (inline).
+
+Todo script é uma função ~function main(std) ... end~. **Em todos os modos o script precisa declarar ~function main(std)~** e terminar com ~std.result.ok(...)~ ou ~std.result.err(...)~. No modo ~code~ inline, se você mandar só o corpo, o wrapper é adicionado automaticamente — mas os exemplos abaixo já trazem o wrapper completo.
+
+## Modo 1 — code (inline)
+Conteúdo do script:
+
+~~~lua
+function main(std)
+  local args = std.args or {}
+  print("Ola do sandbox!", #args)
+  std.result.ok({ ok = true, n = #args })
+end
+~~~
+
+Chamada:
+~~~jsonc
+{
+  "action": "run",
+  "code": "function main(std)\n  local args = std.args or {}\n  print(\\"Ola do sandbox!\\", #args)\n  std.result.ok({ ok = true, n = #args })\nend",
+  "args": [1, 2, 3]
+}
+~~~
+
+## Modo 2 — path (arquivo .lua no host)
+Crie o script no repositório (com ~function main(std)~):
+
+~~~lua
+-- scripts/relatorio.lua
+function main(std)
+  local mes = std.args and std.args.mes or "hoje"
+  std.result.ok({ relatorio = mes, lido = true })
+end
+~~~
+
+Chamada:
+~~~jsonc
+{
+  "action": "run",
+  "path": "scripts/relatorio.lua",
+  "args": { "mes": "2026-09" }
+}
+~~~
+
+## args → std.args
+O campo ~args~ vira ~std.args~ dentro do script. Array vira table indexada; objeto vira table com chaves; uma string que é JSON válido também é interpretada; caso contrário permanece string. Sem ~args~, ~std.args~ é ~nil~.
+
+~~~lua
+function main(std)
+  local nome = std.args and std.args.nome or "anon"
+  std.result.ok({ nome = nome, recebido = std.args })
+end
+~~~
+
+## Retorno
+- ~std.result.ok(data)~ — sucesso; o ~data~ vira o JSON de saída.
+- ~std.result.err(msg)~ — erro (~msg~ vira a mensagem).
+- Sem ~result~, o valor retornado por ~main~ é usado; ~print()~/~std.log.*~ viram a seção de output.`,
+}
+
+var lunaExamples = &lunaMod{
+	Name: "examples",
+	Desc: "cookbook of small examples",
+	Body: `# Examples (cookbook)
+
+## Read and aggregate a file
+~~~lua
+if std.io.exists("data.txt") then
+  local lines = std.io.lines("data.txt")
+  std.result.ok({ count = #lines, first = lines[1] })
+end
+~~~
+
+## Authenticated API call via secrets
+~~~lua
+if std.secrets.has("github_token_api") then
+  local token = std.secrets.get("github_token_api")
+  local res = std.fetch.json("https://api.github.com/user", {
+    headers = { Authorization = "Bearer " .. token },
+  })
+  std.result.ok({ ok = res.ok, login = res.data and res.data.login })
+end
+~~~
+
+## SQL round-trip
+~~~lua
+local sql = std.sql.connect("app.db")
+sql.exec("CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY, name TEXT)")
+sql.exec("INSERT INTO t (name) VALUES (?)", { "Ava" })
+local schema = sql.schema()
+local rows = sql.query("SELECT * FROM t")
+std.result.ok({ tables = schema.tables, rows = rows })
+~~~
+
+## CSV
+~~~lua
+local rows = std.csv.parse("name,age\nAva,30\nNoah,22")
+std.result.ok({ count = #rows, names = std.list.map(rows, function(r) return r[1] end) })
+~~~
+
+## Directory tree
+~~~lua
+local tree = std.io.walk("")
+std.result.ok({ root = tree.name, children = #(tree.children or {}) })
+~~~
+
+## XML
+~~~lua
+local doc = std.xml.parse('<people><person id="1">Ava</person></people>')
+local xml = std.xml.stringify({ name = "people", children = { { name = "person", attrs = { id = "2" }, text = "Noah" } } })
+std.result.ok({ first = doc.children[1].text, xml = xml })
+~~~
+
+## Excel
+~~~lua
+std.excel.write("tmp:out.xlsx", { { "nome", "idade" }, { "Ava", 30 } })
+local rows = std.data.from("excel", "tmp:out.xlsx")
+std.result.ok({ nomes = std.list.map(rows, function(r) return r.nome end) })
+~~~
+
+## Data pipeline (CSV → JSON → XLSX)
+~~~lua
+std.data.convert("tmp:dados.csv", "tmp:dados.json")
+std.data.convert("tmp:dados.json", "tmp:dados.xlsx")
+~~~`,
+}
+
+var lunaLimits = &lunaMod{
+	Name: "limits",
+	Desc: "execution and storage limits",
+	Body: `# Limits
+
+- Execution: up to 30s.
+- Output: 256 KiB (truncated).
+- Result: 256 KiB (truncated with ~... (truncado)~).
+- File: 2 MB per file; 1 MB per write.
+- Paths are confined to the sandbox (no absolute paths, no ~..~).
+- ~std.sql.query~ returns at most 10,000 rows (~SANDBOX_SQL_MAX_ROWS~).
+- Secrets (~SECRET_*~) are auto-masked in any output/return.`,
+}
+
+var lunaEnv = &lunaMod{
+	Name: "env",
+	Desc: "environment / secrets configuration",
+	Body: `# Environment
+
+Secrets are available via ~std.secrets.get~ using ~SECRET_*~ variables (e.g., ~SECRET_GITHUB_TOKEN_API~ → ~std.secrets.get("github_token_api")~).
+
+Other ~SANDBOX_*~ variables configure the sandbox (folders, limits, network) and are set by the operator — scripts don't need to read them.`,
+}
+
 var lunaResult = &lunaMod{
 	Name:   "result",
 	Prefix: "result",
@@ -137,7 +353,7 @@ std.result.ok({ total = n, ok = true })`,
 var lunaLog = &lunaMod{
 	Name:   "log",
 	Prefix: "log",
-	Desc:   "writes to the script's captured output (also `console.*` and `print()`)",
+	Desc:   "writes to the script's captured output (also `print()`)",
 	Fns: []lunaFn{
 		{"ok", "...", "nil", "logs a line (without breaking the result)"},
 		{"info", "...", "nil", "same as `ok`"},
@@ -177,6 +393,8 @@ var lunaIO = &lunaMod{
 		{"mkdir", "path:string", "true", "creates folder(s)"},
 		{"glob", "pattern:string", "table<string>", "matching relative paths"},
 		{"walk", "path?:string", "table", "{ name, isDir, size, lines, children }"},
+		{"zip", "dest:string, source:table|string", "table<string>", "creates a zip: array of paths (folders recursed), {name=content} or a single path; returns entry names"},
+		{"unzip", "src:string, dest:string", "table<string>", "extracts a zip into a folder; returns the extracted paths (rejects zip-slip)"},
 	},
 	Example: `if std.io.exists("data.txt") then
   std.io.append("data.txt", "\nfim")
@@ -206,12 +424,32 @@ var lunaFetch = &lunaMod{
 		{"get", "url:string, opts?:table", "table", "GET"},
 		{"post", "url:string, body?:string, opts?:table", "table", "POST"},
 		{"json", "url:string, opts?:table", "table", "GET and parses the body (res.data)"},
+		{"save", "url:string, path:string, opts?:table", "table", "GET and writes the body to a sandbox file; retries on 429/5xx (opts.retries, opts.backoffMs)"},
 	},
 	Example: `local res = std.fetch.get("http://localhost:8080/api", {
   headers = { Authorization = "Bearer " .. std.secrets.get("TOKEN") },
   timeout = 5000,
 })
 if res.ok then std.result.ok({ status = res.status, body = res.body }) end`,
+}
+
+var lunaHuman = &lunaMod{
+	Name:   "human",
+	Prefix: "human",
+	Desc:   "humanizes numbers: bytes, durations, compact counts, currency, ordinals, plurals and lists (pt-BR)",
+	Fns: []lunaFn{
+		{"bytes", "n:number", "string", "bytes: `123 B`, `1,2 MB`, `3 GB`"},
+		{"duration", "ms:number", "string", "milliseconds: `5 min`, `1 h 30 min`, `3,5 s`"},
+		{"compact", "n:number", "string", "large numbers: `999`, `1,2 mil`, `3,4 mi`, `5 bi`"},
+		{"money", "n:number, cur?:string", "string", "currency (default `R$`): `R$ 1.234,56`"},
+		{"ordinal", "n:number", "string", "ordinal: `1º`, `12º`"},
+		{"plural", "n:number, one:string, many:string", "string", "plural: `human.plural(2, 'item', 'itens')`"},
+		{"list", "items:table", "string", "list: `a, b e c`"},
+	},
+	Example: `local b = std.human.bytes(1.2 * 1024 * 1024)
+local d = std.human.duration(300000)
+local m = std.human.money(1234.56)
+std.result.ok({ b = b, d = d, m = m })`,
 }
 
 var lunaCookies = &lunaMod{
@@ -244,33 +482,27 @@ end`,
 var lunaSQL = &lunaMod{
 	Name:   "sql",
 	Prefix: "sql",
-	Desc:   "SQLite databases in the sandbox — the same path reuses its connection during the run; `tmp:` for temp; `:memory:` for in-memory",
+	Desc:   "SQLite in the sandbox — `connect(path)` returns a bound handle; module-level `import`/`export` take the path. The handle exposes exec/query/get/scalar/close/begin/commit/rollback/tables/columns/schema/import/export (all without the path)",
 	Fns: []lunaFn{
-		{"exec", "path:string, sql:string, params?:table", "table", "{ lastId, rows } — executes and returns affected rows"},
-		{"query", "path:string, sql:string, params?:table", "table<row>", "rows as maps (max SANDBOX_SQL_MAX_ROWS)"},
-		{"get", "path:string, sql:string, params?:table", "row|nil", "first row or nil"},
-		{"scalar", "path:string, sql:string, params?:table", "any", "first column of the first row"},
-		{"close", "path:string", "bool", "closes the connection before the run ends"},
-		{"begin", "path:string", "true", "begins a transaction"},
-		{"commit", "path:string", "true", "commits"},
-		{"rollback", "path:string", "true", "rolls back"},
-		{"tables", "path:string", "table<string>", "table names"},
-		{"columns", "path:string, table:string", "table", "{ name, type, notnull, pk, dflt }"},
-		{"schema", "path:string", "table", "{ tables, columns = { [table] = {...} } }"},
+		{"connect", "path:string", "object", "returns a bound handle with all query methods (no `path` arg)"},
+		{"import", "path:string, table:string, rows:table<map>, opts?:table", "table", "{ imported } — bulk inserts rows; opts.create=true creates the table"},
+		{"export", "path:string, sql:string", "table<row>", "query → rows as maps"},
 	},
-	Example: `std.sql.exec("app.db", "CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY, name TEXT)")
-std.sql.exec("app.db", "INSERT INTO t (name) VALUES (?)", { "Ava" })
-local r = std.sql.query("app.db", "SELECT * FROM t")
+	Example: `local sql = std.sql.connect("app.db")
+sql.exec("CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY, name TEXT)")
+sql.exec("INSERT INTO t (name) VALUES (?)", { "Ava" })
+local r = sql.query("SELECT * FROM t")
 std.result.ok({ total = #r, first = r[1] and r[1].name })`,
 }
 
 var lunaUUID = &lunaMod{
 	Name:   "uuid",
 	Prefix: "uuid",
-	Desc:   "UUID generation",
+	Desc:   "UUID generation and validation",
 	Fns: []lunaFn{
 		{"v4", "-", "string", "random UUID (RFC 4122)"},
 		{"v7", "-", "string", "time-ordered UUID (RFC 9562)"},
+		{"valid", "s:string, version?:number", "bool", "is a valid UUID; optional version check (4/7)"},
 	},
 	Example: `std.result.ok({ id = std.uuid.v4(), ordered = std.uuid.v7() })`,
 }
@@ -307,7 +539,7 @@ var lunaExcel = &lunaMod{
 	Fns: []lunaFn{
 		{"sheets", "path:string", "table<string>", "sheet names"},
 		{"read", "path:string, sheet?:string", "rows", "rows (array of arrays); uses the first sheet if omitted"},
-		{"write", "path:string, rows:table, sheet?:string", "true", "writes the spreadsheet"},
+		{"write", "path:string, rows:table, sheet?:string, opts?:table", "true", "writes the spreadsheet; color opts (header/row/alt/zebra)"},
 	},
 	Example: `local sheets = std.excel.sheets("dados.xlsx")
 local rows = std.excel.read("dados.xlsx", sheets[1])
@@ -317,27 +549,15 @@ std.result.ok({ total = #rows, first = rows[1] })`,
 var lunaData = &lunaMod{
 	Name:   "data",
 	Prefix: "data",
-	Desc:   "data pipeline (sqlize-style): moves between CSV/JSON/XML/Excel/SQLite/SQL (rows = array of maps)",
+	Desc:   "data pipeline (sqlize-style): moves between CSV/JSON/XML/HTML/Excel/SQLite/SQL (rows = array of maps)",
 	Fns: []lunaFn{
-		{"fromCSV", "s:string, sep?:string", "rows", "CSV → rows"},
-		{"toCSV", "rows:table, sep?:string", "string", "rows → CSV"},
-		{"fromJSON", "s:string", "any", "JSON → value"},
-		{"toJSON", "v:any", "string", "value → JSON"},
-		{"toXML", "rows:table, root?:string, row?:string", "string", "rows → XML"},
-		{"fromXML", "s:string, row?:string", "rows", "XML → rows"},
-		{"fromJSONL", "s:string", "rows", "NDJSON/JSONL → rows (one JSON object per line)"},
-		{"toJSONL", "rows:table", "string", "rows → NDJSON/JSONL (one compact JSON per line)"},
-		{"fromExcel", "path:string, sheet?:string", "rows", "spreadsheet → rows"},
-		{"toExcel", "rows:table, path:string, sheet?:string", "true", "rows → spreadsheet"},
-		{"sqlImport", "db:string, table:string, rows:table, opts?:table", "table", "{ imported } — optional opts.create=true"},
-		{"sqlExport", "db:string, query:string", "rows", "query → rows"},
-		{"convert", "src:string, dst:string", "true", "converts by extension"},
-		{"toSql", "rows:table, table?:string", "string", "rows → SQL (CREATE + INSERT)"},
-		{"fromSql", "s:string", "rows", "SQL → rows (reads the toSql format)"},
+		{"from", "fmt:string, s:string, opts?:string", "any", "parse by format: csv, json, jsonl/ndjson, xml, html, sql (text) or excel/xlsx/xls (file path); opts = sep / root / sheet"},
+		{"to", "fmt:string, v:any, opts?:string", "string", "serialize by format: csv, json, jsonl/ndjson, xml, html, sql (returns text); excel writes to a file (opts = path + sheet); color opts (header/row/alt/zebra)"},
+		{"convert", "src:string, dst:string, opts?:table", "true", "converts by extension (opts = colors)"},
 	},
-	Example: `local rows = std.data.fromCSV("nome,idade\nAva,30")
-std.data.sqlImport("app.db", "pessoas", rows, { create = true })
-std.result.ok({ total = #std.data.sqlExport("app.db", "SELECT * FROM pessoas") })`,
+	Example: `local rows = std.data.from("csv", "nome,idade\nAva,30")
+std.sql.import("app.db", "pessoas", rows, { create = true })
+std.result.ok({ total = #std.sql.export("app.db", "SELECT * FROM pessoas") })`,
 }
 
 var lunaRegex = &lunaMod{
@@ -364,7 +584,7 @@ var lunaJSON = &lunaMod{
 	Fns: []lunaFn{
 		{"parse", "s:string", "any", "JSON → value"},
 		{"stringify", "v:any, indent?:number", "string", "value → JSON"},
-		{"format", "v:any", "string", "indented JSON"},
+		{"format", "v:any, opts?:table", "string", "pretty JSON; opts = { indent?, nested?, max? } — `nested` parseia strings que são JSON, `max` trunca o resultado"},
 		{"minify", "s:string", "string", "JSON without spaces"},
 		{"path", "v:any, path:string", "any", "accesses a dot path, e.g. `a.1`"},
 	},
@@ -377,10 +597,11 @@ var lunaEncode = &lunaMod{
 	Prefix: "encode",
 	Desc:   "hashes and encodings",
 	Fns: []lunaFn{
-		{"crc32", "s:string", "hex", "CRC-32"},
+		{"crc32", "s:string", "hex", "CRC-32 (checksum)"},
 		{"md5", "s:string", "hex", "MD5"},
 		{"sha256", "s:string", "hex", "SHA-256"},
 		{"base64", "s:string, mode?:string", "string", "encode/decode/url-safe"},
+		{"base32", "s:string, mode?:string", "string", "encode/decode/hex/nopad"},
 		{"hex", "s:string, mode?:string", "string", "encode/decode"},
 	},
 	Example: `std.result.ok({
@@ -478,15 +699,24 @@ std.result.ok({ iso = std.date.iso(later) })`,
 var lunaRandom = &lunaMod{
 	Name:   "random",
 	Prefix: "random",
-	Desc:   "random numbers/picks (seeded)",
+	Desc:   "random values (seeded) — numbers, picks and generated data (names/emails/sentences)",
 	Fns: []lunaFn{
 		{"seed", "n:number", "nil", "sets the seed (deterministic)"},
 		{"int", "min:number, max:number", "number", "inclusive integer"},
+		{"float", "min:number, max:number, dec?:number", "number", "decimal"},
 		{"pick", "arr:table", "any", "random element"},
 		{"shuffle", "arr:table", "table", "shuffled copy"},
+		{"bool", "-", "bool", "random boolean"},
+		{"name", "-", "string", "randomly generated full name"},
+		{"email", "-", "string", "random email"},
+		{"username", "-", "string", "random username"},
+		{"phone", "-", "string", "phone"},
+		{"date", "from?:string, to?:string", "string", "RFC3339 date"},
+		{"sentence", "n?:number", "string", "n random sentences (default 1)"},
+		{"paragraph", "n?:number", "string", "n random sentences (default 3)"},
 	},
-	Example: `std.random.seed(123)
-std.result.ok({ n = std.random.int(1, 6), s = std.random.shuffle({ "a", "b", "c" }) })`,
+	Example: `std.random.seed(42)
+std.result.ok({ n = std.random.int(1, 100), nome = std.random.name() })`,
 }
 
 var lunaAssert = &lunaMod{
@@ -498,7 +728,6 @@ var lunaAssert = &lunaMod{
 		{"equal", "a:any, b:any", "nil", "fails if not deep-equal"},
 		{"throws", "fn:function", "nil", "fails if `fn` does not raise"},
 		{"type", "v:any, kind:string", "nil", "fails if the type is not the given one"},
-		{"notNil", "v:any, msg?:string", "nil", "fails if `v` is nil"},
 		{"number", "v:any, msg?:string", "nil", "fails if not a number"},
 		{"string", "v:any, msg?:string", "nil", "fails if not a string"},
 		{"boolean", "v:any, msg?:string", "nil", "fails if not a boolean"},
@@ -513,43 +742,21 @@ std.assert.matches("abc123", "[0-9]+")
 std.result.ok({ ok = true })`,
 }
 
-var lunaFake = &lunaMod{
-	Name:   "fake",
-	Prefix: "fake",
-	Desc:   "fake data (Faker-style) with deterministic seed",
-	Fns: []lunaFn{
-		{"seed", "n:number", "nil", "sets the seed"},
-		{"name", "-", "string", "full name"},
-		{"firstName", "-", "string", "first name"},
-		{"lastName", "-", "string", "last name"},
-		{"email", "-", "string", "email"},
-		{"username", "-", "string", "username"},
-		{"phone", "-", "string", "phone"},
-		{"int", "min:number, max:number", "number", "integer"},
-		{"float", "min:number, max:number, dec?:number", "number", "decimal"},
-		{"bool", "-", "bool", "boolean"},
-		{"uuid", "-", "string", "UUID v4"},
-		{"date", "from?:string, to?:string", "string", "RFC3339 date"},
-		{"words", "n?:number", "string", "words"},
-		{"sentence", "n?:number", "string", "sentence"},
-		{"paragraph", "n?:number", "string", "paragraph"},
-	},
-	Example: `std.fake.seed(42)
-std.result.ok({ nome = std.fake.name(), email = std.fake.email(), n = std.fake.int(1, 100) })`,
-}
+
 
 var lunaTemplate = &lunaMod{
 	Name:   "template",
 	Prefix: "template",
-	Desc:   "render text with placeholders — `{name}` or `{{name}}` (dot-path supported)",
+	Desc:   "render text with placeholders and inline blocks — `{name}`/`{{name}}`, `{{#if}}`, `{{#unless}}`, `{{#each}}`, `{{else}}` (dot-path, `{{this}}`, `{{@index}}`)",
 	Fns: []lunaFn{
-		{"render", "str:string, vars:table", "string", "replaces placeholders with vars (missing → empty)"},
-		{"compile", "str:string", "function", "pre-compiles into a reusable render(vars) function"},
-		{"loop", "fragment:string, items:table, vars?:table", "string", "renders the fragment once per item, concatenating"},
-		{"cond", "cond:any, thenStr:string, elseStr?:string, vars?:table", "string", "renders thenStr if cond truthy, else elseStr"},
+		{"render", "str:string, vars:table", "string", "replaces placeholders; supports blocks `#if`/`#unless`/`#each`/`else` (missing → empty)"},
 	},
-	Example: `std.result.ok({
-  saud = std.template.render("Olá {nome}, {idade} anos", { nome = "Ava", idade = 30 }),
-  lista = std.template.loop("<li>{nome}</li>", { { nome = "A" }, { nome = "B" } }),
-})`,
+	Example: `local t = [[
+<ul>
+{{#each itens}}<li>{{@index}}: {{nome}}{{#if ativo}} (ativo){{else}} (inativo){{/if}}</li>{{/each}}
+</ul>
+]]
+std.result.ok({ html = std.template.render(t, {
+  itens = { { nome = "Ava", ativo = true }, { nome = "Noah", ativo = false } },
+}) })`,
 }

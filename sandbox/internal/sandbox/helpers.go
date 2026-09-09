@@ -1,7 +1,6 @@
 package sandbox
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -44,28 +43,21 @@ func renderData(v any) (string, bool) {
 	}
 	switch exp := v.(type) {
 	case string:
-		if pretty, ok := prettyJSON(exp); ok {
-			return pretty, true
+		var parsed any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(exp)), &parsed); err == nil {
+			if b, err := json.MarshalIndent(parseNestedJSON(parsed), "", "  "); err == nil {
+				return string(b), true
+			}
 		}
 		return exp, false
 	case map[string]any, []any:
-		if b, err := json.MarshalIndent(exp, "", "  "); err == nil {
+		if b, err := json.MarshalIndent(parseNestedJSON(v), "", "  "); err == nil {
 			return string(b), true
 		}
-		return fmt.Sprint(exp), false
+		return fmt.Sprint(v), false
 	default:
-		return fmt.Sprint(exp), false
+		return fmt.Sprint(v), false
 	}
 }
 
-func prettyJSON(s string) (string, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" || (s[0] != '{' && s[0] != '[') {
-		return "", false
-	}
-	var buf bytes.Buffer
-	if err := json.Indent(&buf, []byte(s), "", "  "); err != nil {
-		return "", false
-	}
-	return buf.String(), true
-}
+

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	lua "github.com/Shopify/go-lua"
 )
@@ -12,6 +13,7 @@ import (
 const (
 	maxTimeout          = 30 * time.Second
 	maxOutputBytes      = 256 * 1024
+	maxResultBytes      = 256 * 1024
 	maxScriptConcurrent = 4
 )
 
@@ -178,7 +180,22 @@ func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, e
 	} else if !L.IsNil(ret) {
 		result.Data, result.DataJSON = renderData(secrets.RedactValue(luaToAny(L, ret)))
 	}
+	if len(result.Data) > maxResultBytes {
+		result.Data = safeTruncate(result.Data, maxResultBytes) + "\n... (truncado)"
+		result.Truncated = true
+	}
 	return result, nil
+}
+
+func safeTruncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	end := max
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end]
 }
 
 func hardenLua(l *lua.State) {
@@ -261,7 +278,7 @@ func buildStd(L *lua.State, store, tmp *Store, reg *sqlRegistry, args string, wr
 	setModule("encode", func() int { return buildEncode(L) })
 	setModule("json", func() int { return buildJson(L) })
 	setModule("assert", func() int { return buildAssert(L) })
-	setModule("fetch", func() int { return buildFetch(L) })
+	setModule("fetch", func() int { return buildFetch(L, store) })
 	setModule("secrets", func() int { return buildSecrets(L, secrets) })
 	setModule("sql", func() int { return buildSQL(L, reg, store, tmp) })
 	setModule("uuid", func() int { return buildUUID(L) })
@@ -270,11 +287,8 @@ func buildStd(L *lua.State, store, tmp *Store, reg *sqlRegistry, args string, wr
 	setModule("excel", func() int { return buildExcel(L, store, tmp) })
 	setModule("data", func() int { return buildData(L, reg, store, tmp) })
 	setModule("regex", func() int { return buildRegex(L) })
-	setModule("fake", func() int { return buildFake(L) })
 	setModule("template", func() int { return buildTemplate(L) })
-
-	buildLog(L, writeOut)
-	L.SetGlobal("console")
+	setModule("human", func() int { return buildHuman(L) })
 }
 
 func buildLog(L *lua.State, writeOut func(string)) int {

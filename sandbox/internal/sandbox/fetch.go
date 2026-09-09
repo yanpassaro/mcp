@@ -91,7 +91,7 @@ func (c *fetchConfig) allowHost(authority string) bool {
 	return false
 }
 
-func buildFetch(L *lua.State) int {
+func buildFetch(L *lua.State, store *Store) int {
 	cfg := defaultFetchConfig()
 	t := newTable(L)
 
@@ -162,10 +162,89 @@ func buildFetch(L *lua.State) int {
 		return 1
 	})
 	setFieldValue(L, t, "cookies")
+
+	setGoFunc(L, t, "save", func(l *lua.State) int {
+		url := argString(l, 1)
+		path := argString(l, 2)
+		if strings.TrimSpace(path) == "" {
+			panic("informe o caminho do arquivo de destino")
+		}
+		meta, err := fetchSave(&cfg, store, url, path, toAnyMap(l, 3))
+		if err != nil {
+			panic(err)
+		}
+		pushAny(l, meta)
+		return 1
+	})
 	return t
 }
 
 func doFetch(cfg *fetchConfig, urlStr string, opts map[string]any) (map[string]any, error) {
+	body, meta, err := fetchAttempts(cfg, urlStr, opts, cfg.maxBody)
+	if err != nil {
+		return nil, err
+	}
+	meta["body"] = string(body)
+	meta["bytes"] = len(body)
+	return meta, nil
+}
+
+func fetchSave(cfg *fetchConfig, store *Store, urlStr, path string, opts map[string]any) (map[string]any, error) {
+	body, meta, err := fetchAttempts(cfg, urlStr, opts, maxFileBytes)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := store.WriteBytes(path, body); err != nil {
+		return nil, err
+	}
+	meta["bytes"] = len(body)
+	meta["path"] = path
+	return meta, nil
+}
+
+func fetchAttempts(cfg *fetchConfig, urlStr string, opts map[string]any, limit int64) ([]byte, map[string]any, error) {
+	retries := 0
+	if d, ok := numOpt(opts["retries"]); ok && d > 0 {
+		retries = int(d)
+	}
+	backoff := 250 * time.Millisecond
+	if d, ok := numOpt(opts["backoffMs"]); ok && d >= 0 {
+		backoff = time.Duration(d) * time.Millisecond
+	}
+	var lastErr error
+	var lastMeta map[string]any
+	var lastBody []byte
+	for attempt := 0; attempt <= retries; attempt++ {
+		body, meta, err := doAttempt(cfg, urlStr, opts, limit)
+		if err != nil {
+			lastErr = err
+			lastMeta = nil
+		}
+		if err == nil {
+			lastMeta = meta
+			lastBody = body
+			okFlag, _ := meta["ok"].(bool)
+			status, _ := meta["status"].(int)
+			if okFlag || !isRetryableStatus(status) {
+				return body, meta, nil
+			}
+			lastErr = fmt.Errorf("status %d", status)
+		}
+		if attempt < retries {
+			time.Sleep(backoff * time.Duration(1<<attempt))
+		}
+	}
+	if lastMeta != nil {
+		return lastBody, lastMeta, nil
+	}
+	return nil, nil, lastErr
+}
+
+func isRetryableStatus(status int) bool {
+	return status == 429 || (status >= 500 && status < 600)
+}
+
+func doAttempt(cfg *fetchConfig, urlStr string, opts map[string]any, limit int64) ([]byte, map[string]any, error) {
 	method, _ := opts["method"].(string)
 	method = strings.ToUpper(strings.TrimSpace(method))
 	if method == "" {
@@ -174,16 +253,16 @@ func doFetch(cfg *fetchConfig, urlStr string, opts map[string]any) (map[string]a
 
 	u, err := url.Parse(strings.TrimSpace(urlStr))
 	if err != nil {
-		return nil, fmt.Errorf("URL inválida: %w", err)
+		return nil, nil, fmt.Errorf("URL inválida: %w", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("apenas http/https são permitidos (recebi %q)", u.Scheme)
+		return nil, nil, fmt.Errorf("apenas http/https são permitidos (recebi %q)", u.Scheme)
 	}
 	if u.Host == "" {
-		return nil, errors.New("URL sem host")
+		return nil, nil, errors.New("URL sem host")
 	}
 	if !cfg.allowHost(u.Host) {
-		return nil, fmt.Errorf("host %q não está na allowlist (SANDBOX_FETCH_ALLOW_HOST: %s)", u.Host, strings.Join(cfg.allow, ", "))
+		return nil, nil, fmt.Errorf("host %q não está na allowlist (SANDBOX_FETCH_ALLOW_HOST: %s)", u.Host, strings.Join(cfg.allow, ", "))
 	}
 
 	timeout := cfg.timeout
@@ -203,7 +282,7 @@ func doFetch(cfg *fetchConfig, urlStr string, opts map[string]any) (map[string]a
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), rd)
 	if err != nil {
-		return nil, fmt.Errorf("montar requisição: %w", err)
+		return nil, nil, fmt.Errorf("montar requisição: %w", err)
 	}
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", "NTDSK-SANDBOX/1.0")
@@ -238,16 +317,15 @@ func doFetch(cfg *fetchConfig, urlStr string, opts map[string]any) (map[string]a
 		Transport: &http.Transport{Proxy: nil},
 	}
 	follow, _ := opts["followRedirects"].(bool)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	if follow {
 		client.CheckRedirect = nil
-	} else {
-		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	}
 
 	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 
@@ -257,25 +335,24 @@ func doFetch(cfg *fetchConfig, urlStr string, opts map[string]any) (map[string]a
 		}
 	}
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, cfg.maxBody+1))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	trunc := int64(len(raw)) > cfg.maxBody
+	trunc := int64(len(raw)) > limit
 	if trunc {
-		raw = raw[:cfg.maxBody]
+		raw = raw[:limit]
 	}
 
 	hdr := map[string]any{}
 	for k, vv := range resp.Header {
 		hdr[k] = strings.Join(vv, ", ")
 	}
-	return map[string]any{
+	return raw, map[string]any{
 		"status":     resp.StatusCode,
 		"statusText": resp.Status,
 		"ok":         resp.StatusCode >= 200 && resp.StatusCode < 300,
 		"headers":    hdr,
-		"body":       string(raw),
 		"truncated":  trunc,
 		"bytes":      len(raw),
 		"ms":         time.Since(start).Milliseconds(),

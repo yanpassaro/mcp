@@ -10,112 +10,193 @@ import (
 	lua "github.com/Shopify/go-lua"
 )
 
-type tmplPart struct {
-	text  string
-	path  string
-	isVar bool
+const (
+	tokText = iota
+	tokVar
+	tokIf
+	tokEach
+	tokUnless
+	tokElse
+	tokEnd
+)
+
+type tmplTok struct {
+	kind int
+	text string
+	path string
+}
+
+type tmplNode struct {
+	kind int
+	text string
+	path string
+	then []*tmplNode
+	els  []*tmplNode
 }
 
 func buildTemplate(L *lua.State) int {
 	t := newTable(L)
-
 	setGoFunc(L, t, "render", func(l *lua.State) int {
-		parts := compileTemplate(argString(l, 1))
-		l.PushString(renderTemplate(parts, toAnyMap(l, 2)))
+		l.PushString(renderTemplate(argString(l, 1), toAnyMap(l, 2)))
 		return 1
 	})
-
-	setGoFunc(L, t, "compile", func(l *lua.State) int {
-		parts := compileTemplate(argString(l, 1))
-		l.PushGoFunction(func(l *lua.State) int {
-			l.PushString(renderTemplate(parts, toAnyMap(l, 1)))
-			return 1
-		})
-		return 1
-	})
-
-	setGoFunc(L, t, "loop", func(l *lua.State) int {
-		frag := argString(l, 1)
-		items := luaArrayAny(l, 2)
-		base := toAnyMap(l, 3)
-		parts := compileTemplate(frag)
-		var b strings.Builder
-		for _, item := range items {
-			m := mergeMap(base, asMap(item))
-			b.WriteString(renderTemplate(parts, m))
-		}
-		l.PushString(b.String())
-		return 1
-	})
-
-	setGoFunc(L, t, "cond", func(l *lua.State) int {
-		truthy := l.ToValue(1) != nil && l.ToValue(1) != false
-		vars := toAnyMap(l, 4)
-		if truthy {
-			l.PushString(renderTemplate(compileTemplate(argString(l, 2)), vars))
-		} else {
-			elseStr := ""
-			if l.Top() >= 3 {
-				elseStr = argString(l, 3)
-			}
-			l.PushString(renderTemplate(compileTemplate(elseStr), vars))
-		}
-		return 1
-	})
-
 	return t
 }
 
-func compileTemplate(s string) []tmplPart {
-	var parts []tmplPart
+func renderTemplate(s string, vars map[string]any) string {
+	return renderNodes(parseTemplate(tokenizeTemplate(s)), vars)
+}
+
+func tokenizeTemplate(s string) []tmplTok {
+	var toks []tmplTok
 	var lit strings.Builder
 	flush := func() {
 		if lit.Len() > 0 {
-			parts = append(parts, tmplPart{text: lit.String()})
+			toks = append(toks, tmplTok{kind: tokText, text: lit.String()})
 			lit.Reset()
 		}
 	}
-	for i := 0; i < len(s); {
-		if s[i] == '{' {
-			if i+1 < len(s) && s[i+1] == '{' {
-				if end := strings.Index(s[i+2:], "}}"); end >= 0 {
-					key := strings.TrimSpace(s[i+2 : i+2+end])
-					if key != "" {
-						flush()
-						parts = append(parts, tmplPart{path: key, isVar: true})
-						i += 2 + end + 2
-						continue
-					}
-				}
-			} else if end := strings.Index(s[i+1:], "}"); end >= 0 {
-				key := strings.TrimSpace(s[i+1 : i+1+end])
-				if key != "" {
-					flush()
-					parts = append(parts, tmplPart{path: key, isVar: true})
-					i += 1 + end + 1
-					continue
-				}
+	addBlock := func(inner string) {
+		inner = strings.TrimSpace(inner)
+		switch {
+		case inner == "else":
+			toks = append(toks, tmplTok{kind: tokElse})
+		case strings.HasPrefix(inner, "/"):
+			toks = append(toks, tmplTok{kind: tokEnd, text: strings.TrimSpace(inner[1:])})
+		case strings.HasPrefix(inner, "#each"):
+			toks = append(toks, tmplTok{kind: tokEach, path: strings.TrimSpace(strings.TrimPrefix(inner, "#each"))})
+		case strings.HasPrefix(inner, "#if"):
+			toks = append(toks, tmplTok{kind: tokIf, path: strings.TrimSpace(strings.TrimPrefix(inner, "#if"))})
+		case strings.HasPrefix(inner, "#unless"):
+			toks = append(toks, tmplTok{kind: tokUnless, path: strings.TrimSpace(strings.TrimPrefix(inner, "#unless"))})
+		case inner != "":
+			toks = append(toks, tmplTok{kind: tokVar, path: inner})
+		}
+	}
+	i := 0
+	for i < len(s) {
+		if s[i] == '{' && i+1 < len(s) && s[i+1] == '{' {
+			if end := strings.Index(s[i+2:], "}}"); end >= 0 {
+				flush()
+				addBlock(s[i+2 : i+2+end])
+				i += 2 + end + 2
+				continue
+			}
+		} else if s[i] == '{' {
+			if end := strings.Index(s[i+1:], "}"); end >= 0 {
+				flush()
+				addBlock(s[i+1 : i+1+end])
+				i += 1 + end + 1
+				continue
 			}
 		}
 		lit.WriteByte(s[i])
 		i++
 	}
 	flush()
-	return parts
+	return toks
 }
 
-func renderTemplate(parts []tmplPart, vars map[string]any) string {
-	var b strings.Builder
-	for _, p := range parts {
-		if !p.isVar {
-			b.WriteString(p.text)
-			continue
+func parseTemplate(toks []tmplTok) []*tmplNode {
+	root := []*tmplNode{}
+	type open struct {
+		node   *tmplNode
+		branch int
+	}
+	stack := []open{}
+	cur := &root
+	for _, tok := range toks {
+		switch tok.kind {
+		case tokText:
+			*cur = append(*cur, &tmplNode{kind: tokText, text: tok.text})
+		case tokVar:
+			*cur = append(*cur, &tmplNode{kind: tokVar, path: tok.path})
+		case tokIf, tokEach, tokUnless:
+			n := &tmplNode{kind: tok.kind, path: tok.path}
+			*cur = append(*cur, n)
+			stack = append(stack, open{node: n, branch: 0})
+			cur = &n.then
+		case tokElse:
+			if len(stack) > 0 {
+				top := &stack[len(stack)-1]
+				top.branch = 1
+				cur = &top.node.els
+			}
+		case tokEnd:
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+			if len(stack) == 0 {
+				cur = &root
+			} else {
+				top := stack[len(stack)-1]
+				if top.branch == 0 {
+					cur = &top.node.then
+				} else {
+					cur = &top.node.els
+				}
+			}
 		}
-		if v, ok := jsonPath(vars, p.path); ok {
-			b.WriteString(tmplText(v))
+	}
+	return root
+}
+
+func renderNodes(nodes []*tmplNode, ctx map[string]any) string {
+	var b strings.Builder
+	for _, n := range nodes {
+		switch n.kind {
+		case tokText:
+			b.WriteString(n.text)
+		case tokVar:
+			if v, ok := jsonPath(ctx, n.path); ok {
+				b.WriteString(tmplText(v))
+			}
+		case tokIf:
+			if v, ok := jsonPath(ctx, n.path); ok && truthyVal(v) {
+				b.WriteString(renderNodes(n.then, ctx))
+			} else {
+				b.WriteString(renderNodes(n.els, ctx))
+			}
+		case tokUnless:
+			if v, ok := jsonPath(ctx, n.path); !ok || !truthyVal(v) {
+				b.WriteString(renderNodes(n.then, ctx))
+			} else {
+				b.WriteString(renderNodes(n.els, ctx))
+			}
+		case tokEach:
+			v, ok := jsonPath(ctx, n.path)
+			arr, isArr := v.([]any)
+			if ok && isArr && len(arr) > 0 {
+				for i, item := range arr {
+					m := map[string]any{}
+					for k, v := range ctx {
+						m[k] = v
+					}
+					if im, ok := item.(map[string]any); ok {
+						for k, v := range im {
+							m[k] = v
+						}
+					}
+					m["this"] = item
+					m["@index"] = float64(i)
+					b.WriteString(renderNodes(n.then, m))
+				}
+			} else {
+				b.WriteString(renderNodes(n.els, ctx))
+			}
 		}
 	}
 	return b.String()
+}
+
+func truthyVal(v any) bool {
+	if v == nil {
+		return false
+	}
+	if b, ok := v.(bool); ok {
+		return b
+	}
+	return true
 }
 
 func tmplText(v any) string {
@@ -140,22 +221,4 @@ func tmplText(v any) string {
 		}
 	}
 	return fmt.Sprint(v)
-}
-
-func mergeMap(base, over map[string]any) map[string]any {
-	m := make(map[string]any, len(base)+len(over))
-	for k, v := range base {
-		m[k] = v
-	}
-	for k, v := range over {
-		m[k] = v
-	}
-	return m
-}
-
-func asMap(v any) map[string]any {
-	if m, ok := v.(map[string]any); ok {
-		return m
-	}
-	return map[string]any{}
 }

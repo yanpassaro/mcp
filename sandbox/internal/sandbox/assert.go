@@ -41,12 +41,6 @@ func buildAssert(L *lua.State) int {
 		}
 		return 0
 	})
-	setGoFunc(L, t, "notNil", func(l *lua.State) int {
-		if l.IsNil(1) {
-			panic(fmt.Errorf("assert.notNil falhou: %s", argStr(l, 2, "valor nil")))
-		}
-		return 0
-	})
 	setGoFunc(L, t, "number", func(l *lua.State) int {
 		if !l.IsNumber(1) {
 			panic(fmt.Errorf("assert.number falhou: %s", argStr(l, 2, "esperado number")))

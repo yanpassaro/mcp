@@ -36,11 +36,30 @@ func buildJson(L *lua.State) int {
 		return 1
 	})
 	setGoFunc(L, t, "format", func(l *lua.State) int {
-		b, err := json.MarshalIndent(luaToAny(l, 1), "", "  ")
+		val := luaToAny(l, 1)
+		if str, ok := val.(string); ok {
+			var parsed any
+			if err := json.Unmarshal([]byte(strings.TrimSpace(str)), &parsed); err == nil {
+				val = parsed
+			}
+		}
+		opts := toAnyMap(l, 2)
+		indent := 2
+		if d, ok := numOpt(opts["indent"]); ok && d > 0 {
+			indent = int(d)
+		}
+		if truthyOpt(opts, "nested") {
+			val = parseNestedJSON(val)
+		}
+		b, err := json.MarshalIndent(val, "", strings.Repeat(" ", indent))
 		if err != nil {
 			panic(err)
 		}
-		l.PushString(string(b))
+		out := string(b)
+		if mx, ok := numOpt(opts["max"]); ok && mx > 0 && len(out) > int(mx) {
+			out = out[:int(mx)] + "\n... (truncado)"
+		}
+		l.PushString(out)
 		return 1
 	})
 	setGoFunc(L, t, "minify", func(l *lua.State) int {
@@ -65,6 +84,34 @@ func buildJson(L *lua.State) int {
 		return 1
 	})
 	return t
+}
+
+func parseNestedJSON(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := map[string]any{}
+		for k, val := range x {
+			out[k] = parseNestedJSON(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, val := range x {
+			out[i] = parseNestedJSON(val)
+		}
+		return out
+	case string:
+		s := strings.TrimSpace(x)
+		if len(s) > 0 && (s[0] == '{' || s[0] == '[') {
+			var parsed any
+			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+				return parseNestedJSON(parsed)
+			}
+		}
+		return x
+	default:
+		return v
+	}
 }
 
 func jsonPath(v any, path string) (any, bool) {

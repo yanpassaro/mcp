@@ -143,6 +143,24 @@ func buildIO(L *lua.State, store *Store) int {
 		pushAny(l, treeNodeToAny(node))
 		return 1
 	})
+	setGoFunc(L, t, "zip", func(l *lua.State) int {
+		dest := argString(l, 1)
+		names, err := storeZip(store, dest, luaToAny(l, 2))
+		if err != nil {
+			panic(ioErr("zip", dest, err))
+		}
+		pushAny(l, names)
+		return 1
+	})
+	setGoFunc(L, t, "unzip", func(l *lua.State) int {
+		src := argString(l, 1)
+		names, err := storeUnzip(store, src, argString(l, 2))
+		if err != nil {
+			panic(ioErr("unzip", src, err))
+		}
+		pushAny(l, names)
+		return 1
+	})
 	return t
 }
 

@@ -116,6 +116,26 @@ func (s *Store) Write(name, content string) (int, error) {
 	return len(content), nil
 }
 
+func (s *Store) WriteBytes(name string, data []byte) (int, error) {
+	full, err := s.resolve(name)
+	if err != nil {
+		return 0, err
+	}
+	if len(data) > maxFileBytes {
+		return 0, fmt.Errorf("conteúdo excede %d bytes", maxFileBytes)
+	}
+	if err := s.enforceLimits(full, len(data)); err != nil {
+		return 0, err
+	}
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(full, data, 0o644); err != nil {
+		return 0, err
+	}
+	return len(data), nil
+}
+
 func (s *Store) Append(name, content string) (int, error) {
 	full, err := s.resolve(name)
 	if err != nil {

@@ -46,7 +46,7 @@ func buildExcel(L *lua.State, mnt, tmp *Store) int {
 			panic(err)
 		}
 		rows := rowsAnyToExcel(luaArrayAny(l, 2))
-		if err := excelWriteRows(path, argString(l, 3), rows); err != nil {
+		if err := excelWriteRows(path, argString(l, 3), rows, toAnyMap(l, 4)); err != nil {
 			panic(err)
 		}
 		l.PushBoolean(true)
@@ -92,7 +92,7 @@ func excelReadRows(path, sheet string) ([][]string, error) {
 	return rows, nil
 }
 
-func excelWriteRows(path, sheet string, rows [][]string) error {
+func excelWriteRows(path, sheet string, rows [][]string, opts map[string]any) error {
 	f := excelize.NewFile()
 	defer f.Close()
 	sheetName := "Sheet1"
@@ -107,6 +107,9 @@ func excelWriteRows(path, sheet string, rows [][]string) error {
 			return fmt.Errorf("excel: %w", err)
 		}
 	}
+	if err := styleExcel(f, sheetName, rows, opts); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("excel: %w", err)
 	}
@@ -114,6 +117,83 @@ func excelWriteRows(path, sheet string, rows [][]string) error {
 		return fmt.Errorf("excel: %w", err)
 	}
 	return nil
+}
+
+func styleExcel(f *excelize.File, sheetName string, rows [][]string, opts map[string]any) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	headerColor := optColor(opts, "header", "headerColor")
+	rowColor := optColor(opts, "row", "rowColor")
+	altColor := optColor(opts, "alt", "altRowColor")
+	zebra := truthyOpt(opts, "zebra")
+	lastCol := colLetters(len(rows[0]))
+	if headerColor != "" {
+		st, err := f.NewStyle(&excelize.Style{
+			Font: &excelize.Font{Bold: true},
+			Fill: excelize.Fill{Type: "pattern", Color: []string{stripHashColor(headerColor)}, Pattern: 1},
+		})
+		if err != nil {
+			return fmt.Errorf("excel: %w", err)
+		}
+		if err := f.SetCellStyle(sheetName, "A1", lastCol+"1", st); err != nil {
+			return fmt.Errorf("excel: %w", err)
+		}
+	}
+	if rowColor != "" {
+		st, err := f.NewStyle(&excelize.Style{
+			Fill: excelize.Fill{Type: "pattern", Color: []string{stripHashColor(rowColor)}, Pattern: 1},
+		})
+		if err != nil {
+			return fmt.Errorf("excel: %w", err)
+		}
+		for r := 1; r < len(rows); r++ {
+			if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", r+1), lastCol+fmt.Sprint(r+1), st); err != nil {
+				return fmt.Errorf("excel: %w", err)
+			}
+		}
+	}
+	if zebra {
+		if altColor == "" {
+			altColor = "#f5f5f5"
+		}
+		st, err := f.NewStyle(&excelize.Style{
+			Fill: excelize.Fill{Type: "pattern", Color: []string{stripHashColor(altColor)}, Pattern: 1},
+		})
+		if err != nil {
+			return fmt.Errorf("excel: %w", err)
+		}
+		for r := 1; r < len(rows); r++ {
+			if r%2 == 1 {
+				if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", r+1), lastCol+fmt.Sprint(r+1), st); err != nil {
+					return fmt.Errorf("excel: %w", err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func colLetters(n int) string {
+	if n < 1 {
+		return "A"
+	}
+	var b strings.Builder
+	for n > 0 {
+		n--
+		b.WriteByte(byte('A' + n%26))
+		n /= 26
+	}
+	s := b.String()
+	runes := []rune(s)
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+	return string(runes)
+}
+
+func stripHashColor(c string) string {
+	return strings.TrimPrefix(c, "#")
 }
 
 func excelRowsToAny(rows [][]string) []any {
