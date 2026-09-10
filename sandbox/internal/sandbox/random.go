@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	phonOns = []string{"b", "c", "d", "f", "g", "j", "l", "m", "n", "p", "r", "s", "t", "v", "z", "br", "cr", "dr", "fl", "gr", "pl", "tr", "ch", "qu"}
-	phonVow = []string{"a", "e", "i", "o", "u", "ã", "é", "ó", "á"}
+	phonOns      = []string{"b", "c", "d", "f", "g", "j", "l", "m", "n", "p", "r", "s", "t", "v", "z", "br", "cr", "dr", "fl", "gr", "pl", "tr", "ch", "qu"}
+	phonVow      = []string{"a", "e", "i", "o", "u", "ã", "é", "ó", "á"}
+	phonVowAscii = []string{"a", "e", "i", "o", "u"}
 )
 
 func buildRandom(L *lua.State) int {
@@ -55,19 +56,19 @@ func buildRandom(L *lua.State) int {
 		return 1
 	})
 	setGoFunc(L, t, "name", func(l *lua.State) int {
-		l.PushString(cap1(fakeToken(rng)) + " " + cap1(fakeToken(rng)))
+		l.PushString(cap1(fakeTokenAscii(rng)) + " " + cap1(fakeTokenAscii(rng)))
 		return 1
 	})
 	setGoFunc(L, t, "email", func(l *lua.State) int {
-		f := strings.ToLower(fakeToken(rng))
-		m := strings.ToLower(fakeToken(rng))
-		d := strings.ToLower(fakeToken(rng))
+		f := strings.ToLower(fakeTokenAscii(rng))
+		m := strings.ToLower(fakeTokenAscii(rng))
+		d := strings.ToLower(fakeTokenAscii(rng))
 		l.PushString(f + "." + m + "@" + d + ".com")
 		return 1
 	})
 	setGoFunc(L, t, "username", func(l *lua.State) int {
-		f := strings.ToLower(fakeToken(rng))
-		m := strings.ToLower(fakeToken(rng))
+		f := strings.ToLower(fakeTokenAscii(rng))
+		m := strings.ToLower(fakeTokenAscii(rng))
 		l.PushString(f + m + fmt.Sprint(10+rng.IntN(90)))
 		return 1
 	})
@@ -115,10 +116,7 @@ func buildRandom(L *lua.State) int {
 		return 1
 	})
 	setGoFunc(L, t, "sentence", func(l *lua.State) int {
-		n := int(argNum(l, 1))
-		if n < 1 {
-			n = 1
-		}
+		n := max(int(argNum(l, 1)), 1)
 		parts := make([]string, n)
 		for i := range parts {
 			parts[i] = fakeSentence(rng)
@@ -143,11 +141,19 @@ func buildRandom(L *lua.State) int {
 }
 
 func fakeToken(rng *rand.Rand) string {
+	return fakeTokenWith(phonVow, rng)
+}
+
+func fakeTokenAscii(rng *rand.Rand) string {
+	return fakeTokenWith(phonVowAscii, rng)
+}
+
+func fakeTokenWith(vow []string, rng *rand.Rand) string {
 	n := 2 + rng.IntN(2)
 	var b strings.Builder
-	for i := 0; i < n; i++ {
+	for range n {
 		b.WriteString(phonOns[rng.IntN(len(phonOns))])
-		b.WriteString(phonVow[rng.IntN(len(phonVow))])
+		b.WriteString(vow[rng.IntN(len(vow))])
 	}
 	return b.String()
 }

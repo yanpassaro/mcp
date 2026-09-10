@@ -86,7 +86,7 @@ As libs nativas perigosas são removidas: `dofile`, `loadfile`, `load`, `loadstr
 
 ## Limites
 
-- Execução: **30s** (timeout real; a chamada retorna em até 30s).
+- Execução: **180s** (3 min; timeout real, configurável via `SANDBOX_EXEC_TIMEOUT_SECONDS`).
 - Saída e retorno: **256 KiB** (truncado com `... (truncado)`).
 - Arquivo: **2 MB** por arquivo; **1 MB** por escrita.
 - RAM do processo: **512 MiB** (padrão, soft limit do Go).
@@ -128,6 +128,7 @@ O filesystem é fixo (sem env): `mnt` em `~/.local/state/mcp/mnt` (compartilhado
 | `SANDBOX_TMP_SPACE_MB` | `64` | teto de espaço de `tmp/` |
 | `SANDBOX_MNT_SPACE_MB` | `256` | teto de espaço de `mnt/` |
 | `SANDBOX_MEM_LIMIT_MB` | `512` | teto de RAM do processo sandbox |
+| `SANDBOX_EXEC_TIMEOUT_SECONDS` | `180` | timeout de execução de cada script |
 | `SANDBOX_FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | hosts permitidos para `std.fetch` (vírgulas; `.domínio` libera subdomínios) |
 | `SANDBOX_FETCH_TIMEOUT_SECONDS` | `30` | timeout do `std.fetch` |
 | `SANDBOX_FETCH_MAX_BODY_KB` | `1024` | teto do corpo da resposta do `std.fetch` |

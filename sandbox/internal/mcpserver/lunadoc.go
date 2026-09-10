@@ -331,7 +331,7 @@ var lunaLimits = &lunaMod{
 	Desc: "execution and storage limits",
 	Body: `# Limits
 
-- Execution: up to 30s.
+- Execution: up to 180s (3 min) — configurable via ~SANDBOX_EXEC_TIMEOUT_SECONDS~.
 - Output: 256 KiB (truncated).
 - Result: 256 KiB (truncated with ~... (truncado)~).
 - File: 2 MB per file; 1 MB per write.

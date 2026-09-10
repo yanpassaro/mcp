@@ -2,7 +2,9 @@ package sandbox
 
 import (
 	"fmt"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -11,11 +13,19 @@ import (
 )
 
 const (
-	maxTimeout          = 30 * time.Second
 	maxOutputBytes      = 256 * 1024
 	maxResultBytes      = 256 * 1024
 	maxScriptConcurrent = 4
 )
+
+var maxTimeout = func() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("SANDBOX_EXEC_TIMEOUT_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 180 * time.Second
+}()
 
 var reMain = regexp.MustCompile(`(?m)\bfunction\s+main\s*\(`)
 
