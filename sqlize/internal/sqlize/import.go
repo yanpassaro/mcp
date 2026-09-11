@@ -72,7 +72,7 @@ func (s *store) importFile(ctx context.Context, path, table, sheet string) (stri
 			return "", err
 		}
 		return fmt.Sprintf("Tabela %q criada a partir de %s: %d colunas, %d linhas.", name, filepath.Base(path), len(cols), len(rows)), nil
-	case ".xlsx", ".xlsm", ".xls":
+	case ".xlsx", ".xlsm", ".xls", ".html", ".htm":
 		sheets, err := parseWorkbook(path, sheet)
 		if err != nil {
 			return "", err
@@ -96,7 +96,7 @@ func (s *store) importFile(ctx context.Context, path, table, sheet string) (stri
 			}
 			created = append(created, fmt.Sprintf("%q (%d linhas)", name, len(d.rows)))
 		}
-		return fmt.Sprintf("Planilha %s importada. Tabelas: %s.", filepath.Base(path), strings.Join(created, ", ")), nil
+		return fmt.Sprintf("Arquivo %s importado. Tabelas: %s.", filepath.Base(path), strings.Join(created, ", ")), nil
 	case ".sql":
 		n, err := s.runSQLScript(ctx, path)
 		if err != nil {
@@ -120,7 +120,7 @@ func (s *store) importFile(ctx context.Context, path, table, sheet string) (stri
 		}
 		return fmt.Sprintf("Tabela %q criada a partir de %s: %d colunas, %d linhas.", name, filepath.Base(path), len(cols), len(rows)), nil
 	default:
-		return "", fmt.Errorf("formato não suportado: %s (use .json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .xlsm, .xls, .sql, .sqlite, .db, .xml)", ext)
+		return "", fmt.Errorf("formato não suportado: %s (use .json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .xlsm, .xls, .html, .htm, .sql, .sqlite, .db, .xml)", ext)
 	}
 }
 
@@ -391,7 +391,7 @@ func parseWorkbook(path, only string) (map[string]sheetData, error) {
 	if looksLikeHTML(head) {
 		return parseHTMLWorkbook(path)
 	}
-	return nil, fmt.Errorf("formato .xls não reconhecido (o binário legado BIFF não é suportado). Converta o arquivo para .xlsx antes de importar.")
+	return nil, fmt.Errorf("formato não reconhecido (o binário legado BIFF do .xls não é suportado). Converta para .xlsx ou use um .html/.htm contendo <table>.")
 }
 
 func readFileHead(path string, n int) ([]byte, error) {
@@ -439,7 +439,7 @@ func parseHTMLWorkbook(path string) (map[string]sheetData, error) {
 	}
 	walk(doc)
 	if len(tables) == 0 {
-		return nil, fmt.Errorf("arquivo .xls (HTML) sem tabela <table>: %s", filepath.Base(path))
+		return nil, fmt.Errorf("arquivo sem tabela <table>: %s", filepath.Base(path))
 	}
 	base := deriveTableName("", path, "xls")
 	used := map[string]int{}
@@ -459,7 +459,7 @@ func parseHTMLWorkbook(path string) (map[string]sheetData, error) {
 		out[name] = sheetData{cols: cols, rows: rows[1:]}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("planilha .xls (HTML) sem dados: %s", filepath.Base(path))
+		return nil, fmt.Errorf("arquivo sem dados em <table>: %s", filepath.Base(path))
 	}
 	return out, nil
 }

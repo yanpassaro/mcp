@@ -39,6 +39,8 @@ func (s *store) exportFile(ctx context.Context, outPath, source, table, target s
 	switch format {
 	case "json":
 		err = writeJSON(dest, cols, rows)
+	case "jsonl":
+		err = writeJSONL(dest, cols, rows)
 	case "csv":
 		err = writeDelimited(dest, cols, rows, ',')
 	case "tsv":
@@ -65,6 +67,8 @@ func formatFromPath(p string) (string, error) {
 	switch ext {
 	case ".json":
 		return "json", nil
+	case ".jsonl", ".ndjson":
+		return "jsonl", nil
 	case ".csv":
 		return "csv", nil
 	case ".tsv":
@@ -78,7 +82,7 @@ func formatFromPath(p string) (string, error) {
 	case ".xml":
 		return "xml", nil
 	default:
-		return "", fmt.Errorf("extensão não suportada para exportação: %s (use .json, .csv, .tsv, .xlsx, .sql, .html, .xml)", ext)
+		return "", fmt.Errorf("extensão não suportada para exportação: %s (use .json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .sql, .html, .xml)", ext)
 	}
 }
 
@@ -135,6 +139,29 @@ func writeJSON(path string, cols []string, rows [][]string) error {
 		return err
 	}
 	return os.WriteFile(path, b, 0644)
+}
+
+func writeJSONL(path string, cols []string, rows [][]string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	for _, r := range rows {
+		m := make(map[string]any, len(cols))
+		for i, c := range cols {
+			v := ""
+			if i < len(r) {
+				v = r[i]
+			}
+			m[c] = valueFromStr(v)
+		}
+		if err := enc.Encode(m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeDelimited(path string, cols []string, rows [][]string, comma rune) error {
@@ -303,6 +330,8 @@ func exportLiveFile(path string, cols []string, rows [][]string, target string) 
 	switch format {
 	case "json":
 		err = writeJSON(dest, cols, rows)
+	case "jsonl":
+		err = writeJSONL(dest, cols, rows)
 	case "csv":
 		err = writeDelimited(dest, cols, rows, ',')
 	case "tsv":
@@ -316,7 +345,7 @@ func exportLiveFile(path string, cols []string, rows [][]string, target string) 
 	case "sql":
 		err = writeSQL(dest, cols, rows, target)
 	default:
-		return "", fmt.Errorf("formato de exportação não suportado: %s (use .csv, .html, .xlsx, .tsv, .json, .xml, .sql)", format)
+		return "", fmt.Errorf("formato de exportação não suportado: %s (use .csv, .html, .xlsx, .tsv, .json, .jsonl, .ndjson, .xml, .sql)", format)
 	}
 	if err != nil {
 		return "", err

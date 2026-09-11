@@ -427,7 +427,8 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 			"JOIN information_schema.key_column_usage kcu " +
 			"ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name " +
 			"WHERE tc.table_name = c.table_name AND tc.table_schema = c.table_schema " +
-			"AND tc.constraint_type = 'PRIMARY KEY' AND kcu.column_name = c.column_name) AS is_pk " +
+			"AND tc.constraint_type = 'PRIMARY KEY' AND kcu.column_name = c.column_name) AS is_pk, " +
+			"(c.is_identity = 'YES' OR c.column_default LIKE 'nextval(%') AS is_auto " +
 			"FROM information_schema.columns c WHERE c.table_name = $1 AND c.table_schema = " + schemaExpr + " ORDER BY c.ordinal_position"
 		fkQ = "SELECT att.attname AS col, fns.nspname AS ref_schema, ft.relname AS ref_table, fatt.attname AS ref_col " +
 			"FROM pg_constraint con " +
@@ -438,22 +439,46 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 			"JOIN pg_namespace fns ON fns.oid = ft.relnamespace " +
 			"JOIN pg_attribute fatt ON fatt.attrelid = con.confrelid AND fatt.attnum = ANY(con.confkey) " +
 			"WHERE con.contype = 'f' AND rel.relname = $1 AND nsp.nspname = " + schemaExpr + " ORDER BY con.conname, att.attnum"
-		idxQ = "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = " + schemaExpr + " AND tablename = $1 ORDER BY indexname"
+		idxQ = "SELECT i.relname, ix.indisunique, ix.indisprimary, " +
+			"string_agg(a.attname, ',' ORDER BY k.ord) " +
+			"FROM pg_index ix " +
+			"JOIN pg_class i ON i.oid = ix.indexrelid " +
+			"JOIN pg_class t ON t.oid = ix.indrelid " +
+			"JOIN pg_namespace n ON n.oid = t.relnamespace " +
+			"JOIN LATERAL unnest(ix.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) ON true " +
+			"JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum AND k.attnum <> 0 " +
+			"WHERE t.relname = $1 AND n.nspname = " + schemaExpr + " " +
+			"GROUP BY i.relname, ix.indisunique, ix.indisprimary ORDER BY i.relname"
 		args = []string{table, schema}
 	} else {
 		schemaExpr := "COALESCE(NULLIF(?,''), DATABASE())"
-		colsQ = "SELECT column_name, data_type, is_nullable, column_default, (column_key = 'PRI') AS is_pk " +
+		colsQ = "SELECT column_name, data_type, is_nullable, column_default, (column_key = 'PRI') AS is_pk, " +
+			"(LOWER(extra) LIKE '%auto_increment%') AS is_auto " +
 			"FROM information_schema.columns WHERE table_name = ? AND table_schema = " + schemaExpr + " ORDER BY ordinal_position"
 		fkQ = "SELECT column_name AS col, referenced_table_schema AS ref_schema, referenced_table_name AS ref_table, referenced_column_name AS ref_col " +
 			"FROM information_schema.key_column_usage WHERE table_name = ? AND table_schema = " + schemaExpr + " AND referenced_table_name IS NOT NULL " +
 			"ORDER BY constraint_name, ordinal_position"
-		idxQ = "SELECT index_name, GROUP_CONCAT(column_name ORDER BY seq_in_index) AS cols, MIN(non_unique) AS non_unique " +
+		idxQ = "SELECT index_name, GROUP_CONCAT(column_name ORDER BY seq_in_index), MIN(non_unique), (index_name = 'PRIMARY') " +
 			"FROM information_schema.statistics WHERE table_name = ? AND table_schema = " + schemaExpr + " GROUP BY index_name ORDER BY index_name"
 		args = []string{table, schema}
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "### %s\n", table)
+	engine := "postgres"
+	if c.driver == "mysql" {
+		engine = "mysql"
+	}
+	display := schema
+	if display == "" && engine == "postgres" {
+		display = "public"
+	}
+	if display == "" && engine == "mysql" {
+		if _, r, e := c.query(ctx, "SELECT DATABASE()", nil, false, true); e == nil && len(r) > 0 && len(r[0]) > 0 {
+			display = r[0][0]
+		}
+	}
+
+	st := structTable{Schema: display, Name: table, Engine: engine}
+
 	_, rows, err := c.query(ctx, colsQ, args, false, false)
 	if err != nil {
 		return "", err
@@ -462,7 +487,7 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 		return fmt.Sprintf("Tabela %q não encontrada.", table), nil
 	}
 	for _, r := range rows {
-		name, typ, nullable, def, pk := "", "", "", "", ""
+		name, typ, nullable, def, pk, auto := "", "", "", "", "", ""
 		if len(r) > 0 {
 			name = r[0]
 		}
@@ -478,67 +503,87 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 		if len(r) > 4 {
 			pk = r[4]
 		}
-		b.WriteString(columnLine(name, typ, nullable, def, pk))
-		b.WriteString("\n")
+		if len(r) > 5 {
+			auto = r[5]
+		}
+		st.Cols = append(st.Cols, structColumn{
+			Name:    name,
+			Type:    typ,
+			NotNull: notNull(nullable),
+			Default: def,
+			PK:      isPkVal(pk),
+			Auto:    isTruthy(auto),
+		})
 	}
 
-	if _, rows, err := c.query(ctx, fkQ, args, false, false); err == nil && len(rows) > 0 {
-		b.WriteString("\nFks:\n")
-		seen := map[string]bool{}
+	fkByCol := map[string]structColumn{}
+	if _, rows, err := c.query(ctx, fkQ, args, false, false); err == nil {
 		for _, r := range rows {
 			if len(r) == 0 {
 				continue
 			}
-			col, refSC, refT, refC := r[0], "", "", ""
+			var fk structColumn
+			col := r[0]
 			if len(r) > 1 {
-				refSC = r[1]
+				fk.RefSchema = r[1]
 			}
 			if len(r) > 2 {
-				refT = r[2]
+				fk.RefTable = r[2]
 			}
 			if len(r) > 3 {
-				refC = r[3]
+				fk.RefColumn = r[3]
 			}
-			key := col + "|" + refSC + "|" + refT + "|" + refC
-			if seen[key] {
-				continue
+			if _, ok := fkByCol[col]; !ok {
+				fkByCol[col] = fk
 			}
-			seen[key] = true
-			ref := refC
-			if refT != "" {
-				ref = refT + "." + refC
-			}
-			if refSC != "" && ref != "" {
-				ref = refSC + "." + ref
-			}
-			fmt.Fprintf(&b, "- %s → %s\n", short(col), short(ref))
+		}
+	}
+	for i := range st.Cols {
+		if fk, ok := fkByCol[st.Cols[i].Name]; ok {
+			st.Cols[i].RefSchema = fk.RefSchema
+			st.Cols[i].RefTable = fk.RefTable
+			st.Cols[i].RefColumn = fk.RefColumn
 		}
 	}
 
-	if _, rows, err := c.query(ctx, idxQ, args, false, false); err == nil && len(rows) > 0 {
-		b.WriteString("\nÍndices:\n")
+	if _, rows, err := c.query(ctx, idxQ, args, false, false); err == nil {
 		for _, r := range rows {
 			if len(r) == 0 {
 				continue
 			}
-			name := r[0]
+			ix := structIdx{}
+			colsStr := ""
 			if c.driver == "pgx" {
-				fmt.Fprintf(&b, "- %s\n", short(name))
-				if len(r) > 1 && r[1] != "" {
-					fmt.Fprintf(&b, "  `%s`\n", short(r[1]))
+				if len(r) > 1 {
+					ix.Unique = isTruthy(r[1])
+				}
+				if len(r) > 2 {
+					ix.IsPK = isTruthy(r[2])
+				}
+				if len(r) > 3 {
+					colsStr = r[3]
 				}
 			} else {
-				colsStr := ""
-				uniq := ""
 				if len(r) > 1 {
-					colsStr = short(r[1])
+					colsStr = r[1]
 				}
-				if len(r) > 2 && r[2] == "0" {
-					uniq = " (único)"
+				if len(r) > 2 {
+					ix.Unique = r[2] == "0"
 				}
-				fmt.Fprintf(&b, "- %s%s: %s\n", short(name), uniq, colsStr)
+				if len(r) > 3 {
+					ix.IsPK = isTruthy(r[3])
+				}
 			}
+			if colsStr != "" {
+				for _, c := range strings.Split(colsStr, ",") {
+					if c = strings.TrimSpace(c); c != "" {
+						ix.Columns = append(ix.Columns, c)
+					}
+				}
+			}
+			st.Idx = append(st.Idx, ix)
 		}
 	}
-	return b.String(), nil
+
+	return renderStructureTable(st), nil
 }

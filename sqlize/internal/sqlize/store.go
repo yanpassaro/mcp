@@ -37,6 +37,7 @@ type fkInfo struct {
 type indexInfo struct {
 	Name    string
 	Unique  bool
+	Origin  string
 	Columns []string
 }
 
@@ -325,7 +326,7 @@ func (s *store) tableForeignKeys(ctx context.Context, schema, name string) ([]fk
 }
 
 func (s *store) tableIndexes(ctx context.Context, schema, name string) ([]indexInfo, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, "unique" FROM pragma_index_list(?, ?) ORDER BY name`, name, schema)
+	rows, err := s.db.QueryContext(ctx, `SELECT name, "unique", origin FROM pragma_index_list(?, ?) ORDER BY name`, name, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +334,7 @@ func (s *store) tableIndexes(ctx context.Context, schema, name string) ([]indexI
 	var idx []indexInfo
 	for rows.Next() {
 		var ix indexInfo
-		if err := rows.Scan(&ix.Name, &ix.Unique); err != nil {
+		if err := rows.Scan(&ix.Name, &ix.Unique, &ix.Origin); err != nil {
 			return nil, err
 		}
 		idx = append(idx, ix)
@@ -361,6 +362,19 @@ func (s *store) tableIndexes(ctx context.Context, schema, name string) ([]indexI
 		crows.Close()
 	}
 	return idx, nil
+}
+
+func (s *store) refSchema(ctx context.Context, refTable string) (string, error) {
+	tables, err := s.listTables(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, t := range tables {
+		if t.Name == refTable {
+			return t.Schema, nil
+		}
+	}
+	return "main", nil
 }
 
 func (s *store) attachDB(ctx context.Context, path string) (string, error) {

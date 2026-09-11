@@ -6,10 +6,10 @@ Importa, consulta e exporta dados usando um banco **SQLite em arquivo** como bas
 
 | Tool | O que faz |
 | --- | --- |
-| `sqlize_import` | Importa um arquivo: `.json/.jsonl/.csv/.tsv/.xlsx/.xls/.xml` → tabelas; `.sql` → executa; `.sqlite/.db` → anexa como esquema |
+| `sqlize_import` | Importa um arquivo: `.json/.jsonl/.ndjson/.csv/.tsv/.xlsx/.xlsm/.xls/.html/.htm/.xml` → tabelas; `.sql` → executa; `.sqlite/.db` → anexa como esquema |
 | `sqlize_structure` | Lista tabelas/colunas; com `table`, detalha colunas + FKs + índices |
 | `sqlize_query` | Qualquer SQL no banco de trabalho; retorna Markdown (até 200 linhas) com PII mascarada por nome real de coluna |
-| `sqlize_export` | Exporta consulta/tabela **crua** (sem máscara) sempre para `<home>/.local/state/mcp/mnt` (o mesmo mnt do sandbox) |
+| `sqlize_export` | Exporta consulta/tabela **crua** (sem máscara) sempre para `<home>/.local/state/mcp/mnt` (o mesmo mnt do sandbox); formato pela extensão (`.json/.jsonl/.ndjson/.csv/.tsv/.xlsx/.sql/.html/.xml`) |
 
 Para cada banco ao vivo configurado nas envs, existem `{engine}[_{alias}]_query`, `{engine}[_{alias}]_export` e `{engine}[_{alias}]_structure`.
 

@@ -28,7 +28,7 @@ func (s *Server) Close() error {
 func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_import",
-		Description: "Import a file into the working SQLite database. Formats: .json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .xlsm, .xls, .sql, .sqlite, .db, .xml. 'table' names the destination table; .sqlite/.db are attached as a schema.",
+		Description: "Import a file into the working SQLite database. Formats: .json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .xlsm, .xls, .html, .htm, .sql, .sqlite, .db, .xml. 'table' names the destination table; .sqlite/.db are attached as a schema; .html/.htm imports each <table> as a table.",
 	}, s.importTool)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -43,7 +43,7 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlize_export",
-		Description: "Export a query or table to a raw (unredacted) file inside the shared filesystem root ~/.local/state/mcp/mnt (sandbox mnt, out of the AI's reach). Only the path is returned. Formats by path extension (.json, .csv, .tsv, .xlsx, .sql, .html, .xml). Values in 'args'.",
+		Description: "Export a query or table to a raw (unredacted) file inside the shared filesystem root ~/.local/state/mcp/mnt (sandbox mnt, out of the AI's reach). Only the path is returned. Formats by path extension (.json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .sql, .html, .xml). Values in 'args'.",
 	}, s.exportTool)
 
 	for _, cfg := range discoverLiveDBs() {
@@ -55,7 +55,7 @@ func (s *Server) Register(server *mcp.Server) {
 		}, s.liveQueryHandler(cfg))
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        prefix + "_export",
-			Description: fmt.Sprintf("Run a read-only query (SELECT/WITH) on the live %s database (%s) and write the full (raw, unredacted) result to a file inside the shared ~/.local/state/mcp/mnt; the extension sets the format (.csv, .html, .xlsx, .tsv, .json, .xml, .sql).", cfg.Engine, env),
+			Description: fmt.Sprintf("Run a read-only query (SELECT/WITH) on the live %s database (%s) and write the full (raw, unredacted) result to a file inside the shared ~/.local/state/mcp/mnt; the extension sets the format (.csv, .html, .xlsx, .tsv, .json, .jsonl, .ndjson, .xml, .sql).", cfg.Engine, env),
 		}, s.liveExportHandler(cfg))
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        prefix + "_structure",
@@ -116,31 +116,21 @@ func (s *Server) structureTool(ctx context.Context, _ *mcp.CallToolRequest, in s
 		}
 		var b strings.Builder
 		for _, t := range found {
-			cols, err := s.store.tableColumns(ctx, t.Schema, t.Name)
+			cols, err := s.colStruct(ctx, t)
 			if err != nil {
 				return nil, nil, err
 			}
-			fmt.Fprintf(&b, "### %s (esquema %s)\n", t.Name, schemaLabel(t.Schema))
-			for _, c := range cols {
-				b.WriteString(columnLine(c.Name, c.Type, c.NotNull, c.Default, c.PK))
-				b.WriteString("\n")
+			idx, err := s.idxStruct(ctx, t)
+			if err != nil {
+				return nil, nil, err
 			}
-			if fks, e := s.store.tableForeignKeys(ctx, t.Schema, t.Name); e == nil && len(fks) > 0 {
-				b.WriteString("\nFks:\n")
-				for _, fk := range fks {
-					fmt.Fprintf(&b, "- %s → %s.%s\n", short(fk.Column), short(fk.RefTable), short(fk.RefColumn))
-				}
-			}
-			if idx, e := s.store.tableIndexes(ctx, t.Schema, t.Name); e == nil && len(idx) > 0 {
-				b.WriteString("\nÍndices:\n")
-				for _, ix := range idx {
-					u := ""
-					if ix.Unique {
-						u = " (único)"
-					}
-					fmt.Fprintf(&b, "- %s%s: %s\n", short(ix.Name), u, short(strings.Join(ix.Columns, ", ")))
-				}
-			}
+			b.WriteString(renderStructureTable(structTable{
+				Schema: t.Schema,
+				Name:   t.Name,
+				Engine: "sqlite",
+				Cols:   cols,
+				Idx:    idx,
+			}))
 			b.WriteString("\n")
 		}
 		return textResult(b.String())
@@ -172,6 +162,70 @@ func schemaLabel(s string) string {
 	return s
 }
 
+func (s *Server) colStruct(ctx context.Context, t tableInfo) ([]structColumn, error) {
+	cols, err := s.store.tableColumns(ctx, t.Schema, t.Name)
+	if err != nil {
+		return nil, err
+	}
+	fks, err := s.store.tableForeignKeys(ctx, t.Schema, t.Name)
+	if err != nil {
+		return nil, err
+	}
+	fkByCol := map[string]fkInfo{}
+	for _, fk := range fks {
+		fkByCol[fk.Column] = fk
+	}
+
+	autoCol := ""
+	pkCount := 0
+	for _, c := range cols {
+		if isPkVal(c.PK) {
+			pkCount++
+			if strings.Contains(strings.ToUpper(c.Type), "INT") {
+				autoCol = c.Name
+			}
+		}
+	}
+	if pkCount != 1 {
+		autoCol = ""
+	}
+
+	out := make([]structColumn, 0, len(cols))
+	for _, c := range cols {
+		sc := structColumn{
+			Name:    c.Name,
+			Type:    c.Type,
+			NotNull: notNull(c.NotNull),
+			Default: c.Default,
+			PK:      isPkVal(c.PK),
+			Auto:    c.Name == autoCol,
+		}
+		if fk, ok := fkByCol[c.Name]; ok {
+			sc.RefSchema, _ = s.store.refSchema(ctx, fk.RefTable)
+			sc.RefTable = fk.RefTable
+			sc.RefColumn = fk.RefColumn
+		}
+		out = append(out, sc)
+	}
+	return out, nil
+}
+
+func (s *Server) idxStruct(ctx context.Context, t tableInfo) ([]structIdx, error) {
+	idxs, err := s.store.tableIndexes(ctx, t.Schema, t.Name)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]structIdx, 0, len(idxs))
+	for _, ix := range idxs {
+		out = append(out, structIdx{
+			Unique:  ix.Unique || ix.Origin == "u",
+			IsPK:    ix.Origin == "pk",
+			Columns: ix.Columns,
+		})
+	}
+	return out, nil
+}
+
 type queryInput struct {
 	SQL  string   `json:"sql" jsonschema:"SQL statement. Values via 'args' (use ? placeholders)."`
 	Args []string `json:"args,omitempty" jsonschema:"Bound parameters for '?' placeholders."`
@@ -189,7 +243,7 @@ func (s *Server) queryTool(ctx context.Context, _ *mcp.CallToolRequest, in query
 }
 
 type exportInput struct {
-	Path   string   `json:"path" jsonschema:"Output file name (.json, .csv, .tsv, .xlsx, .sql, .html, .xml). Always saved inside the shared ~/.local/state/mcp/mnt."`
+	Path   string   `json:"path" jsonschema:"Output file name (.json, .jsonl, .ndjson, .csv, .tsv, .xlsx, .sql, .html, .xml). Always saved inside the shared ~/.local/state/mcp/mnt."`
 	Query  string   `json:"query,omitempty" jsonschema:"Source SQL (optional if 'table' given)."`
 	Args   []string `json:"args,omitempty" jsonschema:"Bound parameters for the query."`
 	Table  string   `json:"table,omitempty" jsonschema:"Source table (optional if 'query' given)."`
@@ -351,23 +405,6 @@ func notNull(v string) bool {
 	return false
 }
 
-func columnLine(name, typ, nullable, def, pk string) string {
-	line := "- " + short(name) + ": " + short(typ)
-	var flags []string
-	if isTruthy(pk) {
-		flags = append(flags, "PK")
-	}
-	if notNull(nullable) {
-		flags = append(flags, "NOT NULL")
-	}
-	if def != "" {
-		line += " DEFAULT " + short(strings.TrimSpace(def))
-	}
-	if len(flags) > 0 {
-		line += " · " + strings.Join(flags, " · ")
-	}
-	return line
-}
 
 func cleanCell(s string) string {
 	s = strings.ReplaceAll(s, "\r", " ")
