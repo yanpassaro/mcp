@@ -2,7 +2,9 @@ package sandbox
 
 import (
 	"crypto/md5"
+	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
@@ -11,6 +13,7 @@ import (
 	"strings"
 
 	lua "github.com/Shopify/go-lua"
+	"golang.org/x/crypto/sha3"
 )
 
 func buildEncode(L *lua.State) int {
@@ -26,6 +29,36 @@ func buildEncode(L *lua.State) int {
 	})
 	setGoFunc(L, t, "sha256", func(l *lua.State) int {
 		sum := sha256.Sum256([]byte(argString(l, 1)))
+		l.PushString(hex.EncodeToString(sum[:]))
+		return 1
+	})
+	setGoFunc(L, t, "sha1", func(l *lua.State) int {
+		sum := sha1.Sum([]byte(argString(l, 1)))
+		l.PushString(hex.EncodeToString(sum[:]))
+		return 1
+	})
+	setGoFunc(L, t, "sha224", func(l *lua.State) int {
+		sum := sha256.Sum224([]byte(argString(l, 1)))
+		l.PushString(hex.EncodeToString(sum[:]))
+		return 1
+	})
+	setGoFunc(L, t, "sha384", func(l *lua.State) int {
+		sum := sha512.Sum384([]byte(argString(l, 1)))
+		l.PushString(hex.EncodeToString(sum[:]))
+		return 1
+	})
+	setGoFunc(L, t, "sha512", func(l *lua.State) int {
+		sum := sha512.Sum512([]byte(argString(l, 1)))
+		l.PushString(hex.EncodeToString(sum[:]))
+		return 1
+	})
+	setGoFunc(L, t, "sha3_256", func(l *lua.State) int {
+		sum := sha3.Sum256([]byte(argString(l, 1)))
+		l.PushString(hex.EncodeToString(sum[:]))
+		return 1
+	})
+	setGoFunc(L, t, "sha3_512", func(l *lua.State) int {
+		sum := sha3.Sum512([]byte(argString(l, 1)))
 		l.PushString(hex.EncodeToString(sum[:]))
 		return 1
 	})
@@ -67,6 +100,8 @@ func buildEncode(L *lua.State) int {
 		}
 		return 1
 	})
+	setGoFunc(L, t, "argon2", argon2HashFn)
+	setGoFunc(L, t, "argon2_verify", argon2VerifyFn)
 	setGoFunc(L, t, "hex", func(l *lua.State) int {
 		s := argString(l, 1)
 		switch strings.ToLower(strings.TrimSpace(argString(l, 2))) {

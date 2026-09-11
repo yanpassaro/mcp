@@ -310,6 +310,10 @@ func buildStd(L *lua.State, store, tmp *Store, reg *sqlRegistry, args string, wr
 	setModule("regex", func() int { return buildRegex(L) })
 	setModule("template", func() int { return buildTemplate(L) })
 	setModule("human", func() int { return buildHuman(L) })
+	setModule("path", func() int { return buildPath(L) })
+	setModule("stats", func() int { return buildStats(L) })
+	setModule("schema", func() int { return buildSchema(L) })
+	setModule("diff", func() int { return buildDiff(L) })
 }
 
 func buildLog(L *lua.State, writeOut func(string)) int {

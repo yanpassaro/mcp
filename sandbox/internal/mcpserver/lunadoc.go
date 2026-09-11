@@ -25,7 +25,8 @@ var lunaOrder = []*lunaMod{
 	lunaResult, lunaLog, lunaArgs, lunaIO, lunaTmp, lunaFetch, lunaCookies,
 	lunaSecrets, lunaSQL, lunaUUID, lunaCSV, lunaXML, lunaExcel, lunaData,
 	lunaRegex, lunaJSON, lunaEncode, lunaStr, lunaList, lunaNum, lunaDate,
-	lunaRandom, lunaAssert, lunaTemplate, lunaHuman,
+	lunaRandom, lunaAssert, lunaTemplate, lunaHuman, lunaPath, lunaStats,
+	lunaSchema, lunaDiff,
 }
 
 var lunaNative = []string{
@@ -612,14 +613,24 @@ var lunaEncode = &lunaMod{
 	Fns: []lunaFn{
 		{"crc32", "s:string", "hex", "CRC-32 (checksum)"},
 		{"md5", "s:string", "hex", "MD5"},
+		{"sha1", "s:string", "hex", "SHA-1"},
+		{"sha224", "s:string", "hex", "SHA-224"},
 		{"sha256", "s:string", "hex", "SHA-256"},
+		{"sha384", "s:string", "hex", "SHA-384"},
+		{"sha512", "s:string", "hex", "SHA-512"},
+		{"sha3_256", "s:string", "hex", "SHA3-256"},
+		{"sha3_512", "s:string", "hex", "SHA3-512"},
+		{"argon2", "password:string, opts?:table", "string", "argon2id PHC hash (`memory`, `iterations`, `parallelism`, `salt`, `key_length`)"},
+		{"argon2_verify", "password:string, hash:string", "bool", "verifies a password against an argon2id PHC hash"},
 		{"base64", "s:string, mode?:string", "string", "encode/decode/url-safe"},
 		{"base32", "s:string, mode?:string", "string", "encode/decode/hex/nopad"},
 		{"hex", "s:string, mode?:string", "string", "encode/decode"},
 	},
-	Example: `std.result.ok({
+	Example: `local hash = std.encode.argon2("s3cret!")
+std.result.ok({
   h = std.encode.sha256("abc"),
   b = std.encode.base64("abc"),
+  ok = std.encode.argon2_verify("s3cret!", hash),
 })`,
 }
 
@@ -712,7 +723,7 @@ std.result.ok({ iso = std.date.iso(later) })`,
 var lunaRandom = &lunaMod{
 	Name:   "random",
 	Prefix: "random",
-	Desc:   "random values (seeded) — numbers, picks and generated data (names/emails/sentences)",
+	Desc:   "random values (seeded) — numbers, picks and generated data (names/emails/sentences/passwords)",
 	Fns: []lunaFn{
 		{"seed", "n:number", "nil", "sets the seed (deterministic)"},
 		{"int", "min:number, max:number", "number", "inclusive integer"},
@@ -727,9 +738,11 @@ var lunaRandom = &lunaMod{
 		{"date", "from?:string, to?:string", "string", "RFC3339 date"},
 		{"sentence", "n?:number", "string", "n random sentences (default 1)"},
 		{"paragraph", "n?:number", "string", "n random sentences (default 3)"},
+		{"password", "length?:number, opts?:table", "string", "random password (`lower/upper/digits/symbols`, `exclude`, `allow`)"},
+		{"token", "bytes?:number, opts?:table", "string", "crypto-safe token (base64url; `alphabet` custom)"},
 	},
 	Example: `std.random.seed(42)
-std.result.ok({ n = std.random.int(1, 100), nome = std.random.name() })`,
+std.result.ok({ n = std.random.int(1, 100), nome = std.random.name(), pw = std.random.password(12) })`,
 }
 
 var lunaAssert = &lunaMod{
@@ -772,4 +785,83 @@ var lunaTemplate = &lunaMod{
 std.result.ok({ html = std.template.render(t, {
   itens = { { nome = "Ava", ativo = true }, { nome = "Noah", ativo = false } },
 }) })`,
+}
+
+var lunaPath = &lunaMod{
+	Name:   "path",
+	Prefix: "path",
+	Desc:   "path manipulation (slash-based) — helpers for building mnt paths",
+	Fns: []lunaFn{
+		{"join", "...parts", "string", "joins segments"},
+		{"basename", "p:string", "string", "last segment"},
+		{"dirname", "p:string", "string", "parent dir"},
+		{"ext", "p:string", "string", "extension with dot"},
+		{"stem", "p:string", "string", "basename without ext"},
+		{"split", "p:string", "table", "{dir, file}"},
+		{"normalize", "p:string", "string", "cleans `.`/`..`/`//`"},
+		{"is_abs", "p:string", "bool", "absolute?"},
+		{"rel", "base:string, p:string", "string", "relative path"},
+		{"within", "base:string, p:string", "bool", "is `p` inside `base`?"},
+	},
+	Example: `std.result.ok({
+  j = std.path.join("mnt", "data", "x.csv"),
+  e = std.path.ext("a/b/x.csv"),
+})`,
+}
+
+
+
+var lunaStats = &lunaMod{
+	Name:   "stats",
+	Prefix: "stats",
+	Desc:   "descriptive statistics on numeric arrays (or `opts.field`) — ignores non-numeric",
+	Fns: []lunaFn{
+		{"count", "arr:table, opts?:table", "number", "counts numeric entries"},
+		{"min", "arr:table, opts?:table", "number", "smallest"},
+		{"max", "arr:table, opts?:table", "number", "largest"},
+		{"avg", "arr:table, opts?:table", "number", "mean"},
+		{"median", "arr:table, opts?:table", "number", "median"},
+		{"quantile", "arr:table, q:number", "number", "q in 0..1"},
+		{"percentile", "arr:table, p:number", "number", "p in 0..100"},
+		{"variance", "arr:table, sample?:bool", "number", "population or sample"},
+		{"stdev", "arr:table, sample?:bool", "number", "standard deviation"},
+		{"range", "arr:table, opts?:table", "table", "{min, max}"},
+		{"mode", "arr:table, opts?:table", "table<number>", "most frequent values"},
+		{"histogram", "arr:table, opts?:table", "table", "bins `{count, lo, hi}`"},
+	},
+	Example: `local xs = { 1, 2, 2, 3, 4, 5, 5, 5, 6 }
+std.result.ok({ med = std.stats.median(xs), q = std.stats.quantile(xs, 0.25) })`,
+}
+
+var lunaSchema = &lunaMod{
+	Name:   "schema",
+	Prefix: "schema",
+	Desc:   "validate rows/objects against a spec — returns `{ok, errors}` (no panic)",
+	Fns: []lunaFn{
+		{"validate", "rows:table, spec:table", "table", "validates a list of maps"},
+		{"validate_one", "obj:table, spec:table", "table", "validates one map"},
+		{"coerce", "v:any, type:string", "any", "coerces to string/number/bool"},
+	},
+	Example: `local res = std.schema.validate({
+  { name = "Ava", age = 30, email = "a@x.com" },
+}, {
+  { field = "name",  type = "string", required = true },
+  { field = "age",   type = "number", min = 0, max = 120 },
+})
+std.result.ok(res)`,
+}
+
+var lunaDiff = &lunaMod{
+	Name:   "diff",
+	Prefix: "diff",
+	Desc:   "unified diff between strings (stdlib only) — no external library",
+	Fns: []lunaFn{
+		{"unified", "a:string, b:string, opts?:table", "string", "unified diff (`context`, `from`, `to`)"},
+		{"lines", "a:string, b:string", "table", "ops `{op, text}` (equal/add/del)"},
+		{"ratio", "a:string, b:string", "number", "similarity 0..1"},
+	},
+	Example: `std.result.ok({
+  u = std.diff.unified("a\nb\nc", "a\nb\nd"),
+  r = std.diff.ratio("abc", "abd"),
+})`,
 }

@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math/rand/v2"
 	"strings"
@@ -136,6 +137,31 @@ func buildRandom(L *lua.State) int {
 		l.PushString(strings.Join(parts, " "))
 		return 1
 	})
+	setGoFunc(L, t, "password", func(l *lua.State) int {
+		length := int(argNum(l, 1))
+		opts := toAnyMap(l, 2)
+		if n := optUint(opts, "length", 0); n > 0 {
+			length = int(n)
+		}
+		l.PushString(randomPassword(rng, length, opts))
+		return 1
+	})
+	setGoFunc(L, t, "token", func(l *lua.State) int {
+		n := int(argNum(l, 1))
+		if n <= 0 {
+			n = 32
+		}
+		opts := toAnyMap(l, 2)
+		if b := optUint(opts, "bytes", uint32(n)); b > 0 {
+			n = int(b)
+		}
+		if alphabet := optString(opts, "alphabet"); alphabet != "" {
+			l.PushString(secureToken(n, alphabet))
+		} else {
+			l.PushString(base64.RawURLEncoding.EncodeToString(randomBytes(n)))
+		}
+		return 1
+	})
 
 	return t
 }
@@ -170,4 +196,111 @@ func fakeSentence(rng *rand.Rand) string {
 
 func cap1(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+const (
+	pwLower   = "abcdefghijklmnopqrstuvwxyz"
+	pwUpper   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	pwDigits  = "0123456789"
+	pwSymbols = "!@#$%^&*()-_=+[]{};:,.<>?/|~"
+)
+
+func secureToken(n int, alphabet string) string {
+	if len(alphabet) > 255 {
+		panic(fmt.Errorf("token: alphabet com mais de 255 caracteres"))
+	}
+	out := make([]byte, n)
+	limit := 256 - (256 % len(alphabet))
+	for i := range out {
+		for {
+			b := randomBytes(1)[0]
+			if int(b) < limit {
+				out[i] = alphabet[int(b)%len(alphabet)]
+				break
+			}
+		}
+	}
+	return string(out)
+}
+
+func randomPassword(rng *rand.Rand, length int, opts map[string]any) string {
+	if length <= 0 {
+		length = 16
+	}
+	if length < 4 {
+		length = 4
+	}
+
+	var classes []string
+	pool := make([]byte, 0, 128)
+	addClass := func(s string) {
+		if s == "" {
+			return
+		}
+		classes = append(classes, s)
+		pool = append(pool, s...)
+	}
+	if asBool(opts["lower"], true) {
+		addClass(pwLower)
+	}
+	if asBool(opts["upper"], true) {
+		addClass(pwUpper)
+	}
+	if asBool(opts["digits"], true) {
+		addClass(pwDigits)
+	}
+	if asBool(opts["symbols"], true) {
+		addClass(pwSymbols)
+	}
+	if len(classes) == 0 {
+		addClass(pwLower)
+	}
+
+	exclude := optString(opts, "exclude")
+	if allow := optString(opts, "allow"); allow != "" {
+		classes = []string{allow}
+		pool = []byte(allow)
+	}
+
+	filter := func(s string) string {
+		if exclude == "" {
+			return s
+		}
+		var b strings.Builder
+		for i := 0; i < len(s); i++ {
+			if strings.IndexByte(exclude, s[i]) < 0 {
+				b.WriteByte(s[i])
+			}
+		}
+		return b.String()
+	}
+	pool = []byte(filter(string(pool)))
+
+	out := make([]byte, length)
+	used := make([]bool, length)
+	idx := 0
+	for _, cls := range classes {
+		if idx >= length {
+			break
+		}
+		cc := filter(cls)
+		if cc == "" {
+			continue
+		}
+		out[idx] = cc[rng.IntN(len(cc))]
+		used[idx] = true
+		idx++
+	}
+	for i := 0; i < length; i++ {
+		if used[i] {
+			continue
+		}
+		if len(pool) == 0 {
+			out[i] = 'x'
+			continue
+		}
+		out[i] = pool[rng.IntN(len(pool))]
+	}
+	rng.Shuffle(length, func(i, j int) { out[i], out[j] = out[j], out[i] })
+	return string(out)
 }
