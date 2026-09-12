@@ -213,6 +213,92 @@ func (s *Store) Glob(pattern string) ([]string, error) {
 	return out, nil
 }
 
+func (s *Store) Walk(root string, files, dirs bool, ext string) ([]string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		root = "."
+	}
+	full, err := s.resolve(root)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	err = filepath.Walk(full, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if path != full && strings.HasPrefix(info.Name(), ".") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
+			if dirs && path != full {
+				if rel, e := filepath.Rel(s.Root, path); e == nil {
+					out = append(out, rel)
+				}
+			}
+			return nil
+		}
+		if !files {
+			return nil
+		}
+		if ext != "" && !strings.EqualFold(filepath.Ext(info.Name()), ext) {
+			return nil
+		}
+		if rel, e := filepath.Rel(s.Root, path); e == nil {
+			out = append(out, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (s *Store) RecursiveGlob(pattern string, files, dirs bool, ext string) ([]string, error) {
+	all, err := s.Walk("", files, dirs, ext)
+	if err != nil {
+		return nil, err
+	}
+	pat := strings.TrimSpace(pattern)
+	pat = strings.TrimPrefix(pat, "**/")
+	out := []string{}
+	for _, rel := range all {
+		if ok, _ := filepath.Match(pat, filepath.Base(rel)); ok {
+			out = append(out, rel)
+		}
+	}
+	return out, nil
+}
+
+func filterGlob(store *Store, names []string, files, dirs bool, ext string) ([]string, error) {
+	out := []string{}
+	for _, n := range names {
+		st, err := store.Stat(n)
+		if err != nil {
+			continue
+		}
+		if st.IsDir {
+			if dirs {
+				out = append(out, n)
+			}
+			continue
+		}
+		if !files {
+			continue
+		}
+		if ext != "" && !strings.EqualFold(filepath.Ext(n), ext) {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
 func (s *Store) Clear() (int, error) {
 	entries, err := os.ReadDir(s.Root)
 	if err != nil {

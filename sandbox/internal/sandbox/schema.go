@@ -205,6 +205,9 @@ func isDateStr(s string) bool {
 }
 
 func coerceValue(v any, typ string) any {
+	if v == nil {
+		return nil
+	}
 	s := strings.TrimSpace(fmt.Sprint(v))
 	switch strings.ToLower(strings.TrimSpace(typ)) {
 	case "string":

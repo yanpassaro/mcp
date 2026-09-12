@@ -128,7 +128,7 @@ func buildIO(L *lua.State, store *Store) int {
 		return 1
 	})
 	setGoFunc(L, t, "glob", func(l *lua.State) int {
-		names, err := store.Glob(argString(l, 1))
+		names, err := ioGlob(store, argString(l, 1), toAnyMap(l, 2))
 		if err != nil {
 			panic(err)
 		}
@@ -136,6 +136,15 @@ func buildIO(L *lua.State, store *Store) int {
 		return 1
 	})
 	setGoFunc(L, t, "walk", func(l *lua.State) int {
+		opts := toAnyMap(l, 2)
+		paths, err := store.Walk(argString(l, 1), asBool(opts["files"], true), asBool(opts["dirs"], false), optString(opts, "ext"))
+		if err != nil {
+			panic(err)
+		}
+		pushAny(l, paths)
+		return 1
+	})
+	setGoFunc(L, t, "tree", func(l *lua.State) int {
 		node, err := store.Tree(strings.TrimSpace(argString(l, 1)))
 		if err != nil {
 			panic(err)
@@ -162,6 +171,20 @@ func buildIO(L *lua.State, store *Store) int {
 		return 1
 	})
 	return t
+}
+
+func ioGlob(store *Store, pattern string, opts map[string]any) ([]string, error) {
+	files := asBool(opts["files"], true)
+	dirs := asBool(opts["dirs"], false)
+	ext := optString(opts, "ext")
+	if asBool(opts["recursive"], false) {
+		return store.RecursiveGlob(pattern, files, dirs, ext)
+	}
+	names, err := store.Glob(pattern)
+	if err != nil {
+		return nil, err
+	}
+	return filterGlob(store, names, files, dirs, ext)
 }
 
 func treeNodeToAny(n TreeNode) map[string]any {

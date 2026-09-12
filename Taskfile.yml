@@ -26,6 +26,7 @@ tasks:
       - task: build:sqlize
       - task: build:anydoc
       - task: build:sandbox
+      - task: build:sandbox-cli
 
   build:git:
     desc: Build git-mcp.exe
@@ -57,6 +58,12 @@ tasks:
     dir: sandbox
     cmds:
       - go build -o ../{{.DIST}}/sandbox-mcp.exe ./cmd/sandbox-mcp
+
+  build:sandbox-cli:
+    desc: Build sandbox.exe (CLI to run Lua scripts without the MCP)
+    dir: sandbox
+    cmds:
+      - go build -o ../{{.DIST}}/sandbox.exe ./cmd/sandbox
 
   format:
     desc: Format all Go modules (gofmt -w, go mod tidy, go vet)

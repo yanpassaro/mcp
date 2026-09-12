@@ -37,6 +37,24 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 
 O filesystem do sandbox (`mnt`) e a exportação do sqlize ficam **fixos** em `~/.local/state/mcp/mnt` (pasta compartilhada, sem env): o `mnt` do sandbox é `~/.local/state/mcp/mnt` e `tmp` é `~/.local/state/mcp/tmp`.
 
+## CLI sandbox.exe
+
+Além do servidor MCP, o sandbox pode ser usado como **CLI** para rodar scripts `.lua` direto no terminal (sem IA):
+
+```sh
+sandbox.exe script.lua
+sandbox.exe script.lua --args '{"nome":"Ava","n":3}'
+sandbox.exe script.lua --json        # resultado completo em JSON (para automação)
+sandbox.exe script.lua --timeout 30
+```
+
+- `--args` (JSON) vira `std.args`; sem ele, os argumentos posicionais viram um array.
+- `--json` imprime o `RunResult` inteiro (ok, name, desc, output, data, error).
+- `mnt/` e `tmp/` são os mesmos do servidor (`~/.local/state/mcp/mnt` e `.../tmp`), persistidos entre execuções; `tmp/` é limpo a cada execução.
+- Código de saída: `0` sucesso, `1` erro, `2` uso incorreto.
+
+Build: `task build:sandbox-cli` (gera `dist/sandbox.exe`).
+
 ## Exemplo (Zed)
 
 ```json

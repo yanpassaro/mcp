@@ -26,7 +26,7 @@ var lunaOrder = []*lunaMod{
 	lunaSecrets, lunaSQL, lunaUUID, lunaCSV, lunaXML, lunaExcel, lunaData,
 	lunaRegex, lunaJSON, lunaEncode, lunaStr, lunaList, lunaNum, lunaDate,
 	lunaRandom, lunaAssert, lunaTemplate, lunaHuman, lunaPath, lunaStats,
-	lunaSchema, lunaDiff,
+	lunaSchema, lunaDiff, lunaInfer, lunaMissing, lunaText, lunaPipe,
 }
 
 var lunaNative = []string{
@@ -405,16 +405,19 @@ var lunaIO = &lunaMod{
 		{"copy", "src:string, dst:string", "true", "copies within the sandbox"},
 		{"move", "src:string, dst:string", "true", "renames/moves"},
 		{"mkdir", "path:string", "true", "creates folder(s)"},
-		{"glob", "pattern:string", "table<string>", "matching relative paths"},
-		{"walk", "path?:string", "table", "{ name, isDir, size, lines, children }"},
+		{"glob", "pattern:string, opts?:table", "table<string>", "matching relative paths (`recursive`, `files`, `dirs`, `ext`)"},
+		{"walk", "path?:string, opts?:table", "table<string>", "flat recursive list of paths (`files`, `dirs`, `ext`)"},
+		{"tree", "path?:string", "table", "{ name, isDir, size, lines, children }"},
 		{"zip", "dest:string, source:table|string", "table<string>", "creates a zip: array of paths (folders recursed), {name=content} or a single path; returns entry names"},
 		{"unzip", "src:string, dest:string", "table<string>", "extracts a zip into a folder; returns the extracted paths (rejects zip-slip)"},
 	},
 	Example: `if std.io.exists("data.txt") then
   std.io.append("data.txt", "\nfim")
 end
-local tree = std.io.walk("")
-std.result.ok({ files = std.io.glob("*.lua"), root = tree.name })`,
+local csvs = std.io.glob("*.csv", { recursive = true })
+local files = std.io.walk("", { files = true })
+local root = std.io.tree("")
+std.result.ok({ files = files, csvs = csvs, root = root.name })`,
 }
 
 var lunaTmp = &lunaMod{
@@ -864,4 +867,84 @@ var lunaDiff = &lunaMod{
   u = std.diff.unified("a\nb\nc", "a\nb\nd"),
   r = std.diff.ratio("abc", "abd"),
 })`,
+}
+
+var lunaInfer = &lunaMod{
+	Name:   "infer",
+	Prefix: "infer",
+	Desc:   "infer column types (integer/number/boolean/date/string) from values",
+	Fns: []lunaFn{
+		{"type", "values:table, opts?:table", "string", "inferred type of a column"},
+		{"types", "rows:table, opts?:table", "table", "{ field = type } (opts.fields)"},
+		{"detect", "v:any", "string", "type of one value"},
+		{"coerce", "values:table, type?:string", "table", "coerces values (opts.type)"},
+	},
+	Example: `std.result.ok({
+  t1 = std.infer.type({ "1", "2", "3.5" }),
+  t2 = std.infer.type({ "2024-01-01", "2023-05-05" }),
+})`,
+}
+
+var lunaMissing = &lunaMod{
+	Name:   "missing",
+	Prefix: "missing",
+	Desc:   "handle null/missing values (nil, empty, NA/NULL/-) — fill/drop/which",
+	Fns: []lunaFn{
+		{"is_null", "v:any, opts?:table", "bool", "is it a missing value?"},
+		{"count", "values:table, opts?:table", "number", "counts missing (opts.field)"},
+		{"which", "values:table, opts?:table", "table<number>", "indices of missing"},
+		{"fill", "values:table, opts?:table", "table", "fill missing (value/method)"},
+		{"drop", "rows:table, opts?:table", "table", "drops rows with missing"},
+	},
+	Example: `std.result.ok({
+  c = std.missing.count({ 1, nil, "", 3 }),
+  f = std.missing.fill({ 1, nil, "", 3 }, { method = "mean" }),
+})`,
+}
+
+var lunaText = &lunaMod{
+	Name:   "text",
+	Prefix: "text",
+	Desc:   "text processing — regex extraction, tokens, n-grams, similarity/fuzzy",
+	Fns: []lunaFn{
+		{"extract", "s:string, pattern:string, opts?:table", "table<string>", "matches (opts.group)"},
+		{"tokens", "s:string, opts?:table", "table<string>", "words (lower/min_len/stopwords)"},
+		{"ngrams", "s:string, n?:number", "table<string>", "sliding n-word windows"},
+		{"similarity", "a:string, b:string, opts?:table", "number", "0..1 (method)"},
+		{"match", "a:string, b:string, threshold?:number", "bool", "similar enough?"},
+		{"keywords", "s:string, n?:number", "table", "top {word, count}"},
+	},
+	Example: `std.result.ok({
+  ex = std.text.extract("email: a@b.com", "[\\w.]+@[\\w.]+"),
+  tok = std.text.tokens("Ola mundo, ola!"),
+  sim = std.text.similarity("Joao", "João"),
+})`,
+}
+
+var lunaPipe = &lunaMod{
+	Name:   "pipe",
+	Prefix: "pipe",
+	Desc:   "row processing over a list of maps — select/rename/mutate/filter/sort/group/join (+ fluent `rows` builder)",
+	Fns: []lunaFn{
+		{"rows", "rows:table", "builder", "fluent builder; chain `:group():count():sum():run()`"},
+		{"map", "rows:table, fn:function", "table", "transforms each row (nil drops)"},
+		{"filter", "rows:table, fn:function", "table", "keeps rows where fn is truthy"},
+		{"rename", "rows:table, mapping:table", "table", "renames columns"},
+		{"select", "rows:table, fields:table", "table", "keeps only fields"},
+		{"drop", "rows:table, fields:table", "table", "drops fields"},
+		{"sort", "rows:table, field:string, desc?:bool", "table", "sorts by field(s)"},
+		{"distinct", "rows:table, fields?:table", "table", "removes duplicates"},
+		{"take", "rows:table, n:number", "table", "first n rows"},
+		{"group", "rows:table, fields:table, aggs:table", "table", "group_by + agg"},
+		{"join", "rows:table, right:table, opts:table", "table", "join (inner/left)"},
+		{"coerce", "rows:table, field:string, type?:string", "table", "coerces a column"},
+		{"infer", "rows:table, opts?:table", "table", "auto-coerces all columns"},
+	},
+	Example: `local out = std.pipe.rows(data)
+  :filter(function(r) return r.regiao ~= nil end)
+  :group("regiao")
+  :count("*", "n")
+  :sum("receita", "total")
+  :run()
+std.result.ok(out)`,
 }
