@@ -162,7 +162,22 @@ func buildRandom(L *lua.State) int {
 		}
 		return 1
 	})
-
+	setGoFunc(L, t, "cpf", func(l *lua.State) int {
+		l.PushString(randomCPF(rng))
+		return 1
+	})
+	setGoFunc(L, t, "cnpj", func(l *lua.State) int {
+		l.PushString(randomCNPJ(rng))
+		return 1
+	})
+	setGoFunc(L, t, "cep", func(l *lua.State) int {
+		l.PushString(randomCEP(rng))
+		return 1
+	})
+	setGoFunc(L, t, "rg", func(l *lua.State) int {
+		l.PushString(randomRG(rng))
+		return 1
+	})
 	return t
 }
 
@@ -304,3 +319,85 @@ func randomPassword(rng *rand.Rand, length int, opts map[string]any) string {
 	rng.Shuffle(length, func(i, j int) { out[i], out[j] = out[j], out[i] })
 	return string(out)
 }
+
+func randDigits(rng *rand.Rand, n int) []int {
+	d := make([]int, n)
+	for i := range d {
+		d[i] = rng.IntN(10)
+	}
+	return d
+}
+
+func randomCPF(rng *rand.Rand) string {
+	d := randDigits(rng, 9)
+	d[0] = 1 + rng.IntN(9)
+	s1 := 0
+	for i, x := range d {
+		s1 += x * (10 - i)
+	}
+	d1 := (s1 * 10) % 11
+	if d1 == 10 {
+		d1 = 0
+	}
+	d = append(d, d1)
+	s2 := 0
+	for i, x := range d {
+		s2 += x * (11 - i)
+	}
+	d2 := (s2 * 10) % 11
+	if d2 == 10 {
+		d2 = 0
+	}
+	d = append(d, d2)
+	return fmt.Sprintf("%d%d%d.%d%d%d.%d%d%d-%d%d", d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9], d[10])
+}
+
+func randomCNPJ(rng *rand.Rand) string {
+	d := randDigits(rng, 12)
+	d[0] = 1 + rng.IntN(9)
+	w1 := []int{5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2}
+	s1 := 0
+	for i, x := range d {
+		s1 += x * w1[i]
+	}
+	r1 := s1 % 11
+	d1 := 0
+	if r1 >= 2 {
+		d1 = 11 - r1
+	}
+	d = append(d, d1)
+	w2 := []int{6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2}
+	s2 := 0
+	for i, x := range d {
+		s2 += x * w2[i]
+	}
+	r2 := s2 % 11
+	d2 := 0
+	if r2 >= 2 {
+		d2 = 11 - r2
+	}
+	d = append(d, d2)
+	return fmt.Sprintf("%d%d.%d%d%d.%d%d%d/%d%d%d%d-%d%d", d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9], d[10], d[11], d[12], d[13])
+}
+
+func randomCEP(rng *rand.Rand) string {
+	d := randDigits(rng, 8)
+	d[0] = 1 + rng.IntN(9)
+	return fmt.Sprintf("%d%d%d%d%d-%d%d%d", d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7])
+}
+
+func randomRG(rng *rand.Rand) string {
+	d := randDigits(rng, 8)
+	d[0] = 1 + rng.IntN(9)
+	s := 0
+	for i, x := range d {
+		s += x * (2 + i)
+	}
+	dv := s % 11
+	if dv == 10 {
+		dv = 0
+	}
+	return fmt.Sprintf("%d%d%d%d%d%d%d%d-%d", d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], dv)
+}
+
+

@@ -27,6 +27,7 @@ var lunaOrder = []*lunaMod{
 	lunaRegex, lunaJSON, lunaEncode, lunaStr, lunaList, lunaNum, lunaDate,
 	lunaRandom, lunaAssert, lunaTemplate, lunaHuman, lunaPath, lunaStats,
 	lunaSchema, lunaDiff, lunaInfer, lunaMissing, lunaText, lunaPipe,
+	lunaSeq, lunaDuration, lunaUnit,
 }
 
 var lunaNative = []string{
@@ -743,6 +744,10 @@ var lunaRandom = &lunaMod{
 		{"paragraph", "n?:number", "string", "n random sentences (default 3)"},
 		{"password", "length?:number, opts?:table", "string", "random password (`lower/upper/digits/symbols`, `exclude`, `allow`)"},
 		{"token", "bytes?:number, opts?:table", "string", "crypto-safe token (base64url; `alphabet` custom)"},
+		{"cpf", "-", "string", "CPF válido (dígito verificador)"},
+		{"cnpj", "-", "string", "CNPJ válido (dígito verificador)"},
+		{"cep", "-", "string", "CEP `NNNNN-NNN`"},
+		{"rg", "-", "string", "RG com dígito verificador"},
 	},
 	Example: `std.random.seed(42)
 std.result.ok({ n = std.random.int(1, 100), nome = std.random.name(), pw = std.random.password(12) })`,
@@ -939,12 +944,64 @@ var lunaPipe = &lunaMod{
 		{"join", "rows:table, right:table, opts:table", "table", "join (inner/left)"},
 		{"coerce", "rows:table, field:string, type?:string", "table", "coerces a column"},
 		{"infer", "rows:table, opts?:table", "table", "auto-coerces all columns"},
+		{"pivot", "rows:table, opts:table", "table", "long→wide (`index`, `columns`, `values`, `agg`)"},
+		{"unpivot", "rows:table, opts:table", "table", "wide→long (`id`, `cols`, `key`, `value`, `drop_nil`)"},
 	},
 	Example: `local out = std.pipe.rows(data)
-  :filter(function(r) return r.regiao ~= nil end)
   :group("regiao")
   :count("*", "n")
   :sum("receita", "total")
   :run()
-std.result.ok(out)`,
+local wide = std.pipe.pivot(vendas, { index={"ano"}, columns="trim", values="receita", agg="sum" })
+std.result.ok({ out = out, wide = wide })`,
+}
+
+var lunaSeq = &lunaMod{
+	Name:   "seq",
+	Prefix: "seq",
+	Desc:   "generate ranges/sequences and pack/zips — `range`, `iota`, `arange`, `repeat`, `zip`, `enumerate`",
+	Fns: []lunaFn{
+		{"range", "n:number", "table<number>", "`{1..n}` (count)"},
+		{"iota", "n:number", "table<number>", "`{0..n-1}` (indices)"},
+		{"arange", "start:number, stop:number, step?:number", "table<number>", "`[start, stop)` (negative step ok)"},
+		{"repeat", "v:any, n:number", "table<any>", "`{v, v, ...}` n times"},
+		{"zip", "...arrs", "table<table>", "i-th elements as tuples"},
+		{"enumerate", "arr:table, start?:number", "table<table>", "`{ {i, item} }`"},
+	},
+	Example: `std.result.ok({
+  r = std.seq.range(5),
+  a = std.seq.arange(0, 10, 2),
+})`,
+}
+
+var lunaDuration = &lunaMod{
+	Name:   "duration",
+	Prefix: "duration",
+	Desc:   "durations in ms — parse/format/arithmetic (complements `date`/`human`)",
+	Fns: []lunaFn{
+		{"parse", "s:string", "number|nil", "`\"2h30m\"` → ms"},
+		{"format", "ms:number", "string", "ms → `\"2h30m\"`"},
+		{"parts", "ms:number", "table", "{w, d, h, m, s, ms}"},
+		{"total", "ms:number, unit:string", "number", "ms in a unit (day/hour/minute/second/week)"},
+		{"compare", "a, b", "number", "-1/0/1 (accepts ms or string)"},
+		{"add", "ts:number, dur", "number", "ms + duration"},
+		{"sub", "ts:number, dur", "number", "ms − duration"},
+	},
+	Example: `local ms = std.duration.parse("2h30m")
+std.result.ok({ ms = ms, fmt = std.duration.format(ms), tot = std.duration.total(ms, "minute") })`,
+}
+
+var lunaUnit = &lunaMod{
+	Name:   "unit",
+	Prefix: "unit",
+	Desc:   "unit conversion — length/mass/data/time/volume/temperature (aliases incl. pt-BR)",
+	Fns: []lunaFn{
+		{"convert", "v:number, from:string, to:string", "number", "converts between compatible units"},
+		{"factor", "unit:string", "number", "factor to the base unit (linear)"},
+		{"list", "-", "table", "{ category = { units } }"},
+	},
+	Example: `std.result.ok({
+  km = std.unit.convert(5, "km", "m"),
+  c  = std.unit.convert(0, "c", "f"),
+})`,
 }

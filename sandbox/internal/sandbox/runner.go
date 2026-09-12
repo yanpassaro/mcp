@@ -318,6 +318,9 @@ func buildStd(L *lua.State, store, tmp *Store, reg *sqlRegistry, args string, wr
 	setModule("missing", func() int { return buildMissing(L) })
 	setModule("text", func() int { return buildText(L) })
 	setModule("pipe", func() int { return buildPipe(L) })
+	setModule("seq", func() int { return buildSeq(L) })
+	setModule("duration", func() int { return buildDuration(L) })
+	setModule("unit", func() int { return buildUnit(L) })
 }
 
 func buildLog(L *lua.State, writeOut func(string)) int {

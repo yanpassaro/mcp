@@ -92,6 +92,14 @@ func buildPipe(L *lua.State) int {
 			sb.rows = pipeInfer(sb.rows)
 			return self(l)
 		})
+		setGoFunc(L, b, "pivot", func(l *lua.State) int {
+			sb.rows = pipePivot(sb.rows, toAnyMap(l, 2))
+			return self(l)
+		})
+		setGoFunc(L, b, "unpivot", func(l *lua.State) int {
+			sb.rows = pipeUnpivot(sb.rows, toAnyMap(l, 2))
+			return self(l)
+		})
 		setGoFunc(L, b, "run", func(l *lua.State) int {
 			if len(sb.group) > 0 || len(sb.aggs) > 0 {
 				pushAny(l, pipeGroup(sb.rows, sb.group, sb.aggs))
@@ -150,6 +158,14 @@ func buildPipe(L *lua.State) int {
 	})
 	setGoFunc(L, t, "infer", func(l *lua.State) int {
 		pushAny(l, pipeInfer(luaArrayAny(l, 1)))
+		return 1
+	})
+	setGoFunc(L, t, "pivot", func(l *lua.State) int {
+		pushAny(l, pipePivot(luaArrayAny(l, 1), toAnyMap(l, 2)))
+		return 1
+	})
+	setGoFunc(L, t, "unpivot", func(l *lua.State) int {
+		pushAny(l, pipeUnpivot(luaArrayAny(l, 1), toAnyMap(l, 2)))
 		return 1
 	})
 
@@ -505,6 +521,147 @@ func pipeInfer(rows []any) []any {
 			nm[k] = coerceValue(v, types[k])
 		}
 		out = append(out, nm)
+	}
+	return out
+}
+
+func pipePivot(rows []any, opts map[string]any) []any {
+	index := stringSlice(opts["index"])
+	columns := optString(opts, "columns")
+	values := optString(opts, "values")
+	agg := optString(opts, "agg")
+	if agg == "" {
+		if values == "" {
+			agg = "count"
+		} else {
+			agg = "sum"
+		}
+	}
+	if columns == "" {
+		panic("pipe.pivot: columns é obrigatório")
+	}
+	idxRows := map[string]map[string]any{}
+	var order []string
+	colSet := map[string]bool{}
+	var colOrder []string
+	groups := map[string]map[string][]any{}
+	for _, r := range rows {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		parts := make([]string, len(index))
+		for i, f := range index {
+			parts[i] = fmt.Sprint(itemProp(m, f))
+		}
+		idxKey := strings.Join(parts, "\x00")
+		cKey := fmt.Sprint(itemProp(m, columns))
+		if _, ok := idxRows[idxKey]; !ok {
+			row := map[string]any{}
+			for _, f := range index {
+				row[f] = itemProp(m, f)
+			}
+			idxRows[idxKey] = row
+			order = append(order, idxKey)
+		}
+		if !colSet[cKey] {
+			colSet[cKey] = true
+			colOrder = append(colOrder, cKey)
+		}
+		if groups[idxKey] == nil {
+			groups[idxKey] = map[string][]any{}
+		}
+		groups[idxKey][cKey] = append(groups[idxKey][cKey], itemProp(m, values))
+	}
+	out := []any{}
+	for _, idxKey := range order {
+		row := idxRows[idxKey]
+		for _, cKey := range colOrder {
+			row[cKey] = pivotCell(agg, groups[idxKey][cKey])
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func pivotCell(agg string, vals []any) any {
+	switch agg {
+	case "count":
+		return float64(len(vals))
+	case "first":
+		if len(vals) > 0 {
+			return vals[0]
+		}
+		return nil
+	case "last":
+		if len(vals) > 0 {
+			return vals[len(vals)-1]
+		}
+		return nil
+	default:
+		var nums []float64
+		for _, v := range vals {
+			if n, ok := numOrNil(v); ok {
+				nums = append(nums, n)
+			}
+		}
+		return aggregate(agg, nums)
+	}
+}
+
+func pipeUnpivot(rows []any, opts map[string]any) []any {
+	id := stringSlice(opts["id"])
+	cols := stringSlice(opts["cols"])
+	key := optString(opts, "key")
+	if key == "" {
+		key = "key"
+	}
+	value := optString(opts, "value")
+	if value == "" {
+		value = "value"
+	}
+	dropNil := asBool(opts["drop_nil"], false)
+	if len(cols) == 0 {
+		set := map[string]bool{}
+		for _, f := range id {
+			set[f] = true
+		}
+		seen := map[string]bool{}
+		for _, r := range rows {
+			if m, ok := r.(map[string]any); ok {
+				for k := range m {
+					if !set[k] && !seen[k] {
+						cols = append(cols, k)
+						seen[k] = true
+					}
+				}
+			}
+		}
+		sort.Strings(cols)
+	}
+	out := []any{}
+	for _, r := range rows {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		base := map[string]any{}
+		for _, f := range id {
+			base[f] = itemProp(m, f)
+		}
+		for _, c := range cols {
+			cell := itemProp(m, c)
+			if dropNil && isNullVal(cell, map[string]any{}) {
+				continue
+			}
+			nm := map[string]any{}
+			for k, v := range base {
+				nm[k] = v
+			}
+			nm[key] = c
+			nm[value] = cell
+			out = append(out, nm)
+		}
 	}
 	return out
 }

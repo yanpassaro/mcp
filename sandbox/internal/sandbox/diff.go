@@ -8,7 +8,7 @@ import (
 )
 
 type diffOp struct {
-	kind byte   // ' ', '+', '-'
+	kind byte
 	a, b string
 }
 
