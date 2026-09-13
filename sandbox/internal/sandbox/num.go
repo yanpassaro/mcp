@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -67,6 +68,118 @@ func buildNum(L *lua.State) int {
 			}
 		}
 		l.PushString(formatNum(argNum(l, 1), dec, loc))
+		return 1
+	})
+	setGoFunc(L, t, "count", func(l *lua.State) int {
+		l.PushNumber(float64(len(statsNums(l, 1, statsField(l, 2)))))
+		return 1
+	})
+	setGoFunc(L, t, "min", func(l *lua.State) int {
+		v := statsNums(l, 1, statsField(l, 2))
+		if len(v) == 0 {
+			l.PushNumber(math.NaN())
+			return 1
+		}
+		m := v[0]
+		for _, x := range v[1:] {
+			if x < m {
+				m = x
+			}
+		}
+		l.PushNumber(cleanFloat(m))
+		return 1
+	})
+	setGoFunc(L, t, "max", func(l *lua.State) int {
+		v := statsNums(l, 1, statsField(l, 2))
+		if len(v) == 0 {
+			l.PushNumber(math.NaN())
+			return 1
+		}
+		m := v[0]
+		for _, x := range v[1:] {
+			if x > m {
+				m = x
+			}
+		}
+		l.PushNumber(cleanFloat(m))
+		return 1
+	})
+	setGoFunc(L, t, "median", func(l *lua.State) int {
+		l.PushNumber(cleanFloat(quantile(statsNums(l, 1, statsField(l, 2)), 0.5)))
+		return 1
+	})
+	setGoFunc(L, t, "quantile", func(l *lua.State) int {
+		v := statsNums(l, 1, statsField(l, 3))
+		l.PushNumber(cleanFloat(quantile(v, argNum(l, 2))))
+		return 1
+	})
+	setGoFunc(L, t, "percentile", func(l *lua.State) int {
+		v := statsNums(l, 1, statsField(l, 3))
+		l.PushNumber(cleanFloat(quantile(v, argNum(l, 2)/100)))
+		return 1
+	})
+	setGoFunc(L, t, "variance", func(l *lua.State) int {
+		v := statsNums(l, 1, statsField(l, 3))
+		l.PushNumber(cleanFloat(variance(v, asBool(luaToAny(l, 2), false))))
+		return 1
+	})
+	setGoFunc(L, t, "stdev", func(l *lua.State) int {
+		v := statsNums(l, 1, statsField(l, 3))
+		l.PushNumber(cleanFloat(math.Sqrt(variance(v, asBool(luaToAny(l, 2), false)))))
+		return 1
+	})
+	setGoFunc(L, t, "range", func(l *lua.State) int {
+		v := statsNums(l, 1, statsField(l, 2))
+		if len(v) == 0 {
+			pushAny(l, map[string]any{})
+			return 1
+		}
+		lo, hi := v[0], v[0]
+		for _, x := range v[1:] {
+			if x < lo {
+				lo = x
+			}
+			if x > hi {
+				hi = x
+			}
+		}
+		pushAny(l, map[string]any{"min": cleanFloat(lo), "max": cleanFloat(hi)})
+		return 1
+	})
+	setGoFunc(L, t, "mode", func(l *lua.State) int {
+		v := statsNums(l, 1, statsField(l, 2))
+		counts := map[float64]int{}
+		for _, x := range v {
+			counts[x]++
+		}
+		best := 0
+		for _, c := range counts {
+			if c > best {
+				best = c
+			}
+		}
+		vals := []float64{}
+		for x, c := range counts {
+			if c == best {
+				vals = append(vals, x)
+			}
+		}
+		sort.Float64s(vals)
+		out := make([]any, len(vals))
+		for i, x := range vals {
+			out[i] = x
+		}
+		pushAny(l, out)
+		return 1
+	})
+	setGoFunc(L, t, "histogram", func(l *lua.State) int {
+		opts := toAnyMap(l, 2)
+		v := statsNums(l, 1, optString(opts, "field"))
+		bins := 0
+		if b := optUint(opts, "bins", 0); b > 0 {
+			bins = int(b)
+		}
+		pushAny(l, histogram(v, bins))
 		return 1
 	})
 	return t

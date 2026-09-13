@@ -47,6 +47,72 @@ func buildSchema(L *lua.State) int {
 		pushAny(l, coerceValue(luaToAny(l, 1), argString(l, 2)))
 		return 1
 	})
+	setGoFunc(L, t, "infer_type", func(l *lua.State) int {
+		l.PushString(inferType(luaArrayAny(l, 1)))
+		return 1
+	})
+	setGoFunc(L, t, "infer_types", func(l *lua.State) int {
+		rows := luaArrayAny(l, 1)
+		opts := toAnyMap(l, 2)
+		fields := stringSlice(opts["fields"])
+		if len(fields) == 0 {
+			fields = rowFields(rows)
+		}
+		out := map[string]any{}
+		for _, f := range fields {
+			vals := make([]any, 0, len(rows))
+			for _, r := range rows {
+				if m, ok := r.(map[string]any); ok {
+					vals = append(vals, m[f])
+				}
+			}
+			out[f] = inferType(vals)
+		}
+		pushAny(l, out)
+		return 1
+	})
+	setGoFunc(L, t, "detect", func(l *lua.State) int {
+		l.PushString(inferType([]any{luaToAny(l, 1)}))
+		return 1
+	})
+	setGoFunc(L, t, "is_null", func(l *lua.State) int {
+		l.PushBoolean(isNullVal(luaToAny(l, 1), toAnyMap(l, 2)))
+		return 1
+	})
+	setGoFunc(L, t, "count", func(l *lua.State) int {
+		opts := toAnyMap(l, 2)
+		vals := missingVals(luaArrayAny(l, 1), optString(opts, "field"))
+		c := 0
+		for _, v := range vals {
+			if isNullVal(v, opts) {
+				c++
+			}
+		}
+		l.PushNumber(float64(c))
+		return 1
+	})
+	setGoFunc(L, t, "which", func(l *lua.State) int {
+		opts := toAnyMap(l, 2)
+		vals := missingVals(luaArrayAny(l, 1), optString(opts, "field"))
+		out := []any{}
+		for i, v := range vals {
+			if isNullVal(v, opts) {
+				out = append(out, float64(i+1))
+			}
+		}
+		pushAny(l, out)
+		return 1
+	})
+	setGoFunc(L, t, "fill", func(l *lua.State) int {
+		opts := toAnyMap(l, 2)
+		vals := missingVals(luaArrayAny(l, 1), optString(opts, "field"))
+		pushAny(l, missingFill(vals, opts))
+		return 1
+	})
+	setGoFunc(L, t, "drop", func(l *lua.State) int {
+		pushAny(l, missingDrop(luaArrayAny(l, 1), toAnyMap(l, 2)))
+		return 1
+	})
 
 	return t
 }

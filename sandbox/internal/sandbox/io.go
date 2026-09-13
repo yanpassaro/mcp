@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	lua "github.com/Shopify/go-lua"
@@ -168,6 +169,58 @@ func buildIO(L *lua.State, store *Store) int {
 			panic(ioErr("unzip", src, err))
 		}
 		pushAny(l, names)
+		return 1
+	})
+	setGoFunc(L, t, "join", func(l *lua.State) int {
+		parts := make([]string, 0, l.Top())
+		for i := 1; i <= l.Top(); i++ {
+			parts = append(parts, argString(l, i))
+		}
+		l.PushString(path.Join(parts...))
+		return 1
+	})
+	setGoFunc(L, t, "basename", func(l *lua.State) int {
+		l.PushString(path.Base(argString(l, 1)))
+		return 1
+	})
+	setGoFunc(L, t, "dirname", func(l *lua.State) int {
+		l.PushString(path.Dir(argString(l, 1)))
+		return 1
+	})
+	setGoFunc(L, t, "ext", func(l *lua.State) int {
+		l.PushString(path.Ext(argString(l, 1)))
+		return 1
+	})
+	setGoFunc(L, t, "stem", func(l *lua.State) int {
+		base := path.Base(argString(l, 1))
+		l.PushString(strings.TrimSuffix(base, path.Ext(base)))
+		return 1
+	})
+	setGoFunc(L, t, "split", func(l *lua.State) int {
+		dir, file := path.Split(argString(l, 1))
+		pushAny(l, map[string]any{"dir": dir, "file": file})
+		return 1
+	})
+	setGoFunc(L, t, "normalize", func(l *lua.State) int {
+		l.PushString(path.Clean(argString(l, 1)))
+		return 1
+	})
+	setGoFunc(L, t, "is_abs", func(l *lua.State) int {
+		l.PushBoolean(path.IsAbs(argString(l, 1)))
+		return 1
+	})
+	setGoFunc(L, t, "rel", func(l *lua.State) int {
+		r, err := pathRel(argString(l, 1), argString(l, 2))
+		if err != nil {
+			panic(err)
+		}
+		l.PushString(r)
+		return 1
+	})
+	setGoFunc(L, t, "within", func(l *lua.State) int {
+		base := path.Clean(argString(l, 1))
+		p := path.Clean(argString(l, 2))
+		l.PushBoolean(p == base || strings.HasPrefix(p, base+"/"))
 		return 1
 	})
 	return t

@@ -22,12 +22,11 @@ type lunaMod struct {
 }
 
 var lunaOrder = []*lunaMod{
-	lunaResult, lunaLog, lunaArgs, lunaIO, lunaTmp, lunaFetch, lunaCookies,
-	lunaSecrets, lunaSQL, lunaUUID, lunaCSV, lunaXML, lunaExcel, lunaData,
+	lunaResult, lunaLog, lunaArgs, lunaIO, lunaTmp, lunaNet, lunaCookies,
+	lunaSecrets, lunaSQL, lunaCSV, lunaXML, lunaExcel, lunaData,
 	lunaRegex, lunaJSON, lunaEncode, lunaStr, lunaList, lunaNum, lunaDate,
-	lunaRandom, lunaAssert, lunaTemplate, lunaHuman, lunaPath, lunaStats,
-	lunaSchema, lunaDiff, lunaInfer, lunaMissing, lunaText, lunaPipe,
-	lunaSeq, lunaDuration, lunaUnit,
+	lunaRandom, lunaAssert, lunaTemplate, lunaHuman, lunaSchema, lunaPipe,
+	lunaDiff, lunaUnit,
 }
 
 var lunaNative = []string{
@@ -55,7 +54,7 @@ func lunaTopicNames() []string {
 func renderLunaIndex() string {
 	var b strings.Builder
 	b.WriteString("# Sandbox Lua — std (lunadoc)\n\n")
-	b.WriteString("> Isolated Lua sandbox: no OS/process; files in `mnt/`; network only via `std.fetch` (allowlist). Each script is `function main(std)` ending in `std.result.ok(...)`/`err(...)`. Inline `code` can be just the body — the wrapper is added for you.\n\n")
+	b.WriteString("> Isolated Lua sandbox: no OS/process; files in `mnt/`; network only via `std.net` (allowlist). Each script is `function main(std)` ending in `std.result.ok(...)`/`err(...)`. Inline `code` can be just the body — the wrapper is added for you.\n\n")
 	var names []string
 	for _, m := range lunaOrder {
 		names = append(names, "`"+m.Name+"`")
@@ -201,7 +200,7 @@ var lunaRun = &lunaMod{
 	Desc: "how to run scripts (inline code or path)",
 	Body: `# sandbox_run — 2 modos de executar scripts
 
-Executa um script Lua isolado (sem SO/processo; arquivos em ~mnt/~; rede via ~std.fetch~). Entre com **~path~** (arquivo .lua no host) ou **~code~** (inline).
+Executa um script Lua isolado (sem SO/processo; arquivos em ~mnt/~; rede via ~std.net~). Entre com **~path~** (arquivo .lua no host) ou **~code~** (inline).
 
 Todo script é uma função ~function main(std) ... end~. **Em todos os modos o script precisa declarar ~function main(std)~** e terminar com ~std.result.ok(...)~ ou ~std.result.err(...)~. No modo ~code~ inline, se você mandar só o corpo, o wrapper é adicionado automaticamente — mas os exemplos abaixo já trazem o wrapper completo.
 
@@ -278,7 +277,7 @@ end
 ~~~lua
 if std.secrets.has("github_token_api") then
   local token = std.secrets.get("github_token_api")
-  local res = std.fetch.json("https://api.github.com/user", {
+  local res = std.net.json("https://api.github.com/user", {
     headers = { Authorization = "Bearer " .. token },
   })
   std.result.ok({ ok = res.ok, login = res.data and res.data.login })
@@ -411,6 +410,16 @@ var lunaIO = &lunaMod{
 		{"tree", "path?:string", "table", "{ name, isDir, size, lines, children }"},
 		{"zip", "dest:string, source:table|string", "table<string>", "creates a zip: array of paths (folders recursed), {name=content} or a single path; returns entry names"},
 		{"unzip", "src:string, dest:string", "table<string>", "extracts a zip into a folder; returns the extracted paths (rejects zip-slip)"},
+		{"join", "...parts", "string", "joins segments"},
+		{"basename", "p:string", "string", "last segment"},
+		{"dirname", "p:string", "string", "parent dir"},
+		{"ext", "p:string", "string", "extension with dot"},
+		{"stem", "p:string", "string", "basename without ext"},
+		{"split", "p:string", "table", "{dir, file}"},
+		{"normalize", "p:string", "string", "cleans `.`/`..`/`//`"},
+		{"is_abs", "p:string", "bool", "absolute?"},
+		{"rel", "base:string, p:string", "string", "relative path"},
+		{"within", "base:string, p:string", "bool", "is `p` inside `base`?"},
 	},
 	Example: `if std.io.exists("data.txt") then
   std.io.append("data.txt", "\nfim")
@@ -433,9 +442,9 @@ local n = std.tmp.clear()
 std.result.ok({ cleared = n })`,
 }
 
-var lunaFetch = &lunaMod{
-	Name:   "fetch",
-	Prefix: "fetch",
+var lunaNet = &lunaMod{
+	Name:   "net",
+	Prefix: "net",
 	Desc:   "HTTP via allowlist — `res = { status, ok, headers, body, bytes, ms, ... }`",
 	Fns: []lunaFn{
 		{"request", "url:string, opts?:table", "table", "generic request (opts.method, body, headers, timeout, ...)"},
@@ -444,7 +453,7 @@ var lunaFetch = &lunaMod{
 		{"json", "url:string, opts?:table", "table", "GET and parses the body (res.data)"},
 		{"save", "url:string, path:string, opts?:table", "table", "GET and writes the body to a sandbox file; retries on 429/5xx (opts.retries, opts.backoffMs)"},
 	},
-	Example: `local res = std.fetch.get("http://localhost:8080/api", {
+	Example: `local res = std.net.get("http://localhost:8080/api", {
   headers = { Authorization = "Bearer " .. std.secrets.get("TOKEN") },
   timeout = 5000,
 })
@@ -472,8 +481,8 @@ std.result.ok({ b = b, d = d, m = m })`,
 
 var lunaCookies = &lunaMod{
 	Name:   "cookies",
-	Prefix: "fetch.cookies",
-	Desc:   "`std.fetch` cookies, persisted in `SANDBOX_FETCH_COOKIE_FILE`",
+	Prefix: "net.cookies",
+	Desc:   "`std.net` cookies, persisted in `SANDBOX_FETCH_COOKIE_FILE`",
 	Fns: []lunaFn{
 		{"list", "-", "table", "lists all cookies { domain, name, value, path, secure, httpOnly }"},
 		{"clear", "domain?:string", "int", "removes cookies (without a domain, clears all); returns how many"},
@@ -655,6 +664,12 @@ var lunaStr = &lunaMod{
 		{"format", "fmt:string, ...", "string", "printf-style"},
 		{"count", "s:string, sub:string", "number", "occurrences"},
 		{"split", "s:string, sep:string, limit?:number", "table<string>", "splits"},
+		{"extract", "s:string, pattern:string, opts?:table", "table<string>", "regex matches (opts.group)"},
+		{"tokens", "s:string, opts?:table", "table<string>", "words (lower/min_len/stopwords)"},
+		{"ngrams", "s:string, n?:number", "table<string>", "sliding n-word windows"},
+		{"similarity", "a:string, b:string, opts?:table", "number", "0..1 (method)"},
+		{"match", "a:string, b:string, threshold?:number", "bool", "similar enough?"},
+		{"keywords", "s:string, n?:number", "table", "top {word, count}"},
 	},
 	Example: `std.result.ok({
   slug = std.str.slug("Ola Mundo"),
@@ -681,6 +696,12 @@ var lunaList = &lunaMod{
 		{"find", "arr:table, fn:function", "any|nil", "first matching item"},
 		{"some", "arr:table, fn:function", "bool", "does any match?"},
 		{"every", "arr:table, fn:function", "bool", "do all match?"},
+		{"range", "n:number", "table<number>", "`{1..n}` (count)"},
+		{"iota", "n:number", "table<number>", "`{0..n-1}` (indices)"},
+		{"arange", "start:number, stop:number, step?:number", "table<number>", "`[start, stop)` (negative step ok)"},
+		{"repeat", "v:any, n:number", "table<any>", "`{v x n}`"},
+		{"zip", "...arrs", "table<table>", "i-th elements as tuples"},
+		{"enumerate", "arr:table, start?:number", "table<table>", "`{ {i, item} }`"},
 	},
 	Example: `local dbl = std.list.map({ 1, 2, 3 }, function(x) return x * 2 end)
 std.result.ok({ dbl = dbl, all = std.list.every(dbl, function(x) return x > 0 end) })`,
@@ -698,6 +719,17 @@ var lunaNum = &lunaMod{
 		{"avg", "arr:table", "number", "average"},
 		{"parse", "s:string", "number", "parses; NaN if invalid"},
 		{"fmt", "n:number, dec?:number, loc?:string", "string", "formats (pt-BR → 1.234,56)"},
+		{"count", "arr:table, opts?:table", "number", "counts numeric entries"},
+		{"min", "arr:table, opts?:table", "number", "smallest"},
+		{"max", "arr:table, opts?:table", "number", "largest"},
+		{"median", "arr:table, opts?:table", "number", "median"},
+		{"quantile", "arr:table, q:number", "number", "q in 0..1"},
+		{"percentile", "arr:table, p:number", "number", "p in 0..100"},
+		{"variance", "arr:table, sample?:bool", "number", "population or sample"},
+		{"stdev", "arr:table, sample?:bool", "number", "standard deviation"},
+		{"range", "arr:table, opts?:table", "table", "{min, max}"},
+		{"mode", "arr:table, opts?:table", "table<number>", "most frequent values"},
+		{"histogram", "arr:table, opts?:table", "table", "bins `{count, lo, hi}`"},
 	},
 	Example: `std.result.ok({
   t = std.num.sum({ 1, 2, 3 }),
@@ -718,6 +750,13 @@ var lunaDate = &lunaMod{
 		{"add", "ts:number, amount:number, unit:string", "number", "adds `amount` of `unit`"},
 		{"unix", "ts?:number", "number", "seconds"},
 		{"diff", "a:number, b:number, unit:string", "number", "difference in `unit`"},
+		{"duration", "s:string", "number|nil", "`\"2h30m\"` → ms"},
+		{"format_duration", "ms:number", "string", "ms → `\"2h30m\"`"},
+		{"duration_parts", "ms:number", "table", "{w, d, h, m, s, ms}"},
+		{"duration_total", "ms:number, unit:string", "number", "ms in a unit"},
+		{"duration_compare", "a, b", "number", "-1/0/1"},
+		{"duration_add", "ts:number, dur", "number", "ms + duration"},
+		{"duration_sub", "ts:number, dur", "number", "ms − duration"},
 	},
 	Example: `local now = std.date.now()
 local later = std.date.add(now, 2, "hour")
@@ -736,7 +775,7 @@ var lunaRandom = &lunaMod{
 		{"shuffle", "arr:table", "table", "shuffled copy"},
 		{"bool", "-", "bool", "random boolean"},
 		{"name", "-", "string", "randomly generated full name"},
-		{"email", "-", "string", "random email"},
+		{"email", "domain?:string", "string", "random email (opcional domain, ex. \"gmail.com\")"},
 		{"username", "-", "string", "random username"},
 		{"phone", "-", "string", "phone"},
 		{"date", "from?:string, to?:string", "string", "RFC3339 date"},
@@ -748,6 +787,9 @@ var lunaRandom = &lunaMod{
 		{"cnpj", "-", "string", "CNPJ válido (dígito verificador)"},
 		{"cep", "-", "string", "CEP `NNNNN-NNN`"},
 		{"rg", "-", "string", "RG com dígito verificador"},
+		{"uuid", "-", "string", "UUID v4"},
+		{"uuid7", "-", "string", "UUID v7 (time-based)"},
+		{"uuid_valid", "s:string, version?:number", "bool", "is a valid UUID (version)"},
 	},
 	Example: `std.random.seed(42)
 std.result.ok({ n = std.random.int(1, 100), nome = std.random.name(), pw = std.random.password(12) })`,
@@ -849,6 +891,14 @@ var lunaSchema = &lunaMod{
 		{"validate", "rows:table, spec:table", "table", "validates a list of maps"},
 		{"validate_one", "obj:table, spec:table", "table", "validates one map"},
 		{"coerce", "v:any, type:string", "any", "coerces to string/number/bool"},
+		{"infer_type", "values:table", "string", "infers column type"},
+		{"infer_types", "rows:table, opts?:table", "table", "{ field = type }"},
+		{"detect", "v:any", "string", "type of one value"},
+		{"is_null", "v:any, opts?:table", "bool", "is missing?"},
+		{"count", "values:table, opts?:table", "number", "counts missing (opts.field)"},
+		{"which", "values:table, opts?:table", "table<number>", "indices of missing"},
+		{"fill", "values:table, opts?:table", "table", "fill missing (value/method)"},
+		{"drop", "rows:table, opts?:table", "table", "drops rows with missing"},
 	},
 	Example: `local res = std.schema.validate({
   { name = "Ava", age = 30, email = "a@x.com" },

@@ -18,7 +18,7 @@ import (
 	lua "github.com/Shopify/go-lua"
 )
 
-type fetchConfig struct {
+type netConfig struct {
 	allow      []string
 	timeout    time.Duration
 	maxBody    int64
@@ -26,8 +26,8 @@ type fetchConfig struct {
 	store      *sandboxCookieStore
 }
 
-func defaultFetchConfig() fetchConfig {
-	cfg := fetchConfig{
+func defaultNetConfig() netConfig {
+	cfg := netConfig{
 		timeout:    30 * time.Second,
 		maxBody:    1 << 20,
 		cookieFile: filepath.Join(userLocalShare(), "mcp", "sandbox", "cookies.json"),
@@ -66,7 +66,7 @@ func splitHosts(s string) []string {
 	return out
 }
 
-func (c *fetchConfig) allowHost(authority string) bool {
+func (c *netConfig) allowHost(authority string) bool {
 	hostname := strings.ToLower(authority)
 	if h, _, err := net.SplitHostPort(authority); err == nil {
 		hostname = strings.ToLower(h)
@@ -91,12 +91,12 @@ func (c *fetchConfig) allowHost(authority string) bool {
 	return false
 }
 
-func buildFetch(L *lua.State, store *Store) int {
-	cfg := defaultFetchConfig()
+func buildNet(L *lua.State, store *Store) int {
+	cfg := defaultNetConfig()
 	t := newTable(L)
 
 	setGoFunc(L, t, "request", func(l *lua.State) int {
-		res, err := doFetch(&cfg, argString(l, 1), toAnyMap(l, 2))
+		res, err := doNet(&cfg, argString(l, 1), toAnyMap(l, 2))
 		if err != nil {
 			panic(err)
 		}
@@ -106,7 +106,7 @@ func buildFetch(L *lua.State, store *Store) int {
 	setGoFunc(L, t, "get", func(l *lua.State) int {
 		opts := toAnyMap(l, 2)
 		opts["method"] = "GET"
-		res, err := doFetch(&cfg, argString(l, 1), opts)
+		res, err := doNet(&cfg, argString(l, 1), opts)
 		if err != nil {
 			panic(err)
 		}
@@ -122,7 +122,7 @@ func buildFetch(L *lua.State, store *Store) int {
 			opts = toAnyMap(l, 2)
 			opts["method"] = "POST"
 		}
-		res, err := doFetch(&cfg, argString(l, 1), opts)
+		res, err := doNet(&cfg, argString(l, 1), opts)
 		if err != nil {
 			panic(err)
 		}
@@ -132,7 +132,7 @@ func buildFetch(L *lua.State, store *Store) int {
 	setGoFunc(L, t, "json", func(l *lua.State) int {
 		opts := toAnyMap(l, 2)
 		opts["method"] = "GET"
-		res, err := doFetch(&cfg, argString(l, 1), opts)
+		res, err := doNet(&cfg, argString(l, 1), opts)
 		if err != nil {
 			panic(err)
 		}
@@ -169,7 +169,7 @@ func buildFetch(L *lua.State, store *Store) int {
 		if strings.TrimSpace(path) == "" {
 			panic("informe o caminho do arquivo de destino")
 		}
-		meta, err := fetchSave(&cfg, store, url, path, toAnyMap(l, 3))
+		meta, err := netSave(&cfg, store, url, path, toAnyMap(l, 3))
 		if err != nil {
 			panic(err)
 		}
@@ -179,8 +179,8 @@ func buildFetch(L *lua.State, store *Store) int {
 	return t
 }
 
-func doFetch(cfg *fetchConfig, urlStr string, opts map[string]any) (map[string]any, error) {
-	body, meta, err := fetchAttempts(cfg, urlStr, opts, cfg.maxBody)
+func doNet(cfg *netConfig, urlStr string, opts map[string]any) (map[string]any, error) {
+	body, meta, err := netAttempts(cfg, urlStr, opts, cfg.maxBody)
 	if err != nil {
 		return nil, err
 	}
@@ -189,8 +189,8 @@ func doFetch(cfg *fetchConfig, urlStr string, opts map[string]any) (map[string]a
 	return meta, nil
 }
 
-func fetchSave(cfg *fetchConfig, store *Store, urlStr, path string, opts map[string]any) (map[string]any, error) {
-	body, meta, err := fetchAttempts(cfg, urlStr, opts, maxFileBytes)
+func netSave(cfg *netConfig, store *Store, urlStr, path string, opts map[string]any) (map[string]any, error) {
+	body, meta, err := netAttempts(cfg, urlStr, opts, maxFileBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func fetchSave(cfg *fetchConfig, store *Store, urlStr, path string, opts map[str
 	return meta, nil
 }
 
-func fetchAttempts(cfg *fetchConfig, urlStr string, opts map[string]any, limit int64) ([]byte, map[string]any, error) {
+func netAttempts(cfg *netConfig, urlStr string, opts map[string]any, limit int64) ([]byte, map[string]any, error) {
 	retries := 0
 	if d, ok := numOpt(opts["retries"]); ok && d > 0 {
 		retries = int(d)
@@ -244,7 +244,7 @@ func isRetryableStatus(status int) bool {
 	return status == 429 || (status >= 500 && status < 600)
 }
 
-func doAttempt(cfg *fetchConfig, urlStr string, opts map[string]any, limit int64) ([]byte, map[string]any, error) {
+func doAttempt(cfg *netConfig, urlStr string, opts map[string]any, limit int64) ([]byte, map[string]any, error) {
 	method, _ := opts["method"].(string)
 	method = strings.ToUpper(strings.TrimSpace(method))
 	if method == "" {
@@ -358,7 +358,6 @@ func doAttempt(cfg *fetchConfig, urlStr string, opts map[string]any, limit int64
 		"ms":         time.Since(start).Milliseconds(),
 	}, nil
 }
-
 
 type cookieRec struct {
 	Name     string    `json:"name"`

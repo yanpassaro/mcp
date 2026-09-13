@@ -1,6 +1,6 @@
 # sandbox-mcp
 
-Sandbox **não-destrutivo** de Lua para a IA: rode scripts isolados — sem SO/processo, arquivos só em `mnt/`, rede só via `std.fetch` (allowlist).
+Sandbox **não-destrutivo** de Lua para a IA: rode scripts isolados — sem SO/processo, arquivos só em `mnt/`, rede só via `std.net` (allowlist).
 
 ## Quick start
 
@@ -39,7 +39,7 @@ Opcional: `-- name=meu_script` e `-- desc=faz algo` no topo do script aparecem n
 | Tool | O que faz |
 | --- | --- |
 | `sandbox_run` | Roda um script por `path` (`.lua` no host) ou `code` inline, com `args` opcional (vira `std.args`). Ação: `run` (default). |
-| `sandbox_doc` | Documentação da API `std`. `sandbox_doc topic=<módulo>` traz assinaturas + retorno + exemplo (ex.: `io`, `run`, `fetch`, `limits`). |
+| `sandbox_doc` | Documentação da API `std`. `sandbox_doc topic=<módulo>` traz assinaturas + retorno + exemplo (ex.: `io`, `run`, `net`, `limits`). |
 | `sandbox_os` | Gerencia o filesystem: `copy` (host→sandbox), `mount` (sandbox→host), `del`, `stat`, `list`. |
 
 ## A API `std`
@@ -51,27 +51,30 @@ Cada módulo agrupa funções; detalhes em `sandbox_doc topic=<módulo>`.
 | `result` | `ok(data)` / `err(msg)`; `render(template, vars)` → devolve Markdown renderizado |
 | `log` | escreve na saída (`print()` também) |
 | `args` | o valor `args` da execução (`std.args`) |
-| `io` | arquivos em `mnt/`: `read`, `write`, `append`, `lines`, `json`, `del`, `exists`, `stat`, `dir`, `copy`, `move`, `mkdir`, `glob`, `walk`, `zip`, `unzip` |
+| `io` | arquivos em `mnt/`: `read`, `write`, `append`, `lines`, `json`, `del`, `exists`, `stat`, `dir`, `copy`, `move`, `mkdir`, `glob`, `walk`, `tree`, `zip`, `unzip` + paths `join`, `basename`, `dirname`, `ext`, `stem`, `split`, `normalize`, `is_abs`, `rel`, `within` |
 | `tmp` | arquivos temporários (`tmp/`): mesmas funções do `io` + `clear` (limpa a cada execução) |
-| `fetch` | HTTP: `get`, `post`, `json`, `save`, `request` (+ `fetch.cookies`) |
+| `net` | HTTP via allowlist: `get`, `post`, `json`, `save`, `request` (+ `net.cookies`) |
 | `secrets` | lê `SECRET_*`: `get`, `has` (só leitura) |
 | `sql` | SQLite: `connect(path)` → `exec`, `query`, `get`, `schema`… + `import`/`export` |
-| `uuid` | `v4`, `v7`, `valid` |
 | `csv` | `parse`, `stringify` |
 | `xml` | `parse`, `stringify` |
 | `excel` | `.xlsx`: `sheets`, `read`, `write` |
 | `data` | pipeline CSV/JSON/XML/HTML/Excel/SQLite/SQL: `from`, `to`, `convert` |
 | `regex` | Go RE2: `match`, `find`, `findAll`, `replace`, `split`, `groups`, `findAllGroups` |
 | `json` | `parse`, `stringify`, `format`, `minify`, `path` |
-| `encode` | `crc32`, `md5`, `sha256`, `base64`, `base32`, `hex` |
-| `str` | `normalize`, `slug`, `title`, `camel`, `pascal`, `snake`, `kebab`, `wrap`, `summarize`, `format`, `count`, `split` |
-| `list` | `chunk`, `groupBy`, `unique`, `flatten`, `sortBy`, `countBy`, `first`, `last`, `map`, `filter`, `reduce`, `find`, `some`, `every` |
-| `num` | `round`, `clamp`, `percent`, `sum`, `avg`, `parse`, `fmt` |
-| `date` | `now`, `iso`, `format`, `parse`, `add`, `unix`, `diff` |
-| `random` | `seed`, `int`, `float`, `pick`, `shuffle`, `bool`, `name`, `email`, `username`, `phone`, `date`, `sentence`, `paragraph` |
+| `encode` | `crc32`, `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3_256`, `sha3_512`, `argon2`, `argon2_verify`, `base64`, `base32`, `hex` |
+| `str` | `normalize`, `slug`, `title`, `camel`, `pascal`, `snake`, `kebab`, `wrap`, `summarize`, `format`, `count`, `split` + texto `extract`, `tokens`, `ngrams`, `similarity`, `match`, `keywords` |
+| `list` | `chunk`, `groupBy`, `unique`, `flatten`, `sortBy`, `countBy`, `first`, `last`, `map`, `filter`, `reduce`, `find`, `some`, `every` + seq `range`, `iota`, `arange`, `repeat`, `zip`, `enumerate` |
+| `num` | `round`, `clamp`, `percent`, `sum`, `avg`, `parse`, `fmt` + stats `count`, `min`, `max`, `median`, `quantile`, `percentile`, `variance`, `stdev`, `range`, `mode`, `histogram` |
+| `date` | `now`, `iso`, `format`, `parse`, `add`, `unix`, `diff` + duration `duration`, `format_duration`, `duration_parts`, `duration_total`, `duration_compare`, `duration_add`, `duration_sub` |
+| `random` | `seed`, `int`, `float`, `pick`, `shuffle`, `bool`, `name`, `email(domain?)`, `username`, `phone`, `date`, `sentence`, `paragraph`, `password`, `token`, `cpf`, `cnpj`, `cep`, `rg`, `uuid`, `uuid7`, `uuid_valid` |
 | `assert` | `ok`, `equal`, `throws`, `type`, `number`, `string`, `boolean`, `table`, `contains`, `matches`, `between`, `length` |
 | `template` | `render` — placeholders `{nome}`/`{{nome}}` + `{{#if}}`, `{{#unless}}`, `{{#each}}`, `{{else}}` |
 | `human` | `bytes`, `duration`, `compact`, `money`, `ordinal`, `plural`, `list` (pt-BR) |
+| `schema` | qualidade de dados: `validate`, `validate_one`, `coerce`, `infer_type`, `infer_types`, `detect`, `is_null`, `count`, `which`, `fill`, `drop` |
+| `diff` | diff unificado (stdlib só): `unified`, `lines`, `ratio` |
+| `pipe` | fila de linhas: `rows` (builder fluente) + `map`, `filter`, `select`, `rename`, `drop`, `sort`, `distinct`, `take`, `group`, `join`, `coerce`, `infer`, `pivot`, `unpivot` |
+| `unit` | unidades: `convert`, `factor`, `list` (length/mass/data/time/volume/temp) |
 
 ## Como o script termina
 
@@ -129,7 +132,7 @@ O filesystem é fixo (sem env): `mnt` em `~/.local/state/mcp/mnt` (compartilhado
 | `SANDBOX_MNT_SPACE_MB` | `256` | teto de espaço de `mnt/` |
 | `SANDBOX_MEM_LIMIT_MB` | `512` | teto de RAM do processo sandbox |
 | `SANDBOX_EXEC_TIMEOUT_SECONDS` | `180` | timeout de execução de cada script |
-| `SANDBOX_FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | hosts permitidos para `std.fetch` (vírgulas; `.domínio` libera subdomínios) |
-| `SANDBOX_FETCH_TIMEOUT_SECONDS` | `30` | timeout do `std.fetch` |
-| `SANDBOX_FETCH_MAX_BODY_KB` | `1024` | teto do corpo da resposta do `std.fetch` |
-| `SANDBOX_FETCH_COOKIE_FILE` | `~/.local/share/mcp/sandbox/cookies.json` | persistência de cookies do `std.fetch` |
+| `SANDBOX_FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | hosts permitidos para `std.net` (vírgulas; `.domínio` libera subdomínios) |
+| `SANDBOX_FETCH_TIMEOUT_SECONDS` | `30` | timeout do `std.net` |
+| `SANDBOX_FETCH_MAX_BODY_KB` | `1024` | teto do corpo da resposta do `std.net` |
+| `SANDBOX_FETCH_COOKIE_FILE` | `~/.local/share/mcp/sandbox/cookies.json` | persistência de cookies do `std.net` |

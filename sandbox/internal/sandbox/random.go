@@ -63,8 +63,11 @@ func buildRandom(L *lua.State) int {
 	setGoFunc(L, t, "email", func(l *lua.State) int {
 		f := strings.ToLower(fakeTokenAscii(rng))
 		m := strings.ToLower(fakeTokenAscii(rng))
-		d := strings.ToLower(fakeTokenAscii(rng))
-		l.PushString(f + "." + m + "@" + d + ".com")
+		d := emailDomain(argString(l, 1))
+		if d == "" {
+			d = strings.ToLower(fakeTokenAscii(rng)) + ".com"
+		}
+		l.PushString(f + "." + m + "@" + d)
 		return 1
 	})
 	setGoFunc(L, t, "username", func(l *lua.State) int {
@@ -178,6 +181,19 @@ func buildRandom(L *lua.State) int {
 		l.PushString(randomRG(rng))
 		return 1
 	})
+	setGoFunc(L, t, "uuid", func(l *lua.State) int {
+		l.PushString(uuidV4())
+		return 1
+	})
+	setGoFunc(L, t, "uuid7", func(l *lua.State) int {
+		l.PushString(uuidV7(time.Now()))
+		return 1
+	})
+	setGoFunc(L, t, "uuid_valid", func(l *lua.State) int {
+		l.PushBoolean(uuidValid(argString(l, 1), int(argNum(l, 2))))
+		return 1
+	})
+
 	return t
 }
 
@@ -211,6 +227,17 @@ func fakeSentence(rng *rand.Rand) string {
 
 func cap1(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func emailDomain(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "@")
+	s = strings.TrimPrefix(s, "http://")
+	s = strings.TrimPrefix(s, "https://")
+	if i := strings.Index(s, "/"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.ToLower(s)
 }
 
 const (

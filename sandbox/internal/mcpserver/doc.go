@@ -30,6 +30,8 @@ var docAliases = map[string]string{
 	"dates":    "date",
 	"date":     "date",
 	"cookies":   "cookies",
+	"fetch":     "net",
+	"http":      "net",
 	"sqlite":    "sql",
 	"csv":       "csv",
 	"regex":     "regex",

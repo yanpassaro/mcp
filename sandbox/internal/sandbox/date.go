@@ -64,6 +64,47 @@ func buildDate(L *lua.State) int {
 		l.PushNumber(diffIn(a, b, argString(l, 3)))
 		return 1
 	})
+	setGoFunc(L, t, "duration", func(l *lua.State) int {
+		if ms, ok := durationParse(argString(l, 1)); ok {
+			l.PushNumber(float64(ms))
+		} else {
+			l.PushNil()
+		}
+		return 1
+	})
+	setGoFunc(L, t, "format_duration", func(l *lua.State) int {
+		l.PushString(durationFormat(int64(argNum(l, 1))))
+		return 1
+	})
+	setGoFunc(L, t, "duration_parts", func(l *lua.State) int {
+		pushAny(l, durationParts(int64(argNum(l, 1))))
+		return 1
+	})
+	setGoFunc(L, t, "duration_total", func(l *lua.State) int {
+		unit := strings.ToLower(strings.TrimSpace(argString(l, 2)))
+		l.PushNumber(cleanFloat(durationTotal(int64(argNum(l, 1)), unit)))
+		return 1
+	})
+	setGoFunc(L, t, "duration_compare", func(l *lua.State) int {
+		a, b := durationMS(l, 1), durationMS(l, 2)
+		switch {
+		case a < b:
+			l.PushInteger(-1)
+		case a > b:
+			l.PushInteger(1)
+		default:
+			l.PushInteger(0)
+		}
+		return 1
+	})
+	setGoFunc(L, t, "duration_add", func(l *lua.State) int {
+		l.PushNumber(float64(int64(argNum(l, 1)) + durationMS(l, 2)))
+		return 1
+	})
+	setGoFunc(L, t, "duration_sub", func(l *lua.State) int {
+		l.PushNumber(float64(int64(argNum(l, 1)) - durationMS(l, 2)))
+		return 1
+	})
 	return t
 }
 

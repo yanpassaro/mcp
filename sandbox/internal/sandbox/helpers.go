@@ -21,7 +21,7 @@ func numOpt(v any) (float64, bool) {
 func parseArgs(argStr string) any {
 	s := strings.TrimSpace(argStr)
 	if s == "" {
-		return nil
+		return map[string]any{}
 	}
 	var v any
 	if err := json.Unmarshal([]byte(s), &v); err == nil {

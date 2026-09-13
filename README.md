@@ -32,7 +32,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | | `SANDBOX_MNT_SPACE_MB` | `256` | teto de espaço em `mnt/` |
 | | `SANDBOX_SQL_MAX_ROWS` | `10000` | teto de linhas no `std.sql.query` |
 | | `SANDBOX_EXEC_TIMEOUT_SECONDS` | `180` | timeout de execução de cada script |
-| | `SANDBOX_FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | allowlist do `std.fetch` |
+| | `SANDBOX_FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | allowlist do `std.net` |
 | | `SECRET_*` | — | secrets lidas via `std.secrets.get("chave")`; valores são redigidos em toda saída |
 
 O filesystem do sandbox (`mnt`) e a exportação do sqlize ficam **fixos** em `~/.local/state/mcp/mnt` (pasta compartilhada, sem env): o `mnt` do sandbox é `~/.local/state/mcp/mnt` e `tmp` é `~/.local/state/mcp/tmp`.

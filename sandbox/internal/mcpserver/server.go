@@ -42,12 +42,12 @@ func envInt(name string, def int) int {
 func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sandbox_doc",
-		Description: "Returns the sandbox API documentation (std.* modules, tools, limits, env vars, global scripts). Pass 'topic' to get a specific section (io, fetch, secrets, run, scripts, ...).",
+		Description: "Returns the sandbox API documentation (std.* modules, tools, limits, env vars, global scripts). Pass 'topic' to get a specific section (io, net, secrets, run, scripts, ...).",
 	}, s.doc)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sandbox_run",
-		Description: "Run a Lua script by 'path' (host .lua file) or inline 'code'. Action: 'run' (default). Inline 'code' may be just the body — it is auto-wrapped in `function main(std)`. 'args' (array/object) becomes std.args. Sandboxed: no OS/process; filesystem confined to mnt/; network only via std.fetch (allowlist). Timeout of 180s (3 min) by default, configurable via SANDBOX_EXEC_TIMEOUT_SECONDS.",
+		Description: "Run a Lua script by 'path' (host .lua file) or inline 'code'. Action: 'run' (default). Inline 'code' may be just the body — it is auto-wrapped in `function main(std)`. 'args' (array/object) becomes std.args. Sandboxed: no OS/process; filesystem confined to mnt/; network only via std.net (allowlist). Timeout of 180s (3 min) by default, configurable via SANDBOX_EXEC_TIMEOUT_SECONDS.",
 	}, s.run)
 
 	mcp.AddTool(server, &mcp.Tool{
