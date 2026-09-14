@@ -92,7 +92,7 @@ As libs nativas perigosas são removidas: `dofile`, `loadfile`, `load`, `loadstr
 - Execução: **180s** (3 min; timeout real, configurável via `SANDBOX_EXEC_TIMEOUT_SECONDS`).
 - Saída e retorno: **256 KiB** (truncado com `... (truncado)`).
 - Retorno exibido para a IA: **no máximo 500 linhas** (`SANDBOX_MAX_RETURN_LINES`) — evita trazer arquivos gigantes para o contexto.
-- Arquivo: **2 MB** por arquivo; **1 MB** por escrita.
+- Arquivo: **5 MB** por arquivo; **5 MB** por escrita.
 - RAM do processo: **512 MiB** (padrão, soft limit do Go).
 - Espaço: `mnt/` **256 MiB / 5.000 arquivos**; `tmp/` **64 MiB / 1.000 arquivos**.
 - `std.sql.query` retorna no máximo **10.000 linhas** (`SANDBOX_SQL_MAX_ROWS`).

@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	maxFileBytes  = 2 * 1024 * 1024
-	maxWriteBytes = 1 * 1024 * 1024
+	maxFileBytes  = 5 * 1024 * 1024
+	maxWriteBytes = 5 * 1024 * 1024
 )
 
 type Entry struct {

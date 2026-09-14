@@ -47,7 +47,7 @@ func lunaTopicNames() []string {
 	for _, m := range lunaOrder {
 		names = append(names, m.Name)
 	}
-	names = append(names, "meta", "limits", "env", "tools", "run", "scripts", "examples")
+	names = append(names, "meta", "env", "tools", "run", "scripts", "examples")
 	return names
 }
 
@@ -145,7 +145,6 @@ var lunaMetaPages = map[string]*lunaMod{
 	"tools":    lunaTools,
 	"run":      lunaRun,
 	"examples": lunaExamples,
-	"limits":   lunaLimits,
 	"env":      lunaEnv,
 }
 
@@ -327,20 +326,6 @@ std.data.convert("tmp:dados.json", "tmp:dados.xlsx")
 ~~~`,
 }
 
-var lunaLimits = &lunaMod{
-	Name: "limits",
-	Desc: "execution and storage limits",
-	Body: `# Limits
-
-- Execution: up to 180s (3 min) — configurable via ~SANDBOX_EXEC_TIMEOUT_SECONDS~.
-- Output: 256 KiB (truncated).
-- Result: 256 KiB (truncated with ~... (truncado)~).
-- File: 2 MB per file; 1 MB per write.
-- Paths are confined to the sandbox (no absolute paths, no ~..~).
-- ~std.sql.query~ returns at most 10,000 rows (~SANDBOX_SQL_MAX_ROWS~).
-- Secrets (~SECRET_*~) are auto-masked in any output/return.`,
-}
-
 var lunaEnv = &lunaMod{
 	Name: "env",
 	Desc: "environment / secrets configuration",
@@ -348,7 +333,7 @@ var lunaEnv = &lunaMod{
 
 Secrets are available via ~std.secrets.get~ using ~SECRET_*~ variables (e.g., ~SECRET_GITHUB_TOKEN_API~ → ~std.secrets.get("github_token_api")~).
 
-Other ~SANDBOX_*~ variables configure the sandbox (folders, limits, network) and are set by the operator — scripts don't need to read them.`,
+Other ~SANDBOX_*~ variables configure the sandbox (folders, network) and are set by the operator — scripts don't need to read them.`,
 }
 
 var lunaResult = &lunaMod{
