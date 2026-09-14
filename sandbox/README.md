@@ -91,6 +91,7 @@ As libs nativas perigosas são removidas: `dofile`, `loadfile`, `load`, `loadstr
 
 - Execução: **180s** (3 min; timeout real, configurável via `SANDBOX_EXEC_TIMEOUT_SECONDS`).
 - Saída e retorno: **256 KiB** (truncado com `... (truncado)`).
+- Retorno exibido para a IA: **no máximo 500 linhas** (`SANDBOX_MAX_RETURN_LINES`) — evita trazer arquivos gigantes para o contexto.
 - Arquivo: **2 MB** por arquivo; **1 MB** por escrita.
 - RAM do processo: **512 MiB** (padrão, soft limit do Go).
 - Espaço: `mnt/` **256 MiB / 5.000 arquivos**; `tmp/` **64 MiB / 1.000 arquivos**.
@@ -136,3 +137,4 @@ O filesystem é fixo (sem env): `mnt` em `~/.local/state/mcp/mnt` (compartilhado
 | `SANDBOX_FETCH_TIMEOUT_SECONDS` | `30` | timeout do `std.net` |
 | `SANDBOX_FETCH_MAX_BODY_KB` | `1024` | teto do corpo da resposta do `std.net` |
 | `SANDBOX_FETCH_COOKIE_FILE` | `~/.local/share/mcp/sandbox/cookies.json` | persistência de cookies do `std.net` |
+| `SANDBOX_MAX_RETURN_LINES` | `500` | teto de linhas em cada retorno de resultado/tool |

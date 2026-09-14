@@ -8,13 +8,40 @@ import (
 	"ntdsk.com/mcp/sandbox/internal/sandbox"
 )
 
+const defaultMaxReturnLines = 500
+
+func maxReturnLines() int {
+	return envInt("SANDBOX_MAX_RETURN_LINES", defaultMaxReturnLines)
+}
+
+func limitLines(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	body := strings.TrimRight(s, "\n")
+	if body == "" {
+		return s
+	}
+	lines := strings.Split(body, "\n")
+	if len(lines) <= max {
+		return s
+	}
+	n := len(lines) - max
+	omitted := fmt.Sprintf("%d linhas omitidas", n)
+	if n == 1 {
+		omitted = "1 linha omitida"
+	}
+	kept := strings.Join(lines[:max], "\n")
+	return kept + "\n… (truncado: " + omitted + ")"
+}
+
 func textResult(text string) (*mcp.CallToolResult, any, error) {
 	return result(text, false)
 }
 
 func result(text string, isError bool) (*mcp.CallToolResult, any, error) {
 	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		Content: []mcp.Content{&mcp.TextContent{Text: limitLines(text, maxReturnLines())}},
 		IsError: isError,
 	}, nil, nil
 }
