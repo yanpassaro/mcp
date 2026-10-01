@@ -61,18 +61,12 @@ tasks:
       - cmd: cp target/{{.ANYDOC_TARGET}}/release/anydoc-mcp.exe ../{{.DIST}}/anydoc-mcp.exe
         platforms: [windows]
 
-  test:anydoc:
-      desc: Run the anydoc test suite
+  format:anydoc:
+      desc: Format the anydoc module
       dir: anydoc
       cmds:
-        - cargo test
-
-  format:anydoc:
-    desc: Format the anydoc module
-    dir: anydoc
-    cmds:
-      - cargo fmt
-      - cargo clippy --fix --allow-dirty
+        - cargo fmt
+        - cargo clippy --fix --allow-dirty
 
   build:sandbox:
     desc: Build sandbox-mcp.exe

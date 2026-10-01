@@ -1,18 +1,15 @@
 # AnyDoc MCP
 
-Converte documentos para Markdown e para PDF.
+Lê documentos e devolve o conteúdo como Markdown.
 Escrito em **Rust**, usando o crate [`anydoc`](https://github.com/firecrawl/anydoc) (nativo, sem WASM).
 
 ## Tools
 
 | Tool | O que faz |
 | --- | --- |
-| `anydoc_import` | Converte um documento para Markdown ao lado do original (mesmo nome, `.md`; `-extraido.md` se já existir) |
-| `anydoc_export` | Converte um documento para PDF na mesma pasta (mesmo nome, `.pdf`), passando por Markdown |
+| `anydoc_read` | Lê um documento e grava o Markdown ao lado do original (mesmo nome, `.md`; `-extraido.md` se já existir) |
 
-Ambos devolvem o caminho absoluto do arquivo gerado.
-
-O único formato de saída do `anydoc_export` é **PDF**.
+Devolve o caminho absoluto do arquivo gerado. A redação de PII é aplicada antes de gravar.
 
 ## Formatos de entrada
 
@@ -37,7 +34,7 @@ completo.
 
 ## Redação de PII
 
-Todo Markdown gerado passa por `src/pii.rs` antes de ser usado:
+Todo Markdown gerado passa por `src/pii.rs` antes de ser devolvido:
 
 - padrões com validação real (CPF, CNPJ, cartão via Luhn) só mascaram se o dígito
   verificador fecha;
@@ -50,19 +47,15 @@ Todo Markdown gerado passa por `src/pii.rs` antes de ser usado:
 
 ```
 src/
-├── main.rs      # servidor MCP (stdio) e as duas tools
+├── main.rs      # servidor MCP (stdio) e a tool anydoc_read
 ├── pii.rs       # redação de PII
-├── tabular.rs   # CSV/TSV/JSON/XML/HTML -> tabela Markdown
-├── markdown.rs  # parser de Markdown -> modelo de blocos
-├── render.rs    # helpers compartilhados (texto puro, saneamento para PDF)
-└── pdf.rs       # Markdown -> .pdf (printpdf)
+└── tabular.rs   # CSV/TSV/JSON/XML/HTML -> tabela Markdown
 ```
 
 ## Build
 
 ```bash
 cargo build --release        # anydoc/target/release/anydoc-mcp
-cargo test
 ```
 
 Ou pelo Taskfile, junto com os outros módulos:
@@ -75,7 +68,4 @@ task build:anydoc            # gera dist/anydoc-mcp.exe
 
 - **Sem OCR.** PDF digitalizado falha com `NeedsOcr`; a versão em Rust do crate
   `anydoc` não manda o arquivo para nenhum serviço externo.
-- **Imagens não são embutidas no PDF**: entram como o texto alternativo.
-- **Mermaid** é preservado como bloco de código, não desenhado.
-- O PDF usa as fontes base Helvetica; texto muito largo pode ser truncado.
 - Sem variáveis de ambiente (saída de log vai para stderr).

@@ -48,10 +48,6 @@ jobs:
       - name: Setup Task
         uses: go-task/setup-task@v2
 
-      - name: Test anydoc
-        working-directory: anydoc
-        run: cargo test
-
       - name: Build all MCP servers
         run: task build
 

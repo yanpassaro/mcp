@@ -7,7 +7,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | `git-mcp` | Inspeção **read-only** de repositórios Git locais (go-git, sem CLI) |
 | `github-mcp` | Consulta **read-only** à API do GitHub (busca, arquivos, issues/PRs, releases) |
 | `sqlize-mcp` | Importa, consulta e exporta dados (SQLite + Postgres/MySQL read-only) |
-| `anydoc` | Converte/exporta documentos (Word, PDF, Excel, ODT, RTF, EPUB, CSV) |
+| `anydoc` | Lê documentos (Word, PDF, Excel, ODT, RTF, EPUB, CSV) e grava o Markdown ao lado |
 | `sandbox-mcp` | Sandbox **não-destrutivo** de scripts Lua (API `std`, filesystem único, rede via allowlist) |
 
 ## Tools
@@ -15,7 +15,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 - **git**: `git_repo_info`, `git_status`, `git_log`, `git_show`, `git_diff`, `git_refs`, `git_blame`, `git_tree`, `git_read_file`, `git_find_commits`
 - **github**: `github_search`, `github_get_tree`, `github_read_file`, `github_repo_info`, `github_get_item`
 - **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`, `sqlize_export` (+ `postgres_*`/`mysql_*`)
-- **anydoc**: `anydoc_import`, `anydoc_export`
+- **anydoc**: `anydoc_read`
 - **sandbox**: `sandbox_run` (run por `path`/`code` + `args`), `sandbox_doc` (API `std`), `sandbox_os` (copy/mount/del/stat/list)
 
 ## Variáveis de ambiente

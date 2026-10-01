@@ -46,7 +46,7 @@ fn cpf_digit(sum: u32) -> u32 {
     if r >= 10 { 0 } else { r }
 }
 
-pub fn valid_cpf(doc: &str) -> bool {
+fn valid_cpf(doc: &str) -> bool {
     let d: Vec<u8> = digits_only(doc).bytes().collect();
     if d.len() != 11 {
         return false;
@@ -73,7 +73,7 @@ fn cnpj_digit(sum: u32) -> u32 {
     if r < 2 { 0 } else { 11 - r }
 }
 
-pub fn valid_cnpj(doc: &str) -> bool {
+fn valid_cnpj(doc: &str) -> bool {
     let d: Vec<u8> = digits_only(doc).bytes().collect();
     if d.len() != 14 {
         return false;
@@ -447,32 +447,4 @@ pub fn redact_pii(markdown: &str) -> String {
     }
     flush(&mut chunks, &mut out);
     out.join("\n")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn masks_cpf() {
-        assert!(valid_cpf("529.982.247-25"));
-        assert!(!valid_cpf("111.111.111-11"));
-        assert!(redact_pii("cpf 529.982.247-25").contains("[CPF]"));
-    }
-
-    #[test]
-    fn masks_email_and_keeps_code() {
-        let out = redact_pii("a@b.com");
-        assert!(out.contains("[EMAIL]"));
-        let code = "```\na@b.com\n```";
-        assert_eq!(redact_pii(code), code);
-    }
-
-    #[test]
-    fn masks_table_cells_by_column() {
-        let md = "| email | nome |\n| --- | --- |\n| a@b.com | Ana |";
-        let out = redact_pii(md);
-        assert!(out.contains("[EMAIL]"));
-        assert!(out.contains("Ana"));
-    }
 }

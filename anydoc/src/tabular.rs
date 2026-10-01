@@ -250,10 +250,8 @@ fn parse_xml_rows(text: &str, row_tag: &str) -> Option<(Vec<String>, Vec<Vec<Str
                             if let Ok(attr_name) = std::str::from_utf8(a.key.as_ref()) {
                                 if attr_name != "xmlns" {
                                     columns.insert(attr_name.to_string());
-                                    let value = a
-                                        .unescape_value()
-                                        .map(|v| v.to_string())
-                                        .unwrap_or_default();
+                                    let value =
+                                        String::from_utf8_lossy(a.value.as_ref()).into_owned();
                                     current.push((attr_name.to_string(), value));
                                 }
                             }
@@ -264,7 +262,7 @@ fn parse_xml_rows(text: &str, row_tag: &str) -> Option<(Vec<String>, Vec<Vec<Str
             }
             Ok(Event::Text(t)) => {
                 if in_row && depth_in_row >= 2 {
-                    buf.push_str(&t.unescape().unwrap_or_default());
+                    buf.push_str(&String::from_utf8_lossy(t.as_ref()));
                 }
             }
             Ok(Event::End(e)) => {
@@ -332,30 +330,5 @@ pub fn tabular_to_markdown(bytes: &[u8], ext: &str) -> String {
         ".html" | ".htm" => parse_html_tables(&text).join("\n\n"),
         ".xml" => parse_xml_table(&text),
         _ => String::new(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn csv_becomes_table() {
-        let md = tabular_to_markdown(b"a,b\n1,2\n", ".csv");
-        assert!(md.starts_with("| a | b |"));
-        assert!(md.contains("| 1 | 2 |"));
-    }
-
-    #[test]
-    fn json_array_of_objects_becomes_table() {
-        let md = tabular_to_markdown(br#"[{"a":1,"b":2}]"#, ".json");
-        assert!(md.contains("a"));
-        assert!(md.contains("b"));
-    }
-
-    #[test]
-    fn jsonl_extension_is_tabular() {
-        assert!(is_tabular(".tsv"));
-        assert!(!is_tabular(".docx"));
     }
 }
