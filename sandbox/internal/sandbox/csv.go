@@ -33,7 +33,7 @@ func buildCSV(L *lua.State) int {
 	setGoFunc(L, t, "stringify", func(l *lua.State) int {
 		rows := luaArrayAny(l, 1)
 		sep := csvSep(l, 2)
-		var b strings.Builder
+		b := strings.Builder{}
 		w := csv.NewWriter(&b)
 		w.Comma = sep
 		for _, row := range rows {

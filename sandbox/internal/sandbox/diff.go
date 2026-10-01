@@ -1,6 +1,8 @@
 package sandbox
 
 import (
+	"cmp"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -20,14 +22,8 @@ func buildDiff(L *lua.State) int {
 		b := argString(l, 2)
 		opts := toAnyMap(l, 3)
 		ctx := int(optUint(opts, "context", 3))
-		from := optString(opts, "from")
-		if from == "" {
-			from = "a"
-		}
-		to := optString(opts, "to")
-		if to == "" {
-			to = "b"
-		}
+		from := cmp.Or(optString(opts, "from"), "a")
+		to := cmp.Or(optString(opts, "to"), "b")
 		l.PushString(unifiedDiff(a, b, ctx, from, to))
 		return 1
 	})
@@ -60,21 +56,15 @@ func unifiedDiff(a, b string, ctx int, from, to string) string {
 	}
 
 	type hunk struct{ start, end int }
-	var hunks []hunk
+	hunks := []hunk{}
 	for _, s := range segs {
-		st := s[0] - ctx
-		if st < 0 {
-			st = 0
-		}
-		en := s[1] + ctx
-		if en > len(ops) {
-			en = len(ops)
-		}
-		if len(hunks) > 0 && st <= hunks[len(hunks)-1].end {
-			if en > hunks[len(hunks)-1].end {
-				hunks[len(hunks)-1].end = en
+		st := max(s[0]-ctx, 0)
+		en := min(s[1]+ctx, len(ops))
+		if len(hunks) > 0 {
+			if st <= hunks[len(hunks)-1].end {
+				hunks[len(hunks)-1].end = max(en, hunks[len(hunks)-1].end)
+				continue
 			}
-			continue
 		}
 		hunks = append(hunks, hunk{st, en})
 	}
@@ -92,7 +82,7 @@ func unifiedDiff(a, b string, ctx int, from, to string) string {
 		}
 	}
 
-	var sb strings.Builder
+	sb := strings.Builder{}
 	sb.WriteString("--- ")
 	sb.WriteString(from)
 	sb.WriteString("\n")
@@ -133,18 +123,40 @@ func rangeHeader(line, count int) string {
 	if count == 1 {
 		return strconv.Itoa(line)
 	}
-	return strconv.Itoa(line) + "," + strconv.Itoa(count)
+	return fmt.Sprintf("%d,%d", line, count)
+}
+
+func commonPrefix(a, b []string) int {
+	pre := 0
+	for pre < len(a) {
+		if pre >= len(b) {
+			break
+		}
+		if a[pre] != b[pre] {
+			break
+		}
+		pre++
+	}
+	return pre
+}
+
+func commonSuffix(a, b []string, pre int) int {
+	suf := 0
+	for suf < len(a)-pre {
+		if suf >= len(b)-pre {
+			break
+		}
+		if a[len(a)-1-suf] != b[len(b)-1-suf] {
+			break
+		}
+		suf++
+	}
+	return suf
 }
 
 func computeDiff(a, b []string) []diffOp {
-	pre := 0
-	for pre < len(a) && pre < len(b) && a[pre] == b[pre] {
-		pre++
-	}
-	suf := 0
-	for suf < len(a)-pre && suf < len(b)-pre && a[len(a)-1-suf] == b[len(b)-1-suf] {
-		suf++
-	}
+	pre := commonPrefix(a, b)
+	suf := commonSuffix(a, b, pre)
 	midA := a[pre : len(a)-suf]
 	midB := b[pre : len(b)-suf]
 
@@ -179,27 +191,37 @@ func diffCore(a, b []string) []diffOp {
 		for j := m - 1; j >= 0; j-- {
 			if a[i] == b[j] {
 				dp[i][j] = dp[i+1][j+1] + 1
-			} else if dp[i+1][j] >= dp[i][j+1] {
-				dp[i][j] = dp[i+1][j]
-			} else {
-				dp[i][j] = dp[i][j+1]
+			}
+			if a[i] != b[j] {
+				if dp[i+1][j] >= dp[i][j+1] {
+					dp[i][j] = dp[i+1][j]
+				}
+				if dp[i+1][j] < dp[i][j+1] {
+					dp[i][j] = dp[i][j+1]
+				}
 			}
 		}
 	}
 	op := make([]diffOp, 0, n+m)
 	i, j := 0, 0
-	for i < n && j < m {
-		if a[i] == b[j] {
-			op = append(op, diffOp{' ', a[i], b[j]})
-			i++
-			j++
-		} else if dp[i+1][j] >= dp[i][j+1] {
-			op = append(op, diffOp{'-', a[i], ""})
-			i++
-		} else {
+	for i < n {
+		if j < m {
+			if a[i] == b[j] {
+				op = append(op, diffOp{' ', a[i], b[j]})
+				i++
+				j++
+				continue
+			}
+			if dp[i+1][j] >= dp[i][j+1] {
+				op = append(op, diffOp{'-', a[i], ""})
+				i++
+				continue
+			}
 			op = append(op, diffOp{'+', "", b[j]})
 			j++
+			continue
 		}
+		break
 	}
 	for i < n {
 		op = append(op, diffOp{'-', a[i], ""})
@@ -213,19 +235,22 @@ func diffCore(a, b []string) []diffOp {
 }
 
 func changeSegments(ops []diffOp) [][2]int {
-	var segs [][2]int
+	segs := [][2]int{}
 	i := 0
 	for i < len(ops) {
-		if ops[i].kind != ' ' {
-			j := i
-			for j < len(ops) && ops[j].kind != ' ' {
-				j++
-			}
-			segs = append(segs, [2]int{i, j})
-			i = j
-		} else {
+		if ops[i].kind == ' ' {
 			i++
+			continue
 		}
+		j := i
+		for j < len(ops) {
+			if ops[j].kind == ' ' {
+				break
+			}
+			j++
+		}
+		segs = append(segs, [2]int{i, j})
+		i = j
 	}
 	return segs
 }
@@ -247,10 +272,13 @@ func lineOpsToArray(ops []diffOp) []any {
 
 func stringRatio(a, b string) float64 {
 	ra, rb := []rune(a), []rune(b)
-	if len(ra) == 0 && len(rb) == 0 {
-		return 1
+	if len(ra) == 0 {
+		if len(rb) == 0 {
+			return 1
+		}
+		return 0
 	}
-	if len(ra) == 0 || len(rb) == 0 {
+	if len(rb) == 0 {
 		return 0
 	}
 	if len(ra)*len(rb) > 2_000_000 {
@@ -287,14 +315,8 @@ func stringRatio(a, b string) float64 {
 }
 
 func prefixSuffixRatio(a, b []rune) float64 {
-	pre := 0
-	for pre < len(a) && pre < len(b) && a[pre] == b[pre] {
-		pre++
-	}
-	suf := 0
-	for suf < len(a)-pre && suf < len(b)-pre && a[len(a)-1-suf] == b[len(b)-1-suf] {
-		suf++
-	}
+	pre := commonPrefixRunes(a, b)
+	suf := commonSuffixRunes(a, b, pre)
 	denom := float64(len(a) + len(b))
 	if denom == 0 {
 		return 1
@@ -302,13 +324,43 @@ func prefixSuffixRatio(a, b []rune) float64 {
 	return 2 * float64(pre+suf) / denom
 }
 
+func commonPrefixRunes(a, b []rune) int {
+	pre := 0
+	for pre < len(a) {
+		if pre >= len(b) {
+			break
+		}
+		if a[pre] != b[pre] {
+			break
+		}
+		pre++
+	}
+	return pre
+}
+
+func commonSuffixRunes(a, b []rune, pre int) int {
+	suf := 0
+	for suf < len(a)-pre {
+		if suf >= len(b)-pre {
+			break
+		}
+		if a[len(a)-1-suf] != b[len(b)-1-suf] {
+			break
+		}
+		suf++
+	}
+	return suf
+}
+
 func splitLines(s string) []string {
 	if s == "" {
 		return []string{}
 	}
 	parts := strings.Split(s, "\n")
-	if len(parts) > 0 && parts[len(parts)-1] == "" {
-		parts = parts[:len(parts)-1]
+	if len(parts) > 0 {
+		if parts[len(parts)-1] == "" {
+			parts = parts[:len(parts)-1]
+		}
 	}
 	return parts
 }

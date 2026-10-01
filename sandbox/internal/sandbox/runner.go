@@ -13,23 +13,32 @@ import (
 )
 
 const (
-	maxOutputBytes      = 256 * 1024
-	maxResultBytes      = 256 * 1024
-	maxScriptConcurrent = 4
+	MAX_OUTPUT_BYTES      = 256 * 1024
+	MAX_RESULT_BYTES      = 256 * 1024
+	MAX_SCRIPT_CONCURRENT = 4
+	DEFAULT_TIMEOUT       = 180 * time.Second
 )
 
-var maxTimeout = func() time.Duration {
-	if v := strings.TrimSpace(os.Getenv("SANDBOX_EXEC_TIMEOUT_SECONDS")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return time.Duration(n) * time.Second
-		}
-	}
-	return 180 * time.Second
-}()
+var maxTimeout = envTimeout()
 
 var reMain = regexp.MustCompile(`(?m)\bfunction\s+main\s*\(`)
 
-var scriptSlots = make(chan struct{}, maxScriptConcurrent)
+var scriptSlots = make(chan struct{}, MAX_SCRIPT_CONCURRENT)
+
+func envTimeout() time.Duration {
+	v := strings.TrimSpace(os.Getenv("SANDBOX_EXEC_TIMEOUT_SECONDS"))
+	if v == "" {
+		return DEFAULT_TIMEOUT
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return DEFAULT_TIMEOUT
+	}
+	if n <= 0 {
+		return DEFAULT_TIMEOUT
+	}
+	return time.Duration(n) * time.Second
+}
 
 type RunRequest struct {
 	Code    string
@@ -68,7 +77,7 @@ func Run(store, tmp *Store, r RunRequest) (RunResult, error) {
 	select {
 	case scriptSlots <- struct{}{}:
 	default:
-		return RunResult{}, fmt.Errorf("limite de %d scripts simultâneos atingido; aguarde ou encerre os que travarem", maxScriptConcurrent)
+		return RunResult{}, fmt.Errorf("limite de %d scripts simultâneos atingido; aguarde ou encerre os que travarem", MAX_SCRIPT_CONCURRENT)
 	}
 
 	ch := make(chan runOutcome, 1)
@@ -124,14 +133,14 @@ func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, e
 	lua.Require(L, "math", lua.MathOpen, true)
 	hardenLua(L)
 
-	var outBuf strings.Builder
+	outBuf := strings.Builder{}
 	truncated := false
 	writeOut := func(s string) {
-		if outBuf.Len() >= maxOutputBytes {
+		if outBuf.Len() >= MAX_OUTPUT_BYTES {
 			truncated = true
 			return
 		}
-		remaining := maxOutputBytes - outBuf.Len()
+		remaining := MAX_OUTPUT_BYTES - outBuf.Len()
 		if len(s) > remaining {
 			s = s[:remaining]
 			truncated = true
@@ -139,7 +148,7 @@ func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, e
 		outBuf.WriteString(s)
 	}
 
-	var res *luaResult
+	res := (*luaResult)(nil)
 	buildStd(L, store, tmp, reg, r.Args, writeOut, &res, secrets)
 	L.SetGlobal("std")
 
@@ -148,7 +157,7 @@ func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, e
 		for i := 1; i <= l.Top(); i++ {
 			parts = append(parts, argString(l, i))
 		}
-		writeOut(strings.Join(parts, " ") + "\n")
+		writeOut(fmt.Sprintf("%s\n", strings.Join(parts, " ")))
 		return 0
 	})
 	L.SetGlobal("print")
@@ -192,17 +201,21 @@ func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, e
 		if !res.ok {
 			result.Error = res.msg
 		}
-		if res.ok && res.md {
-			if s, ok := res.data.(string); ok {
-				result.Data, result.DataMarkdown = s, true
+		if res.md {
+			if res.ok {
+				if s, ok := res.data.(string); ok {
+					result.Data, result.DataMarkdown = s, true
+				}
 			}
 		}
-		if res.ok && !res.md {
-			result.Data, result.DataJSON = renderData(secrets.RedactValue(res.data))
+		if !res.md {
+			if res.ok {
+				result.Data, result.DataJSON = renderData(secrets.RedactValue(res.data))
+			}
 		}
 	}
-	if len(result.Data) > maxResultBytes {
-		result.Data = safeTruncate(result.Data, maxResultBytes) + "\n... (truncado)"
+	if len(result.Data) > MAX_RESULT_BYTES {
+		result.Data = fmt.Sprintf("%s\n... (truncado)", safeTruncate(result.Data, MAX_RESULT_BYTES))
 		result.Truncated = true
 	}
 	return result, nil
@@ -213,7 +226,10 @@ func safeTruncate(s string, max int) string {
 		return s
 	}
 	end := max
-	for end > 0 && !utf8.RuneStart(s[end]) {
+	for end > 0 {
+		if utf8.RuneStart(s[end]) {
+			break
+		}
 		end--
 	}
 	return s[:end]
@@ -233,8 +249,11 @@ func hardenLua(l *lua.State) {
 func callError(l *lua.State, err error) string {
 	msg := ""
 	if l.Top() > 0 {
-		if s, ok := l.ToString(l.Top()); ok && s != "" {
-			msg = s
+		s, ok := l.ToString(l.Top())
+		if ok {
+			if s != "" {
+				msg = s
+			}
 		}
 	}
 	if msg == "" {
@@ -250,16 +269,19 @@ func ParseMeta(code string) (name, desc string) {
 }
 
 func parseMeta(code string) (string, string) {
-	var name, desc string
+	name, desc := "", ""
 	for _, line := range strings.Split(code, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "--") {
-			line = strings.TrimSpace(strings.TrimPrefix(line, "--"))
-			if strings.HasPrefix(line, "name=") {
-				name = strings.Trim(strings.TrimPrefix(line, "name="), `"' `)
-			} else if strings.HasPrefix(line, "desc=") {
-				desc = strings.Trim(strings.TrimPrefix(line, "desc="), `"' `)
-			}
+		if !strings.HasPrefix(line, "--") {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimPrefix(line, "--"))
+		if strings.HasPrefix(line, "name=") {
+			name = strings.Trim(strings.TrimPrefix(line, "name="), `"' `)
+			continue
+		}
+		if strings.HasPrefix(line, "desc=") {
+			desc = strings.Trim(strings.TrimPrefix(line, "desc="), `"' `)
 		}
 	}
 	return name, desc

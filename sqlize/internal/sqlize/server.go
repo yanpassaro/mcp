@@ -1,6 +1,7 @@
 package sqlize
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -14,6 +15,9 @@ type Server struct {
 }
 
 func New(stateDir string) (*Server, error) {
+	if piiErr != nil {
+		return nil, piiErr
+	}
 	st, err := newStore(stateDir)
 	if err != nil {
 		return nil, err
@@ -50,18 +54,17 @@ func (s *Server) Register(server *mcp.Server) {
 		prefix := cfg.ToolPrefix()
 		env := cfg.EnvVar
 		mcp.AddTool(server, &mcp.Tool{
-			Name:        prefix + "_query",
+			Name:        fmt.Sprintf("%s_query", prefix),
 			Description: fmt.Sprintf("Run a read-only SQL query (SELECT/WITH) against the live %s database (%s), limited to 500 rows. Pass values via 'args' (%s).", cfg.Engine, env, livePlaceholders(cfg.Engine)),
 		}, s.liveQueryHandler(cfg))
 		mcp.AddTool(server, &mcp.Tool{
-			Name:        prefix + "_export",
+			Name:        fmt.Sprintf("%s_export", prefix),
 			Description: fmt.Sprintf("Run a read-only query (SELECT/WITH) on the live %s database (%s) and write the full (raw, unredacted) result to a file inside the shared ~/.local/state/mcp/mnt; the extension sets the format (.csv, .html, .xlsx, .tsv, .json, .jsonl, .ndjson, .xml, .sql).", cfg.Engine, env),
 		}, s.liveExportHandler(cfg))
 		mcp.AddTool(server, &mcp.Tool{
-			Name:        prefix + "_structure",
+			Name:        fmt.Sprintf("%s_structure", prefix),
 			Description: fmt.Sprintf("Structure of the live %s database (%s): tables (no 'table') or columns + FKs + indexes ('table').", cfg.Engine, env),
 		}, s.liveStructureHandler(cfg))
-
 	}
 }
 
@@ -105,7 +108,7 @@ func (s *Server) structureTool(ctx context.Context, _ *mcp.CallToolRequest, in s
 		return nil, nil, err
 	}
 	if strings.TrimSpace(in.Table) != "" {
-		var found []tableInfo
+		found := []tableInfo{}
 		for _, t := range tables {
 			if t.Name == in.Table {
 				found = append(found, t)
@@ -114,7 +117,7 @@ func (s *Server) structureTool(ctx context.Context, _ *mcp.CallToolRequest, in s
 		if len(found) == 0 {
 			return nil, nil, fmt.Errorf("tabela %q não encontrada", in.Table)
 		}
-		var b strings.Builder
+		b := strings.Builder{}
 		for _, t := range found {
 			cols, err := s.colStruct(ctx, t)
 			if err != nil {
@@ -138,7 +141,7 @@ func (s *Server) structureTool(ctx context.Context, _ *mcp.CallToolRequest, in s
 	if len(tables) == 0 {
 		return textResult("Nenhuma tabela importada ainda. Use sqlize_import para carregar um arquivo.")
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	for _, t := range tables {
 		cols, err := s.store.tableColumns(ctx, t.Schema, t.Name)
 		if err != nil {
@@ -147,7 +150,7 @@ func (s *Server) structureTool(ctx context.Context, _ *mcp.CallToolRequest, in s
 		fmt.Fprintf(&b, "### %s (esquema %s) — %d colunas\n", t.Name, schemaLabel(t.Schema), len(cols))
 		names := make([]string, len(cols))
 		for i, c := range cols {
-			names[i] = c.Name + ": " + c.Type
+			names[i] = fmt.Sprintf("%s: %s", c.Name, c.Type)
 		}
 		b.WriteString(strings.Join(names, ", "))
 		b.WriteString("\n\n")
@@ -218,12 +221,19 @@ func (s *Server) idxStruct(ctx context.Context, t tableInfo) ([]structIdx, error
 	out := make([]structIdx, 0, len(idxs))
 	for _, ix := range idxs {
 		out = append(out, structIdx{
-			Unique:  ix.Unique || ix.Origin == "u",
+			Unique:  isUniqueIndex(ix),
 			IsPK:    ix.Origin == "pk",
 			Columns: ix.Columns,
 		})
 	}
 	return out, nil
+}
+
+func isUniqueIndex(ix indexInfo) bool {
+	if ix.Unique {
+		return true
+	}
+	return ix.Origin == "u"
 }
 
 type queryInput struct {
@@ -254,11 +264,7 @@ func (s *Server) exportTool(ctx context.Context, _ *mcp.CallToolRequest, in expo
 	if strings.TrimSpace(in.Path) == "" {
 		return nil, nil, fmt.Errorf("'path' de saída é obrigatório")
 	}
-	target := in.Target
-	if strings.TrimSpace(target) == "" {
-		target = "exported"
-	}
-	res, err := s.store.exportFile(ctx, in.Path, in.Query, in.Table, target, in.Args)
+	res, err := s.store.exportFile(ctx, in.Path, in.Query, in.Table, cmp.Or(strings.TrimSpace(in.Target), "exported"), in.Args)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -266,7 +272,7 @@ func (s *Server) exportTool(ctx context.Context, _ *mcp.CallToolRequest, in expo
 }
 
 
-const liveMaxRows = 200
+const LIVE_MAX_ROWS = 200
 
 func (s *Server) renderLiveQuery(ctx context.Context, cfg liveDBConfig, q string, args []string) (string, error) {
 	if strings.TrimSpace(q) == "" {
@@ -280,7 +286,7 @@ func (s *Server) renderLiveQuery(ctx context.Context, cfg liveDBConfig, q string
 	if err != nil {
 		return "", err
 	}
-	return renderRedactedTable(cols, rows, liveMaxRows), nil
+	return renderRedactedTable(cols, rows, LIVE_MAX_ROWS), nil
 }
 
 func renderRedactedTable(cols []string, rows [][]string, max int) string {
@@ -289,11 +295,12 @@ func renderRedactedTable(cols []string, rows [][]string, max int) string {
 		shown = rows[:max]
 	}
 	red := RedactRows(cols, shown)
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString(markdownTable(cols, red))
 	if len(rows) > max {
 		fmt.Fprintf(&b, "\n... %d linhas no total (mostrando %d, mascaradas).\n", len(rows), max)
-	} else {
+	}
+	if len(rows) <= max {
 		fmt.Fprintf(&b, "\n%d linha(s) (mascaradas).\n", len(rows))
 	}
 	return b.String()
@@ -333,11 +340,7 @@ func (s *Server) liveExportHandler(cfg liveDBConfig) func(context.Context, *mcp.
 		if err != nil {
 			return nil, nil, err
 		}
-		target := strings.TrimSpace(in.TargetTable)
-		if target == "" {
-			target = "exported"
-		}
-		res, err := exportLiveFile(in.ExportTo, cols, rows, target)
+		res, err := exportLiveFile(in.ExportTo, cols, rows, cmp.Or(strings.TrimSpace(in.TargetTable), "exported"))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -369,7 +372,7 @@ type liveStructureInput struct {
 	Table string `json:"table,omitempty" jsonschema:"Table (optional). Empty = list all."`
 }
 
-const maxCellLen = 200
+const MAX_CELL_LEN = 200
 
 func isBinaryText(s string) bool {
 	if strings.IndexByte(s, 0) >= 0 {
@@ -383,10 +386,10 @@ func short(s string) string {
 		return "[binário]"
 	}
 	rs := []rune(s)
-	if len(rs) <= maxCellLen {
+	if len(rs) <= MAX_CELL_LEN {
 		return s
 	}
-	return string(rs[:maxCellLen]) + "…"
+	return fmt.Sprintf("%s…", string(rs[:MAX_CELL_LEN]))
 }
 
 func isTruthy(v string) bool {
@@ -417,11 +420,18 @@ func cleanCell(s string) string {
 	return short(strings.TrimSpace(s))
 }
 
+func cellText(row []string, i int) string {
+	if i >= len(row) {
+		return ""
+	}
+	return cleanCell(row[i])
+}
+
 func markdownTable(headers []string, rows [][]string) string {
 	if len(headers) == 0 {
 		return "Sem colunas."
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString("| ")
 	b.WriteString(strings.Join(headers, " | "))
 	b.WriteString(" |\n")
@@ -435,11 +445,7 @@ func markdownTable(headers []string, rows [][]string) string {
 	for _, row := range rows {
 		cells := make([]string, len(headers))
 		for i := range headers {
-			if i < len(row) {
-				cells[i] = cleanCell(row[i])
-			} else {
-				cells[i] = ""
-			}
+			cells[i] = cellText(row, i)
 		}
 		b.WriteString("| ")
 		b.WriteString(strings.Join(cells, " | "))

@@ -133,13 +133,21 @@ func statsNums(l *lua.State, index int, field string) []float64 {
 	arr := luaArrayAny(l, index)
 	out := make([]float64, 0, len(arr))
 	for _, e := range arr {
-		var v any = e
+		v := any(e)
 		if field != "" {
 			v = itemProp(e, field)
 		}
-		if n, ok := numOpt(v); ok && !math.IsNaN(n) && !math.IsInf(n, 0) {
-			out = append(out, n)
+		n, ok := numOpt(v)
+		if !ok {
+			continue
 		}
+		if math.IsNaN(n) {
+			continue
+		}
+		if math.IsInf(n, 0) {
+			continue
+		}
+		out = append(out, n)
 	}
 	return out
 }
@@ -152,7 +160,7 @@ func statsField(l *lua.State, index int) string {
 }
 
 func mean(v []float64) float64 {
-	var s float64
+	s := float64(0)
 	for _, x := range v {
 		s += x
 	}
@@ -189,7 +197,7 @@ func variance(v []float64, sample bool) float64 {
 		return math.NaN()
 	}
 	m := mean(v)
-	var ss float64
+	ss := float64(0)
 	for _, x := range v {
 		d := x - m
 		ss += d * d

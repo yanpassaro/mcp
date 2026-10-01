@@ -178,7 +178,7 @@ func colLetters(n int) string {
 	if n < 1 {
 		return "A"
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	for n > 0 {
 		n--
 		b.WriteByte(byte('A' + n%26))

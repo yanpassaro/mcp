@@ -28,22 +28,28 @@ func buildUUID(L *lua.State) int {
 
 func uuidValid(s string, version int) bool {
 	s = strings.TrimSpace(s)
-	var h string
-	if len(s) == 36 {
-		if s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
+	h := ""
+	switch len(s) {
+	case 36:
+		if !hasUUIDDashes(s) {
 			return false
 		}
 		h = strings.ReplaceAll(s, "-", "")
-	} else if len(s) == 32 {
+	case 32:
 		h = s
-	} else {
+	default:
 		return false
 	}
-	if len(h) != 32 || !isHexStr(h) {
+	if len(h) != 32 {
 		return false
 	}
-	if version != 0 && h[12] != byte('0'+version) {
+	if !isHexStr(h) {
 		return false
+	}
+	if version != 0 {
+		if h[12] != byte('0'+version) {
+			return false
+		}
 	}
 	switch h[16] {
 	case '8', '9', 'a', 'b', 'A', 'B':
@@ -53,14 +59,46 @@ func uuidValid(s string, version int) bool {
 	}
 }
 
+func hasUUIDDashes(s string) bool {
+	if s[8] != '-' {
+		return false
+	}
+	if s[13] != '-' {
+		return false
+	}
+	if s[18] != '-' {
+		return false
+	}
+	return s[23] == '-'
+}
+
 func isHexStr(s string) bool {
 	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		if !isHexByte(s[i]) {
 			return false
 		}
 	}
 	return true
+}
+
+func isHexByte(c byte) bool {
+	if c >= '0' {
+		if c <= '9' {
+			return true
+		}
+	}
+	if c >= 'a' {
+		if c <= 'f' {
+			return true
+		}
+	}
+	if c >= 'A' {
+		if c <= 'F' {
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 func uuidV4() string {

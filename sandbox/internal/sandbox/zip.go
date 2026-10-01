@@ -167,13 +167,13 @@ func storeUnzip(store *Store, src, dest string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		data, rerr := io.ReadAll(io.LimitReader(rc, maxFileBytes+1))
+		data, rerr := io.ReadAll(io.LimitReader(rc, MAX_FILE_BYTES+1))
 		rc.Close()
 		if rerr != nil {
 			return nil, rerr
 		}
-		if len(data) > maxFileBytes {
-			return nil, fmt.Errorf("entrada no zip %q excede %d bytes", entry, maxFileBytes)
+		if len(data) > MAX_FILE_BYTES {
+			return nil, fmt.Errorf("entrada no zip %q excede %d bytes", entry, MAX_FILE_BYTES)
 		}
 		if _, err := store.WriteBytes(relTarget, data); err != nil {
 			return nil, err
@@ -188,10 +188,27 @@ func cleanZipEntry(name string) (string, error) {
 	name = filepath.ToSlash(name)
 	name = strings.TrimLeft(name, "/")
 	cleaned := filepath.ToSlash(filepath.Clean(name))
-	if cleaned == "" || cleaned == "." || cleaned == ".." ||
-		strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "/") ||
-		filepath.IsAbs(filepath.FromSlash(cleaned)) {
+	if !cleanZipName(cleaned) {
 		return "", fmt.Errorf("caminho inválido no zip: %q", name)
 	}
 	return cleaned, nil
+}
+
+func cleanZipName(cleaned string) bool {
+	if cleaned == "" {
+		return false
+	}
+	if cleaned == "." {
+		return false
+	}
+	if cleaned == ".." {
+		return false
+	}
+	if strings.HasPrefix(cleaned, "../") {
+		return false
+	}
+	if strings.HasPrefix(cleaned, "/") {
+		return false
+	}
+	return !filepath.IsAbs(filepath.FromSlash(cleaned))
 }

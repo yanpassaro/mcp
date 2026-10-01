@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -28,7 +29,7 @@ func setupLog(server string) {
 		log.Printf("aviso: falha ao criar %s; log segue para stderr: %v", dir, err)
 		return
 	}
-	path := filepath.Join(dir, server+"-"+time.Now().Format("2006-01-02_15-04-05")+".log")
+	path := filepath.Join(dir, fmt.Sprintf("%s-%s.log", server, time.Now().Format("2006-01-02_15-04-05")))
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Printf("aviso: falha ao abrir %s; log segue para stderr: %v", path, err)

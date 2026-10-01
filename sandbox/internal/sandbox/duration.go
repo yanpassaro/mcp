@@ -22,11 +22,12 @@ func buildDuration(L *lua.State) int {
 	t := newTable(L)
 
 	setGoFunc(L, t, "parse", func(l *lua.State) int {
-		if ms, ok := durationParse(argString(l, 1)); ok {
-			l.PushNumber(float64(ms))
-		} else {
+		ms, ok := durationParse(argString(l, 1))
+		if !ok {
 			l.PushNil()
+			return 1
 		}
+		l.PushNumber(float64(ms))
 		return 1
 	})
 	setGoFunc(L, t, "format", func(l *lua.State) int {
@@ -71,7 +72,8 @@ func durationMS(l *lua.State, index int) int64 {
 		return int64(v)
 	}
 	if s, ok := l.ToString(index); ok {
-		if ms, ok := durationParse(s); ok {
+		ms, ok := durationParse(s)
+		if ok {
 			return ms
 		}
 	}
@@ -91,12 +93,45 @@ func durationParse(s string) (int64, bool) {
 	return d.Milliseconds(), true
 }
 
+func isDurationNum(c byte) bool {
+	if c == '.' {
+		return true
+	}
+	if c == '-' {
+		return true
+	}
+	if c == '+' {
+		return true
+	}
+	if c < '0' {
+		return false
+	}
+	return c <= '9'
+}
+
+func isDayUnit(c byte) bool {
+	if c == 'd' {
+		return true
+	}
+	return c == 'D'
+}
+
+func isWeekUnit(c byte) bool {
+	if c == 'w' {
+		return true
+	}
+	return c == 'W'
+}
+
 func expandDaysWeeks(s string) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	i := 0
 	for i < len(s) {
 		j := i
-		for j < len(s) && (s[j] == '.' || s[j] == '-' || s[j] == '+' || (s[j] >= '0' && s[j] <= '9')) {
+		for j < len(s) {
+			if !isDurationNum(s[j]) {
+				break
+			}
 			j++
 		}
 		if j >= len(s) {
@@ -104,16 +139,22 @@ func expandDaysWeeks(s string) string {
 			break
 		}
 		c := s[j]
-		if (c == 'd' || c == 'D' || c == 'w' || c == 'W') && j > i {
-			if f, err := strconv.ParseFloat(s[i:j], 64); err == nil {
-				if c == 'd' || c == 'D' {
+		if j > i {
+			if isDayUnit(c) {
+				if f, err := strconv.ParseFloat(s[i:j], 64); err == nil {
 					b.WriteString(strconv.FormatFloat(f*24, 'f', -1, 64))
-				} else {
-					b.WriteString(strconv.FormatFloat(f*24*7, 'f', -1, 64))
+					b.WriteString("h")
+					i = j + 1
+					continue
 				}
-				b.WriteString("h")
-				i = j + 1
-				continue
+			}
+			if isWeekUnit(c) {
+				if f, err := strconv.ParseFloat(s[i:j], 64); err == nil {
+					b.WriteString(strconv.FormatFloat(f*24*7, 'f', -1, 64))
+					b.WriteString("h")
+					i = j + 1
+					continue
+				}
 			}
 		}
 		b.WriteString(s[i:j])
@@ -139,7 +180,7 @@ func durationFormat(ms int64) string {
 	s := ms / msPerSecond
 	ms %= msPerSecond
 
-	var b strings.Builder
+	b := strings.Builder{}
 	if neg {
 		b.WriteByte('-')
 	}
@@ -161,8 +202,13 @@ func durationFormat(ms int64) string {
 	if ms > 0 {
 		fmt.Fprintf(&b, "%dms", ms)
 	}
-	if b.Len() == 0 || (b.Len() == 1 && neg) {
+	if b.Len() == 0 {
 		b.WriteString("0s")
+	}
+	if b.Len() == 1 {
+		if neg {
+			b.WriteString("0s")
+		}
 	}
 	return b.String()
 }

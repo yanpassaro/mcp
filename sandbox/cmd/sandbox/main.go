@@ -42,18 +42,23 @@ func main() {
 	args := argsJSON
 	if args == "" {
 		if len(positional) > 0 {
-			if b, err := json.Marshal(positional); err == nil {
+			b, merr := json.Marshal(positional)
+			if merr == nil {
 				args = string(b)
 			}
-		} else {
+		}
+		if len(positional) == 0 {
 			args = "{}"
 		}
 	}
 
 	mnt := openStore("mnt", mntDir(), 256, 5000)
 	tmp := openStore("tmp", tmpDir(), 64, 1000)
-	if n, err := tmp.Clear(); err == nil && n > 0 {
-		fmt.Fprintf(os.Stderr, "sandbox: tmp limpo (%d arquivo(s))\n", n)
+	n, cerr := tmp.Clear()
+	if cerr == nil {
+		if n > 0 {
+			fmt.Fprintf(os.Stderr, "sandbox: tmp limpo (%d arquivo(s))\n", n)
+		}
 	}
 
 	res, runErr := sandbox.Run(mnt, tmp, sandbox.RunRequest{
@@ -64,14 +69,17 @@ func main() {
 
 	if asJSON {
 		dataVal := any(res.Data)
-		if res.DataJSON && res.Data != "" {
-			var parsed any
-			if err := json.Unmarshal([]byte(res.Data), &parsed); err == nil {
-				dataVal = parsed
+		if res.DataJSON {
+			if res.Data != "" {
+				parsed := any(nil)
+				if uerr := json.Unmarshal([]byte(res.Data), &parsed); uerr == nil {
+					dataVal = parsed
+				}
 			}
 		}
+		ok := !failedRun(res.Ok, runErr)
 		out := map[string]any{
-			"ok":          res.Ok && runErr == nil,
+			"ok":          ok,
 			"name":        res.Name,
 			"desc":        res.Description,
 			"output":      res.Output,
@@ -90,13 +98,15 @@ func main() {
 		if b, err := json.MarshalIndent(out, "", "  "); err == nil {
 			fmt.Println(string(b))
 		}
-		os.Exit(exitCode(res.Ok && runErr == nil))
+		os.Exit(exitCode(ok))
 	}
 
-	if !res.Ok || runErr != nil {
+	if failedRun(res.Ok, runErr) {
 		msg := res.Error
-		if msg == "" && runErr != nil {
-			msg = runErr.Error()
+		if msg == "" {
+			if runErr != nil {
+				msg = runErr.Error()
+			}
 		}
 		fmt.Fprintf(os.Stderr, "✗ %s\n", msg)
 		if out := strings.TrimRight(res.Output, "\n"); out != "" {
@@ -110,26 +120,28 @@ func main() {
 	}
 	if res.Data != "" {
 		fmt.Println(res.Data)
-	} else {
+	}
+	if res.Data == "" {
 		fmt.Println("_(sem resultado)_")
 	}
 }
 
 func parseCLI(args []string) (script string, positional []string, argsJSON string, timeout int, asJSON, help bool, err error) {
 	i := 0
+	hasScript := false
 	for i < len(args) {
 		a := args[i]
 		switch {
-		case a == "--json" || a == "-json":
+		case isJSONFlag(a):
 			asJSON = true
 			i++
-		case a == "--help" || a == "-h" || a == "-help":
+		case isHelpFlag(a):
 			help = true
 			return
 		case strings.HasPrefix(a, "--args="):
 			argsJSON = strings.TrimPrefix(a, "--args=")
 			i++
-		case a == "--args" || a == "-args":
+		case isArgsFlag(a):
 			if i+1 >= len(args) {
 				err = fmt.Errorf("--args requer um valor")
 				return
@@ -139,7 +151,7 @@ func parseCLI(args []string) (script string, positional []string, argsJSON strin
 		case strings.HasPrefix(a, "--timeout="):
 			timeout, _ = strconv.Atoi(strings.TrimPrefix(a, "--timeout="))
 			i++
-		case a == "--timeout" || a == "-timeout":
+		case isTimeoutFlag(a):
 			if i+1 >= len(args) {
 				err = fmt.Errorf("--timeout requer um valor")
 				return
@@ -150,15 +162,48 @@ func parseCLI(args []string) (script string, positional []string, argsJSON strin
 			err = fmt.Errorf("opção desconhecida: %q", a)
 			return
 		default:
-			if script == "" {
+			if !hasScript {
 				script = a
-			} else {
-				positional = append(positional, a)
+				hasScript = true
+				i++
+				continue
 			}
+			positional = append(positional, a)
 			i++
 		}
 	}
 	return
+}
+
+func isJSONFlag(a string) bool {
+	if a == "--json" {
+		return true
+	}
+	return a == "-json"
+}
+
+func isHelpFlag(a string) bool {
+	if a == "--help" {
+		return true
+	}
+	if a == "-h" {
+		return true
+	}
+	return a == "-help"
+}
+
+func isArgsFlag(a string) bool {
+	if a == "--args" {
+		return true
+	}
+	return a == "-args"
+}
+
+func isTimeoutFlag(a string) bool {
+	if a == "--timeout" {
+		return true
+	}
+	return a == "-timeout"
 }
 
 func usage() {
@@ -174,20 +219,28 @@ func usage() {
 }
 
 func openStore(label, dir string, spaceMB, maxFiles int) *sandbox.Store {
-	_ = os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "sandbox: falha ao criar %s: %v\n", dir, err)
+	}
 	s := sandbox.NewStore(dir)
-	s.MaxTotalBytes = int64(envInt("SANDBOX_"+strings.ToUpper(label)+"_SPACE_MB", spaceMB)) * 1024 * 1024
-	s.MaxFiles = envInt("SANDBOX_"+strings.ToUpper(label)+"_FILES", maxFiles)
+	s.MaxTotalBytes = int64(envInt(fmt.Sprintf("SANDBOX_%s_SPACE_MB", strings.ToUpper(label)), spaceMB)) * 1024 * 1024
+	s.MaxFiles = envInt(fmt.Sprintf("SANDBOX_%s_FILES", strings.ToUpper(label)), maxFiles)
 	return s
 }
 
 func envInt(name string, def int) int {
-	if v := os.Getenv(name); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
+	v := os.Getenv(name)
+	if v == "" {
+		return def
 	}
-	return def
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	if n <= 0 {
+		return def
+	}
+	return n
 }
 
 func memLimitMB() int64 {
@@ -199,6 +252,13 @@ func exitCode(ok bool) int {
 		return 0
 	}
 	return 1
+}
+
+func failedRun(ok bool, runErr error) bool {
+	if !ok {
+		return true
+	}
+	return runErr != nil
 }
 
 func mntDir() string {

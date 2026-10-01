@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -15,16 +16,21 @@ import (
 	"ntdsk.com/mcp/github/internal/mcpserver"
 )
 
+const DEFAULT_TIMEOUT = 60
+
 func main() {
 	setupLog("github")
 
 	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	baseURL := os.Getenv("GITHUB_BASE_URL")
 
-	timeout := 60
+	timeout := DEFAULT_TIMEOUT
 	if v := strings.TrimSpace(os.Getenv("GITHUB_TIMEOUT_SECONDS")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			timeout = n
+		n, err := strconv.Atoi(v)
+		if err == nil {
+			if n > 0 {
+				timeout = n
+			}
 		}
 	}
 
@@ -51,7 +57,7 @@ func setupLog(server string) {
 		log.Printf("aviso: falha ao criar %s; log segue para stderr: %v", dir, err)
 		return
 	}
-	path := filepath.Join(dir, server+"-"+time.Now().Format("2006-01-02_15-04-05")+".log")
+	path := filepath.Join(dir, fmt.Sprintf("%s-%s.log", server, time.Now().Format("2006-01-02_15-04-05")))
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Printf("aviso: falha ao abrir %s; log segue para stderr: %v", path, err)

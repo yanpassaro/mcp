@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"bufio"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -137,7 +138,10 @@ func isBinaryFile(name string) bool {
 func inIgnoredDir(name string) bool {
 	name = filepath.ToSlash(name)
 	for _, d := range fallbackDirs {
-		if name == d || strings.HasPrefix(name, d+"/") {
+		if name == d {
+			return true
+		}
+		if strings.HasPrefix(name, fmt.Sprintf("%s/", d)) {
 			return true
 		}
 	}
@@ -158,9 +162,9 @@ func (g *gitIgnorer) ignored(name string) bool {
 	return false
 }
 
-func buildGitIgnorer(tree *object.Tree) *gitIgnorer {
+func buildGitIgnorer(tree *object.Tree) (*gitIgnorer, error) {
 	g := &gitIgnorer{}
-	_ = tree.Files().ForEach(func(f *object.File) error {
+	err := tree.Files().ForEach(func(f *object.File) error {
 		if filepath.Base(f.Name) != ".gitignore" {
 			return nil
 		}
@@ -168,20 +172,33 @@ func buildGitIgnorer(tree *object.Tree) *gitIgnorer {
 		if err != nil {
 			return nil
 		}
-		var domain []string
+		domain := []string{}
 		if i := strings.LastIndex(f.Name, "/"); i >= 0 {
 			domain = strings.Split(f.Name[:i], "/")
 		}
 		for _, line := range strings.Split(content, "\n") {
 			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
+			if skipIgnoreLine(line) {
 				continue
 			}
 			g.entries = append(g.entries, gitignore.ParsePattern(line, domain))
 		}
 		return nil
 	})
-	return g
+	if err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+func skipIgnoreLine(line string) bool {
+	if line == "" {
+		return true
+	}
+	if strings.HasPrefix(line, "#") {
+		return true
+	}
+	return strings.HasPrefix(line, "!")
 }
 
 func repoLanguages(repo *git.Repository) (map[string]int, int, error) {
@@ -198,7 +215,10 @@ func repoLanguages(repo *git.Repository) (map[string]int, int, error) {
 	if err != nil {
 		return langs, 0, err
 	}
-	ignorer := buildGitIgnorer(tree)
+	ignorer, err := buildGitIgnorer(tree)
+	if err != nil {
+		return langs, 0, err
+	}
 	useGitIgnore := len(ignorer.entries) > 0
 	total := 0
 	err = tree.Files().ForEach(func(f *object.File) error {
@@ -209,8 +229,11 @@ func repoLanguages(repo *git.Repository) (map[string]int, int, error) {
 			if ignorer.ignored(f.Name) {
 				return nil
 			}
-		} else if inIgnoredDir(f.Name) {
-			return nil
+		}
+		if !useGitIgnore {
+			if inIgnoredDir(f.Name) {
+				return nil
+			}
 		}
 		lang, ok := languageForPath(f.Name)
 		if !ok {

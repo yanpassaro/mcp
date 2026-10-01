@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -11,7 +12,7 @@ import (
 func buildJson(L *lua.State) int {
 	t := newTable(L)
 	setGoFunc(L, t, "parse", func(l *lua.State) int {
-		var v any
+		v := any(nil)
 		if err := json.Unmarshal([]byte(argString(l, 1)), &v); err != nil {
 			panic(err)
 		}
@@ -20,33 +21,38 @@ func buildJson(L *lua.State) int {
 	})
 	setGoFunc(L, t, "stringify", func(l *lua.State) int {
 		exp := luaToAny(l, 1)
-		if indent := int(argNum(l, 2)); indent > 0 {
+		indent := int(argNum(l, 2))
+		if indent > 0 {
 			b, err := json.MarshalIndent(exp, "", strings.Repeat(" ", indent))
 			if err != nil {
 				panic(err)
 			}
 			l.PushString(string(b))
-		} else {
-			b, err := json.Marshal(exp)
-			if err != nil {
-				panic(err)
-			}
-			l.PushString(string(b))
+			return 1
 		}
+		b, err := json.Marshal(exp)
+		if err != nil {
+			panic(err)
+		}
+		l.PushString(string(b))
 		return 1
 	})
 	setGoFunc(L, t, "format", func(l *lua.State) int {
 		val := luaToAny(l, 1)
-		if str, ok := val.(string); ok {
-			var parsed any
+		str, ok := val.(string)
+		if ok {
+			parsed := any(nil)
 			if err := json.Unmarshal([]byte(strings.TrimSpace(str)), &parsed); err == nil {
 				val = parsed
 			}
 		}
 		opts := toAnyMap(l, 2)
 		indent := 2
-		if d, ok := numOpt(opts["indent"]); ok && d > 0 {
-			indent = int(d)
+		d, ok := numOpt(opts["indent"])
+		if ok {
+			if d > 0 {
+				indent = int(d)
+			}
 		}
 		if truthyOpt(opts, "nested") {
 			val = parseNestedJSON(val)
@@ -56,14 +62,19 @@ func buildJson(L *lua.State) int {
 			panic(err)
 		}
 		out := string(b)
-		if mx, ok := numOpt(opts["max"]); ok && mx > 0 && len(out) > int(mx) {
-			out = out[:int(mx)] + "\n... (truncado)"
+		mx, ok := numOpt(opts["max"])
+		if ok {
+			if mx > 0 {
+				if len(out) > int(mx) {
+					out = fmt.Sprintf("%s\n... (truncado)", out[:int(mx)])
+				}
+			}
 		}
 		l.PushString(out)
 		return 1
 	})
 	setGoFunc(L, t, "minify", func(l *lua.State) int {
-		var v any
+		v := any(nil)
 		if err := json.Unmarshal([]byte(argString(l, 1)), &v); err != nil {
 			panic(err)
 		}
@@ -78,9 +89,9 @@ func buildJson(L *lua.State) int {
 		v, ok := jsonPath(luaToAny(l, 1), argString(l, 2))
 		if !ok {
 			l.PushNil()
-		} else {
-			pushAny(l, v)
+			return 1
 		}
+		pushAny(l, v)
 		return 1
 	})
 	return t
@@ -102,16 +113,25 @@ func parseNestedJSON(v any) any {
 		return out
 	case string:
 		s := strings.TrimSpace(x)
-		if len(s) > 0 && (s[0] == '{' || s[0] == '[') {
-			var parsed any
-			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
-				return parseNestedJSON(parsed)
+		if len(s) > 0 {
+			if isJSONStart(s) {
+				parsed := any(nil)
+				if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+					return parseNestedJSON(parsed)
+				}
 			}
 		}
 		return x
 	default:
 		return v
 	}
+}
+
+func isJSONStart(s string) bool {
+	if s[0] == '{' {
+		return true
+	}
+	return s[0] == '['
 }
 
 func jsonPath(v any, path string) (any, bool) {
@@ -122,14 +142,20 @@ func jsonPath(v any, path string) (any, bool) {
 		part = strings.TrimSpace(part)
 		switch cur := v.(type) {
 		case map[string]any:
-			var ok bool
-			v, ok = cur[part]
+			nv, ok := cur[part]
 			if !ok {
 				return nil, false
 			}
+			v = nv
 		case []any:
 			idx, err := strconv.Atoi(part)
-			if err != nil || idx < 0 || idx >= len(cur) {
+			if err != nil {
+				return nil, false
+			}
+			if idx < 0 {
+				return nil, false
+			}
+			if idx >= len(cur) {
 				return nil, false
 			}
 			v = cur[idx]

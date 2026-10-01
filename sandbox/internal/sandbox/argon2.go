@@ -32,7 +32,7 @@ func argon2HashFn(l *lua.State) int {
 	memory := argon2DefaultMemory
 	iterations := argon2DefaultIters
 	parallel := argon2DefaultParallel
-	var salt []byte
+	salt := []byte{}
 
 	if opts := toAnyMap(l, 2); len(opts) > 0 {
 		memory = optUint(opts, "memory", memory)
@@ -48,11 +48,13 @@ func argon2HashFn(l *lua.State) int {
 			salt = b
 		}
 	}
-	if salt == nil {
+	if len(salt) == 0 {
 		salt = randomBytes(int(saltLen))
 	}
 
-	validateArgonParams(memory, iterations, parallel)
+	if err := validateArgonParams(memory, iterations, parallel); err != nil {
+		panic(err)
+	}
 
 	hash := argon2.IDKey([]byte(password), salt, iterations, memory, parallel, keyLen)
 
@@ -81,51 +83,63 @@ func argon2VerifyFn(l *lua.State) int {
 
 func verifyArgon2(password, phc string) (bool, error) {
 	parts := strings.Split(phc, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" {
+	if len(parts) != 6 {
+		return false, errors.New("argon2_verify: invalid argon2id PHC hash")
+	}
+	if parts[1] != "argon2id" {
 		return false, errors.New("argon2_verify: invalid argon2id PHC hash")
 	}
 
-	var version int
+	version := 0
 	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil {
-		return false, fmt.Errorf("argon2_verify: invalid version: %v", err)
+		return false, fmt.Errorf("argon2_verify: invalid version: %w", err)
 	}
 	if version != argon2.Version {
 		return false, fmt.Errorf("argon2_verify: unsupported version %d", version)
 	}
 
-	var memory, iterations uint32
-	var parallel uint8
+	memory, iterations := uint32(0), uint32(0)
+	parallel := uint8(0)
 	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &parallel); err != nil {
-		return false, fmt.Errorf("argon2_verify: invalid params: %v", err)
+		return false, fmt.Errorf("argon2_verify: invalid params: %w", err)
 	}
-	validateArgonParams(memory, iterations, parallel)
+	if err := validateArgonParams(memory, iterations, parallel); err != nil {
+		return false, err
+	}
 
 	salt, err := phcB64Decode(parts[4])
 	if err != nil {
-		return false, fmt.Errorf("argon2_verify: invalid salt: %v", err)
+		return false, fmt.Errorf("argon2_verify: invalid salt: %w", err)
 	}
 	want, err := phcB64Decode(parts[5])
 	if err != nil {
-		return false, fmt.Errorf("argon2_verify: invalid hash: %v", err)
+		return false, fmt.Errorf("argon2_verify: invalid hash: %w", err)
 	}
 
 	got := argon2.IDKey([]byte(password), salt, iterations, memory, parallel, uint32(len(want)))
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 
-func validateArgonParams(memory, iterations uint32, parallel uint8) {
+func validateArgonParams(memory, iterations uint32, parallel uint8) error {
 	if memory < 8*1024 {
-		panic(fmt.Errorf("argon2: memory must be at least 8 KiB"))
+		return errors.New("argon2: memory must be at least 8 KiB")
 	}
 	if memory > argon2MaxMemory {
-		panic(fmt.Errorf("argon2: memory too large (max %d KiB)", argon2MaxMemory))
+		return fmt.Errorf("argon2: memory too large (max %d KiB)", argon2MaxMemory)
 	}
-	if iterations < 1 || iterations > 64 {
-		panic(fmt.Errorf("argon2: iterations must be 1..64"))
+	if iterations < 1 {
+		return errors.New("argon2: iterations must be 1..64")
 	}
-	if parallel < 1 || parallel > 32 {
-		panic(fmt.Errorf("argon2: parallelism must be 1..32"))
+	if iterations > 64 {
+		return errors.New("argon2: iterations must be 1..64")
 	}
+	if parallel < 1 {
+		return errors.New("argon2: parallelism must be 1..32")
+	}
+	if parallel > 32 {
+		return errors.New("argon2: parallelism must be 1..32")
+	}
+	return nil
 }
 
 func randomBytes(n int) []byte {

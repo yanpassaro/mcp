@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"cmp"
 	"encoding/base64"
 	"fmt"
 	"math/rand/v2"
@@ -17,11 +18,10 @@ var (
 )
 
 func buildRandom(L *lua.State) int {
-	var rng *rand.Rand
+	rng := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano())))
 	newRNG := func(seed int64) {
 		rng = rand.New(rand.NewPCG(uint64(seed), uint64(seed)))
 	}
-	newRNG(time.Now().UnixNano())
 	t := newTable(L)
 
 	setGoFunc(L, t, "seed", func(l *lua.State) int {
@@ -57,17 +57,14 @@ func buildRandom(L *lua.State) int {
 		return 1
 	})
 	setGoFunc(L, t, "name", func(l *lua.State) int {
-		l.PushString(cap1(fakeTokenAscii(rng)) + " " + cap1(fakeTokenAscii(rng)))
+		l.PushString(fmt.Sprintf("%s %s", cap1(fakeTokenAscii(rng)), cap1(fakeTokenAscii(rng))))
 		return 1
 	})
 	setGoFunc(L, t, "email", func(l *lua.State) int {
 		f := strings.ToLower(fakeTokenAscii(rng))
 		m := strings.ToLower(fakeTokenAscii(rng))
-		d := emailDomain(argString(l, 1))
-		if d == "" {
-			d = strings.ToLower(fakeTokenAscii(rng)) + ".com"
-		}
-		l.PushString(f + "." + m + "@" + d)
+		d := cmp.Or(emailDomain(argString(l, 1)), fmt.Sprintf("%s.com", strings.ToLower(fakeTokenAscii(rng))))
+		l.PushString(fmt.Sprintf("%s.%s@%s", f, m, d))
 		return 1
 	})
 	setGoFunc(L, t, "username", func(l *lua.State) int {
@@ -158,11 +155,12 @@ func buildRandom(L *lua.State) int {
 		if b := optUint(opts, "bytes", uint32(n)); b > 0 {
 			n = int(b)
 		}
-		if alphabet := optString(opts, "alphabet"); alphabet != "" {
+		alphabet := optString(opts, "alphabet")
+		if alphabet != "" {
 			l.PushString(secureToken(n, alphabet))
-		} else {
-			l.PushString(base64.RawURLEncoding.EncodeToString(randomBytes(n)))
+			return 1
 		}
+		l.PushString(base64.RawURLEncoding.EncodeToString(randomBytes(n)))
 		return 1
 	})
 	setGoFunc(L, t, "cpf", func(l *lua.State) int {
@@ -207,7 +205,7 @@ func fakeTokenAscii(rng *rand.Rand) string {
 
 func fakeTokenWith(vow []string, rng *rand.Rand) string {
 	n := 2 + rng.IntN(2)
-	var b strings.Builder
+	b := strings.Builder{}
 	for range n {
 		b.WriteString(phonOns[rng.IntN(len(phonOns))])
 		b.WriteString(vow[rng.IntN(len(vow))])
@@ -222,11 +220,11 @@ func fakeSentence(rng *rand.Rand) string {
 		words[i] = fakeToken(rng)
 	}
 	words[0] = cap1(words[0])
-	return strings.Join(words, " ") + "."
+	return fmt.Sprintf("%s.", strings.Join(words, " "))
 }
 
 func cap1(s string) string {
-	return strings.ToUpper(s[:1]) + s[1:]
+	return fmt.Sprintf("%s%s", strings.ToUpper(s[:1]), s[1:])
 }
 
 func emailDomain(s string) string {
@@ -254,13 +252,11 @@ func secureToken(n int, alphabet string) string {
 	out := make([]byte, n)
 	limit := 256 - (256 % len(alphabet))
 	for i := range out {
-		for {
-			b := randomBytes(1)[0]
-			if int(b) < limit {
-				out[i] = alphabet[int(b)%len(alphabet)]
-				break
-			}
+		b := randomBytes(1)[0]
+		for int(b) >= limit {
+			b = randomBytes(1)[0]
 		}
+		out[i] = alphabet[int(b)%len(alphabet)]
 	}
 	return string(out)
 }
@@ -273,7 +269,7 @@ func randomPassword(rng *rand.Rand, length int, opts map[string]any) string {
 		length = 4
 	}
 
-	var classes []string
+	classes := []string{}
 	pool := make([]byte, 0, 128)
 	addClass := func(s string) {
 		if s == "" {
@@ -308,7 +304,7 @@ func randomPassword(rng *rand.Rand, length int, opts map[string]any) string {
 		if exclude == "" {
 			return s
 		}
-		var b strings.Builder
+		b := strings.Builder{}
 		for i := 0; i < len(s); i++ {
 			if strings.IndexByte(exclude, s[i]) < 0 {
 				b.WriteByte(s[i])

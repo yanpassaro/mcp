@@ -12,6 +12,11 @@ import (
 	"ntdsk.com/mcp/github/internal/github"
 )
 
+const (
+	DEFAULT_PER_PAGE = 30
+	MAX_PER_PAGE     = 100
+)
+
 type Server struct {
 	client *github.Client
 }
@@ -60,10 +65,10 @@ type repoInput struct {
 }
 
 func (s *Server) getRepo(ctx context.Context, _ *mcp.CallToolRequest, in repoInput) (*mcp.CallToolResult, any, error) {
-	if strings.TrimSpace(in.Owner) == "" || strings.TrimSpace(in.Repo) == "" {
+	if !hasOwnerRepo(in.Owner, in.Repo) {
 		return nil, nil, errors.New("owner e repo são obrigatórios")
 	}
-	raw, err := s.client.Get(ctx, "/repos/"+in.Owner+"/"+in.Repo)
+	raw, err := s.client.Get(ctx, fmt.Sprintf("/repos/%s/%s", in.Owner, in.Repo))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -71,14 +76,24 @@ func (s *Server) getRepo(ctx context.Context, _ *mcp.CallToolRequest, in repoInp
 	if !ok {
 		return nil, nil, errors.New("resposta inesperada do GitHub")
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString(formatRepoDetail(m))
-	if items, err := s.client.ListReleases(ctx, in.Owner, in.Repo, 5, 1); err == nil && len(items) > 0 {
-		b.WriteString("\n\n")
-		b.WriteString(formatReleases(items))
+	items, err := s.client.ListReleases(ctx, in.Owner, in.Repo, 5, 1)
+	if err == nil {
+		if len(items) > 0 {
+			b.WriteString("\n\n")
+			b.WriteString(formatReleases(items))
+		}
 	}
 	b.WriteString(s.rateLimitFooter())
 	return textResult(b.String())
+}
+
+func hasOwnerRepo(owner, repo string) bool {
+	if strings.TrimSpace(owner) == "" {
+		return false
+	}
+	return strings.TrimSpace(repo) != ""
 }
 
 type itemInput struct {
@@ -89,7 +104,10 @@ type itemInput struct {
 }
 
 func (s *Server) getItem(ctx context.Context, _ *mcp.CallToolRequest, in itemInput) (*mcp.CallToolResult, any, error) {
-	if strings.TrimSpace(in.Owner) == "" || strings.TrimSpace(in.Repo) == "" || in.Number <= 0 {
+	if !hasOwnerRepo(in.Owner, in.Repo) {
+		return nil, nil, errors.New("owner, repo e number são obrigatórios")
+	}
+	if in.Number <= 0 {
 		return nil, nil, errors.New("owner, repo e number são obrigatórios")
 	}
 	switch strings.ToLower(strings.TrimSpace(in.Type)) {
@@ -102,7 +120,7 @@ func (s *Server) getItem(ctx context.Context, _ *mcp.CallToolRequest, in itemInp
 		if !ok {
 			return nil, nil, errors.New("resposta inesperada do GitHub")
 		}
-		return textResult(formatIssueDetail(m) + s.rateLimitFooter())
+		return textResult(fmt.Sprintf("%s%s", formatIssueDetail(m), s.rateLimitFooter()))
 	case "pr", "pull", "pullrequest", "pull_request", "pull-request":
 		raw, err := s.client.Get(ctx, fmt.Sprintf("/repos/%s/%s/pulls/%d", in.Owner, in.Repo, in.Number))
 		if err != nil {
@@ -112,7 +130,7 @@ func (s *Server) getItem(ctx context.Context, _ *mcp.CallToolRequest, in itemInp
 		if !ok {
 			return nil, nil, errors.New("resposta inesperada do GitHub")
 		}
-		return textResult(formatPullRequestDetail(m) + s.rateLimitFooter())
+		return textResult(fmt.Sprintf("%s%s", formatPullRequestDetail(m), s.rateLimitFooter()))
 	default:
 		return nil, nil, fmt.Errorf("'type' inválido: use issue ou pr")
 	}
@@ -138,7 +156,7 @@ func (s *Server) search(ctx context.Context, kind string, query string, sort, or
 	if err != nil {
 		return nil, nil, err
 	}
-	return textResult(formatSearchKind(kind, items, total) + s.rateLimitFooter())
+	return textResult(fmt.Sprintf("%s%s", formatSearchKind(kind, items, total), s.rateLimitFooter()))
 }
 
 func (s *Server) searchTool(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, any, error) {
@@ -150,14 +168,7 @@ func (s *Server) searchTool(ctx context.Context, _ *mcp.CallToolRequest, in sear
 	case "issue", "issues":
 		return s.search(ctx, "issues", in.Query, in.Sort, in.Order, in.PerPage, in.Page)
 	case "pr", "pull", "pullrequest", "pull_request", "pull-request":
-		q := strings.TrimSpace(in.Query)
-		if !strings.Contains(strings.ToLower(q), "is:pr") {
-			if q != "" {
-				q += " "
-			}
-			q += "is:pr"
-		}
-		return s.search(ctx, "issues", q, in.Sort, in.Order, in.PerPage, in.Page)
+		return s.search(ctx, "issues", withIsPR(strings.TrimSpace(in.Query)), in.Sort, in.Order, in.PerPage, in.Page)
 	case "commit", "commits":
 		q := strings.TrimSpace(in.Query)
 		if queryHasFreeTerm(q) {
@@ -177,9 +188,19 @@ func (s *Server) searchTool(ctx context.Context, _ *mcp.CallToolRequest, in sear
 	}
 }
 
+func withIsPR(q string) string {
+	if strings.Contains(strings.ToLower(q), "is:pr") {
+		return q
+	}
+	return fmt.Sprintf("%s is:pr", q)
+}
+
 func (s *Server) listCommitsFallback(ctx context.Context, in commitSearchInput) (*mcp.CallToolResult, any, error) {
 	owner, repo, params := commitListParams(in.Query)
-	if owner == "" || repo == "" {
+	if owner == "" {
+		return nil, nil, errors.New("para listar commits sem um termo de texto, informe o qualificador repo:owner/nome (ex.: 'repo:octocat/Hello-World')")
+	}
+	if repo == "" {
 		return nil, nil, errors.New("para listar commits sem um termo de texto, informe o qualificador repo:owner/nome (ex.: 'repo:octocat/Hello-World')")
 	}
 	params.Set("per_page", strconv.Itoa(clampPerPage(in.PerPage)))
@@ -190,7 +211,7 @@ func (s *Server) listCommitsFallback(ctx context.Context, in commitSearchInput) 
 	if err != nil {
 		return nil, nil, err
 	}
-	return textResult(formatCommitSearch(items, len(items)) + s.rateLimitFooter())
+	return textResult(fmt.Sprintf("%s%s", formatCommitSearch(items, len(items)), s.rateLimitFooter()))
 }
 
 func queryHasFreeTerm(q string) bool {
@@ -236,25 +257,28 @@ func commitListParams(q string) (owner, repo string, params url.Values) {
 
 
 func (s *Server) getTree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput) (*mcp.CallToolResult, any, error) {
-	if strings.TrimSpace(in.Owner) == "" || strings.TrimSpace(in.Repo) == "" {
+	if !hasOwnerRepo(in.Owner, in.Repo) {
 		return nil, nil, errors.New("owner e repo são obrigatórios")
 	}
 	items, err := s.client.GetTree(ctx, in.Owner, in.Repo, in.Ref, in.Recursive)
 	if err != nil {
 		return nil, nil, err
 	}
-	return textResult(formatTree(items, len(items)) + s.rateLimitFooter())
+	return textResult(fmt.Sprintf("%s%s", formatTree(items, len(items)), s.rateLimitFooter()))
 }
 
 func (s *Server) fetchFile(ctx context.Context, _ *mcp.CallToolRequest, in fetchFileInput) (*mcp.CallToolResult, any, error) {
-	if strings.TrimSpace(in.Owner) == "" || strings.TrimSpace(in.Repo) == "" || strings.TrimSpace(in.Path) == "" {
+	if !hasOwnerRepo(in.Owner, in.Repo) {
+		return nil, nil, errors.New("owner, repo e path são obrigatórios")
+	}
+	if strings.TrimSpace(in.Path) == "" {
 		return nil, nil, errors.New("owner, repo e path são obrigatórios")
 	}
 	content, truncated, err := s.client.GetFile(ctx, in.Owner, in.Repo, in.Path, in.Ref)
 	if err != nil {
 		return nil, nil, err
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "📄 %s/%s — %s", in.Owner, in.Repo, in.Path)
 	if truncated {
 		b.WriteString(" (truncado em 200KB)")
@@ -266,7 +290,7 @@ func (s *Server) fetchFile(ctx context.Context, _ *mcp.CallToolRequest, in fetch
 		b.WriteString("\n")
 	}
 	b.WriteString("```")
-	return textResult(b.String() + s.rateLimitFooter())
+	return textResult(fmt.Sprintf("%s%s", b.String(), s.rateLimitFooter()))
 }
 
 type searchInput struct {
@@ -304,10 +328,10 @@ type fetchFileInput struct {
 
 func clampPerPage(p int) int {
 	if p <= 0 {
-		return 30
+		return DEFAULT_PER_PAGE
 	}
-	if p > 100 {
-		return 100
+	if p > MAX_PER_PAGE {
+		return MAX_PER_PAGE
 	}
 	return p
 }

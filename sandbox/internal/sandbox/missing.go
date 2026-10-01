@@ -120,7 +120,7 @@ func missingFill(vals []any, opts map[string]any) []any {
 			}
 		}
 	case "mean", "median":
-		var nums []float64
+		nums := []float64{}
 		for _, e := range out {
 			if n, ok := numOrNil(e); ok {
 				nums = append(nums, n)
@@ -130,7 +130,8 @@ func missingFill(vals []any, opts map[string]any) []any {
 		if len(nums) > 0 {
 			if method == "mean" {
 				fill = mean(nums)
-			} else {
+			}
+			if method == "median" {
 				fill = quantile(nums, 0.5)
 			}
 		}
@@ -146,9 +147,9 @@ func missingFill(vals []any, opts map[string]any) []any {
 				if last != nil {
 					out[i] = last
 				}
-			} else {
-				last = e
+				continue
 			}
+			last = e
 		}
 	case "next":
 		nxt := any(nil)
@@ -158,9 +159,9 @@ func missingFill(vals []any, opts map[string]any) []any {
 				if nxt != nil {
 					out[i] = nxt
 				}
-			} else {
-				nxt = e
+				continue
 			}
+			nxt = e
 		}
 	case "first":
 		fill := any(nil)
@@ -171,7 +172,10 @@ func missingFill(vals []any, opts map[string]any) []any {
 			}
 		}
 		for i, e := range out {
-			if isNullVal(e, opts) && fill != nil {
+			if fill == nil {
+				continue
+			}
+			if isNullVal(e, opts) {
 				out[i] = fill
 			}
 		}
@@ -183,7 +187,10 @@ func missingFill(vals []any, opts map[string]any) []any {
 			}
 		}
 		for i, e := range out {
-			if isNullVal(e, opts) && fill != nil {
+			if fill == nil {
+				continue
+			}
+			if isNullVal(e, opts) {
 				out[i] = fill
 			}
 		}
@@ -200,10 +207,11 @@ func missingDrop(rows []any, opts map[string]any) []any {
 			out = append(out, r)
 			continue
 		}
-		var fields []string
+		fields := []string{}
 		if field != "" {
 			fields = []string{field}
-		} else {
+		}
+		if field == "" {
 			fields = make([]string, 0, len(m))
 			for k := range m {
 				fields = append(fields, k)

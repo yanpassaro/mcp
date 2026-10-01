@@ -59,13 +59,16 @@ func buildInfer(L *lua.State) int {
 }
 
 func inferType(vals []any) string {
-	var clean []any
+	clean := []any{}
 	for _, v := range vals {
 		if v == nil {
 			continue
 		}
-		if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
-			continue
+		s, ok := v.(string)
+		if ok {
+			if strings.TrimSpace(s) == "" {
+				continue
+			}
 		}
 		clean = append(clean, v)
 	}
@@ -92,7 +95,7 @@ func inferType(vals []any) string {
 	allBool := true
 	for _, v := range clean {
 		s := strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
-		if s != "true" && s != "false" && s != "1" && s != "0" && s != "yes" && s != "no" {
+		if !isBoolStr(s) {
 			allBool = false
 			break
 		}
@@ -103,7 +106,11 @@ func inferType(vals []any) string {
 	allDate := true
 	for _, v := range clean {
 		s, ok := v.(string)
-		if !ok || !isDateStr(s) {
+		if !ok {
+			allDate = false
+			break
+		}
+		if !isDateStr(s) {
 			allDate = false
 			break
 		}
@@ -114,12 +121,32 @@ func inferType(vals []any) string {
 	return "string"
 }
 
+func isBoolStr(s string) bool {
+	if s == "true" {
+		return true
+	}
+	if s == "false" {
+		return true
+	}
+	if s == "1" {
+		return true
+	}
+	if s == "0" {
+		return true
+	}
+	if s == "yes" {
+		return true
+	}
+	return s == "no"
+}
+
 func numOrNil(v any) (float64, bool) {
 	if n, ok := numOpt(v); ok {
 		return n, true
 	}
 	if s, ok := v.(string); ok {
-		if f, err := strconv.ParseFloat(strings.TrimSpace(s), 64); err == nil {
+		f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+		if err == nil {
 			return f, true
 		}
 	}
@@ -140,9 +167,11 @@ func stringSlice(v any) []string {
 		parts := strings.Split(x, ",")
 		out := make([]string, 0, len(parts))
 		for _, p := range parts {
-			if p = strings.TrimSpace(p); p != "" {
-				out = append(out, p)
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
 			}
+			out = append(out, p)
 		}
 		return out
 	}
@@ -179,11 +208,5 @@ func cmpAny(a, b any) int {
 		}
 	}
 	s1, s2 := fmt.Sprint(a), fmt.Sprint(b)
-	switch {
-	case s1 < s2:
-		return -1
-	case s1 > s2:
-		return 1
-	}
-	return 0
+	return strings.Compare(s1, s2)
 }

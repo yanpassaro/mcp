@@ -42,7 +42,8 @@ func buildSeq(L *lua.State) int {
 			for v := start; v < stop; v += step {
 				out = append(out, float64(v))
 			}
-		} else {
+		}
+		if step < 0 {
 			for v := start; v > stop; v += step {
 				out = append(out, float64(v))
 			}
@@ -69,7 +70,10 @@ func buildSeq(L *lua.State) int {
 		for i := 1; i <= l.Top(); i++ {
 			arr := luaArrayAny(l, i)
 			arrays = append(arrays, arr)
-			if min == -1 || len(arr) < min {
+			if min == -1 {
+				min = len(arr)
+			}
+			if len(arr) < min {
 				min = len(arr)
 			}
 		}

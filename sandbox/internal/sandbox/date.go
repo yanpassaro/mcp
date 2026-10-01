@@ -65,11 +65,12 @@ func buildDate(L *lua.State) int {
 		return 1
 	})
 	setGoFunc(L, t, "duration", func(l *lua.State) int {
-		if ms, ok := durationParse(argString(l, 1)); ok {
-			l.PushNumber(float64(ms))
-		} else {
+		ms, ok := durationParse(argString(l, 1))
+		if !ok {
 			l.PushNil()
+			return 1
 		}
+		l.PushNumber(float64(ms))
 		return 1
 	})
 	setGoFunc(L, t, "format_duration", func(l *lua.State) int {

@@ -31,12 +31,18 @@ func New(mntDir, tmpDir string) *Server {
 }
 
 func envInt(name string, def int) int {
-	if v := os.Getenv(name); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
+	v := os.Getenv(name)
+	if v == "" {
+		return def
 	}
-	return def
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	if n <= 0 {
+		return def
+	}
+	return n
 }
 
 func (s *Server) Register(server *mcp.Server) {
@@ -146,7 +152,7 @@ func (s *Server) filesystem(ctx context.Context, _ *mcp.CallToolRequest, in file
 		if err != nil {
 			return nil, nil, err
 		}
-		return textResult("```text\n" + FormatTree(t) + "\n```")
+		return textResult(fmt.Sprintf("```text\n%s\n```", FormatTree(t)))
 	default:
 		return nil, nil, fmt.Errorf("ação inválida %q; use copy, mount, del, stat ou list", action)
 	}

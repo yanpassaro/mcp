@@ -36,7 +36,7 @@ func buildXML(L *lua.State) int {
 		if err != nil {
 			panic(err)
 		}
-		var b strings.Builder
+		b := strings.Builder{}
 		writeXMLNode(&b, n)
 		l.PushString(b.String())
 		return 1
@@ -47,13 +47,9 @@ func buildXML(L *lua.State) int {
 
 func parseXML(s string) (*xmlNode, error) {
 	dec := xml.NewDecoder(strings.NewReader(s))
-	var root *xmlNode
+	root := &xmlNode{}
 	stack := []*xmlNode{}
-	for {
-		tok, err := dec.Token()
-		if err == io.EOF {
-			break
-		}
+	for tok, err := dec.Token(); !errors.Is(err, io.EOF); tok, err = dec.Token() {
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +61,8 @@ func parseXML(s string) (*xmlNode, error) {
 			}
 			if len(stack) == 0 {
 				root = n
-			} else {
+			}
+			if len(stack) > 0 {
 				parent := stack[len(stack)-1]
 				parent.children = append(parent.children, n)
 			}
@@ -80,7 +77,7 @@ func parseXML(s string) (*xmlNode, error) {
 			}
 		}
 	}
-	if root == nil {
+	if root.name == "" {
 		return nil, errors.New("XML sem elemento raiz")
 	}
 	return root, nil
@@ -123,8 +120,11 @@ func xmlNodeFromAny(v any) (*xmlNode, error) {
 			n.attrs[k] = fmt.Sprint(val)
 		}
 	}
-	if txt, ok := m["text"]; ok && txt != nil {
-		n.chars.WriteString(fmt.Sprint(txt))
+	txt, ok := m["text"]
+	if ok {
+		if txt != nil {
+			n.chars.WriteString(fmt.Sprint(txt))
+		}
 	}
 	if c, ok := m["children"].([]any); ok {
 		for _, item := range c {
@@ -149,15 +149,16 @@ func writeXMLNode(b *strings.Builder, n *xmlNode) {
 		b.WriteByte('"')
 	}
 	if len(n.children) == 0 {
-		if text := n.chars.String(); text != "" {
+		text := n.chars.String()
+		if text != "" {
 			b.WriteByte('>')
 			xmlEscape(b, text)
 			b.WriteString("</")
 			b.WriteString(n.name)
 			b.WriteByte('>')
-		} else {
-			b.WriteString("/>")
+			return
 		}
+		b.WriteString("/>")
 		return
 	}
 	b.WriteByte('>')
@@ -182,7 +183,10 @@ func sortedKeys(m map[string]string) []string {
 }
 
 func xmlEscape(b *strings.Builder, s string) {
-	var buf bytes.Buffer
-	_ = xml.EscapeText(&buf, []byte(s))
+	buf := bytes.Buffer{}
+	if err := xml.EscapeText(&buf, []byte(s)); err != nil {
+		b.WriteString(s)
+		return
+	}
 	b.WriteString(buf.String())
 }

@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -60,7 +61,7 @@ var docAliases = map[string]string{
 
 func (s *Server) doc(ctx context.Context, _ *mcp.CallToolRequest, in docInput) (*mcp.CallToolResult, any, error) {
 	topic := strings.ToLower(strings.TrimSpace(in.Topic))
-	if topic == "" || topic == "all" || topic == "overview" || topic == "help" || topic == "index" {
+	if isIndexTopic(topic) {
 		return textResult(renderLunaIndex())
 	}
 	if alias, ok := docAliases[topic]; ok {
@@ -72,5 +73,21 @@ func (s *Server) doc(ctx context.Context, _ *mcp.CallToolRequest, in docInput) (
 	if mod := lunaMetaTopic(topic); mod != nil {
 		return textResult(renderLunaModule(mod))
 	}
-	return textResult(renderLunaIndex() + "\n\n⚠️ Topic `" + strings.TrimSpace(in.Topic) + "` not found. Available topics: " + strings.Join(lunaTopicNames(), ", ") + ".\n")
+	return textResult(fmt.Sprintf("%s\n\n⚠️ Topic `%s` not found. Available topics: %s.\n", renderLunaIndex(), strings.TrimSpace(in.Topic), strings.Join(lunaTopicNames(), ", ")))
+}
+
+func isIndexTopic(topic string) bool {
+	if topic == "" {
+		return true
+	}
+	if topic == "all" {
+		return true
+	}
+	if topic == "overview" {
+		return true
+	}
+	if topic == "help" {
+		return true
+	}
+	return topic == "index"
 }

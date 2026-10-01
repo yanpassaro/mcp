@@ -44,17 +44,26 @@ func ResolveCommit(repo *git.Repository, rev string) (*object.Commit, error) {
 	}
 	hash, err := repo.ResolveRevision(plumbing.Revision(rev))
 	if err != nil {
-		if ref, e2 := repo.Reference(plumbing.NewBranchReferenceName(rev), true); e2 == nil {
-			h := ref.Hash()
-			hash = &h
-		} else if ref, e3 := repo.Reference(plumbing.NewTagReferenceName(rev), true); e3 == nil {
-			h := ref.Hash()
-			hash = &h
-		} else {
+		hash = fallbackHash(repo, rev)
+		if hash == nil {
 			return nil, fmt.Errorf("não foi possível resolver a revisão %q: %w", rev, err)
 		}
 	}
 	return repo.CommitObject(*hash)
+}
+
+func fallbackHash(repo *git.Repository, rev string) *plumbing.Hash {
+	ref, err := repo.Reference(plumbing.NewBranchReferenceName(rev), true)
+	if err == nil {
+		h := ref.Hash()
+		return &h
+	}
+	ref, err = repo.Reference(plumbing.NewTagReferenceName(rev), true)
+	if err == nil {
+		h := ref.Hash()
+		return &h
+	}
+	return nil
 }
 
 func ResolveDefaultBase(repo *git.Repository) (*object.Commit, error) {

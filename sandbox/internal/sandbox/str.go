@@ -68,9 +68,9 @@ func buildStr(L *lua.State) int {
 		sep := argString(l, 2)
 		if limit := int(argNum(l, 3)); limit > 0 {
 			pushAny(l, strings.SplitN(s, sep, limit))
-		} else {
-			pushAny(l, strings.Split(s, sep))
+			return 1
 		}
+		pushAny(l, strings.Split(s, sep))
 		return 1
 	})
 	setGoFunc(L, t, "extract", func(l *lua.State) int {
@@ -86,7 +86,9 @@ func buildStr(L *lua.State) int {
 		for _, m := range re.FindAllStringSubmatch(s, -1) {
 			if group == 0 {
 				out = append(out, m[0])
-			} else if group < len(m) {
+				continue
+			}
+			if group < len(m) {
 				out = append(out, m[group])
 			}
 		}
@@ -108,7 +110,8 @@ func buildStr(L *lua.State) int {
 			for _, tk := range toks {
 				out = append(out, tk)
 			}
-		} else {
+		}
+		if n > 1 {
 			for i := 0; i+n <= len(toks); i++ {
 				out = append(out, strings.Join(toks[i:i+n], " "))
 			}
@@ -206,9 +209,9 @@ func camelCase(s string) string {
 	for i := range ws {
 		if i == 0 {
 			ws[i] = strings.ToLower(ws[i])
-		} else {
-			ws[i] = upperFirst(strings.ToLower(ws[i]))
+			continue
 		}
+		ws[i] = upperFirst(strings.ToLower(ws[i]))
 	}
 	return strings.Join(ws, "")
 }
@@ -237,7 +240,10 @@ func luafmtArgs(f string, args []any) []any {
 			continue
 		}
 		j := i + 1
-		for j < len(f) && strings.ContainsRune("+-# 0.123456789", rune(f[j])) {
+		for j < len(f) {
+			if !strings.ContainsRune("+-# 0.123456789", rune(f[j])) {
+				break
+			}
 			j++
 		}
 		if j >= len(f) {
@@ -249,9 +255,9 @@ func luafmtArgs(f string, args []any) []any {
 			if idx < len(args) {
 				if fl, ok := args[idx].(float64); ok {
 					out = append(out, int64(fl))
-				} else {
-					out = append(out, args[idx])
+					continue
 				}
+				out = append(out, args[idx])
 			}
 			idx++
 		case 's':
@@ -305,15 +311,27 @@ func splitWords(s string) []string {
 		}
 	}
 	for i, r := range runes {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-			flush()
-			continue
+		if !unicode.IsLetter(r) {
+			if !unicode.IsDigit(r) {
+				flush()
+				continue
+			}
 		}
 		if len(cur) > 0 {
 			prev := cur[len(cur)-1]
-			nextLower := i+1 < len(runes) && unicode.IsLower(runes[i+1])
-			if unicode.IsUpper(r) && (unicode.IsLower(prev) || (unicode.IsUpper(prev) && nextLower)) {
-				flush()
+			nextLower := false
+			if i+1 < len(runes) {
+				nextLower = unicode.IsLower(runes[i+1])
+			}
+			if unicode.IsUpper(r) {
+				if unicode.IsLower(prev) {
+					flush()
+				}
+				if unicode.IsUpper(prev) {
+					if nextLower {
+						flush()
+					}
+				}
 			}
 		}
 		cur = append(cur, r)
@@ -322,23 +340,27 @@ func splitWords(s string) []string {
 	return words
 }
 
+const DEFAULT_WRAP_WIDTH = 80
+
 func wrapText(s string, width int) []string {
 	if width <= 0 {
-		width = 80
+		width = DEFAULT_WRAP_WIDTH
 	}
 	words := strings.Fields(normalizeStr(s))
 	if len(words) == 0 {
 		return []string{}
 	}
-	var lines []string
-	var cur strings.Builder
+	lines := []string{}
+	cur := strings.Builder{}
 	curLen := 0
 	for _, w := range words {
 		wl := utf8.RuneCountInString(w)
-		if curLen > 0 && curLen+1+wl > width {
-			lines = append(lines, cur.String())
-			cur.Reset()
-			curLen = 0
+		if curLen > 0 {
+			if curLen+1+wl > width {
+				lines = append(lines, cur.String())
+				cur.Reset()
+				curLen = 0
+			}
 		}
 		if curLen > 0 {
 			cur.WriteByte(' ')
@@ -355,13 +377,16 @@ func wrapText(s string, width int) []string {
 
 func summarize(s string, max int) string {
 	r := []rune(s)
-	if max <= 0 || len(r) <= max {
+	if max <= 0 {
+		return s
+	}
+	if len(r) <= max {
 		return s
 	}
 	if max <= 3 {
 		return string(r[:max])
 	}
-	return string(r[:max-3]) + "..."
+	return fmt.Sprintf("%s...", string(r[:max-3]))
 }
 
 

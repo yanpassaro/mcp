@@ -1,6 +1,7 @@
 package sqlize
 
 import (
+	"cmp"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -24,13 +25,12 @@ func (s *store) exportFile(ctx context.Context, outPath, source, table, target s
 	if err != nil {
 		return "", err
 	}
-	var q string
-	if strings.TrimSpace(source) != "" {
-		q = source
-	} else if strings.TrimSpace(table) != "" {
-		q = "SELECT * FROM " + quoteIdent(strings.TrimSpace(table))
-	} else {
-		return "", fmt.Errorf("informe 'query' (SQL) ou 'table' (nome da tabela)")
+	q := strings.TrimSpace(source)
+	if q == "" {
+		if strings.TrimSpace(table) == "" {
+			return "", fmt.Errorf("informe 'query' (SQL) ou 'table' (nome da tabela)")
+		}
+		q = fmt.Sprintf("SELECT * FROM %s", quoteIdent(strings.TrimSpace(table)))
 	}
 	cols, rows, err := s.query(ctx, q, args)
 	if err != nil {
@@ -88,7 +88,13 @@ func formatFromPath(p string) (string, error) {
 
 func exportPath(outPath string) (string, error) {
 	name := filepath.Base(strings.TrimSpace(outPath))
-	if name == "" || name == "." || name == string(filepath.Separator) {
+	if name == "" {
+		return "", fmt.Errorf("nome de arquivo de saída inválido: %q", outPath)
+	}
+	if name == "." {
+		return "", fmt.Errorf("nome de arquivo de saída inválido: %q", outPath)
+	}
+	if name == string(filepath.Separator) {
 		return "", fmt.Errorf("nome de arquivo de saída inválido: %q", outPath)
 	}
 	dir, err := exportDir()
@@ -101,9 +107,6 @@ func exportPath(outPath string) (string, error) {
 	return filepath.Join(dir, name), nil
 }
 
-// exportDir unifica o filesystem do sqlize com o do sandbox: exporta dentro de
-// <home>/.local/state/mcp/mnt, exatamente a mesma pasta do mnt do sandbox,
-// para que os arquivos fiquem imediatamente acessíveis aos scripts do sandbox.
 func exportDir() (string, error) {
 	return mntDir()
 }
@@ -211,10 +214,8 @@ func writeExcel(path string, cols []string, rows [][]string) error {
 }
 
 func writeSQL(path string, cols []string, rows [][]string, tableName string) error {
-	if strings.TrimSpace(tableName) == "" {
-		tableName = "exported"
-	}
-	var b strings.Builder
+	tableName = cmp.Or(strings.TrimSpace(tableName), "exported")
+	b := strings.Builder{}
 	b.WriteString("BEGIN;\n")
 	fmt.Fprintf(&b, "DROP TABLE IF EXISTS %s;\n", quoteIdent(tableName))
 	b.WriteString("CREATE TABLE ")
@@ -254,7 +255,7 @@ func writeSQL(path string, cols []string, rows [][]string, tableName string) err
 }
 
 func writeHTML(path string, cols []string, rows [][]string) error {
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString("<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>sqlize export</title>\n")
 	b.WriteString("<style>body{font-family:system-ui,sans-serif;margin:2rem}table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:.35rem .6rem;text-align:left}th{background:#f2f2f2}tr:nth-child(even){background:#fafafa}</style>\n")
 	b.WriteString("</head>\n<body>\n<table>\n<thead><tr>")
@@ -357,23 +358,20 @@ func sqlLit(s string) string {
 	if s == "" {
 		return "NULL"
 	}
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+	return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''"))
 }
 
 func xmlName(s string) string {
 	fields := strings.Fields(s)
-	joined := strings.Join(fields, "_")
-	if joined == "" {
-		joined = "col"
-	}
-	var b strings.Builder
+	joined := cmp.Or(strings.Join(fields, "_"), "col")
+	b := strings.Builder{}
 	for i, r := range joined {
 		switch {
-		case r == '_' || r == '-' || r == '.':
+		case isXMLNameRune(r):
 			b.WriteRune(r)
-		case (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z'):
+		case isLetter(r):
 			b.WriteRune(r)
-		case r >= '0' && r <= '9':
+		case isDigit(r):
 			if i == 0 {
 				b.WriteRune('_')
 			}
@@ -385,8 +383,37 @@ func xmlName(s string) string {
 	return b.String()
 }
 
+func isXMLNameRune(r rune) bool {
+	if r == '_' {
+		return true
+	}
+	if r == '-' {
+		return true
+	}
+	return r == '.'
+}
+
+func isLetter(r rune) bool {
+	if r >= 'A' {
+		if r <= 'Z' {
+			return true
+		}
+	}
+	if r < 'a' {
+		return false
+	}
+	return r <= 'z'
+}
+
+func isDigit(r rune) bool {
+	if r < '0' {
+		return false
+	}
+	return r <= '9'
+}
+
 func cellName(col, row int) (string, error) {
-	var b strings.Builder
+	b := strings.Builder{}
 	n := col + 1
 	for n > 0 {
 		n--
@@ -397,5 +424,5 @@ func cellName(col, row int) (string, error) {
 	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
 		runes[i], runes[j] = runes[j], runes[i]
 	}
-	return string(runes) + strconv.Itoa(row), nil
+	return fmt.Sprintf("%s%d", string(runes), row), nil
 }

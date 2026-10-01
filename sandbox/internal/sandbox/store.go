@@ -2,18 +2,19 @@ package sandbox
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
 const (
-	maxFileBytes  = 5 * 1024 * 1024
-	maxWriteBytes = 5 * 1024 * 1024
+	MAX_FILE_BYTES  = 5 * 1024 * 1024
+	MAX_WRITE_BYTES = 5 * 1024 * 1024
 )
 
 type Entry struct {
@@ -38,12 +39,13 @@ func (s *Store) List() ([]Entry, error) {
 
 func (s *Store) ListDir(rel string) ([]Entry, error) {
 	full := s.Root
-	if rel = strings.TrimSpace(rel); rel != "" {
-		var err error
-		full, err = s.resolve(rel)
+	rel = strings.TrimSpace(rel)
+	if rel != "" {
+		resolved, err := s.resolve(rel)
 		if err != nil {
 			return nil, err
 		}
+		full = resolved
 	}
 	entries, err := os.ReadDir(full)
 	if err != nil {
@@ -51,7 +53,10 @@ func (s *Store) ListDir(rel string) ([]Entry, error) {
 	}
 	out := make([]Entry, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		name := e.Name()
@@ -62,7 +67,7 @@ func (s *Store) ListDir(rel string) ([]Entry, error) {
 		n, _ := countLines(filepath.Join(full, name))
 		out = append(out, Entry{Name: name, Lines: n, Size: info.Size()})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b Entry) int { return cmp.Compare(a.Name, b.Name) })
 	return out, nil
 }
 
@@ -78,8 +83,8 @@ func (s *Store) Read(name string) (string, error) {
 	if fi.IsDir() {
 		return "", fmt.Errorf("%s é uma pasta, não um arquivo", name)
 	}
-	if fi.Size() > maxFileBytes {
-		return "", fmt.Errorf("arquivo %s excede %d bytes", name, maxFileBytes)
+	if fi.Size() > MAX_FILE_BYTES {
+		return "", fmt.Errorf("arquivo %s excede %d bytes", name, MAX_FILE_BYTES)
 	}
 	b, err := os.ReadFile(full)
 	if err != nil {
@@ -101,8 +106,8 @@ func (s *Store) Write(name, content string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if len(content) > maxWriteBytes {
-		return 0, fmt.Errorf("conteúdo excede %d bytes", maxWriteBytes)
+	if len(content) > MAX_WRITE_BYTES {
+		return 0, fmt.Errorf("conteúdo excede %d bytes", MAX_WRITE_BYTES)
 	}
 	if err := s.enforceLimits(full, len(content)); err != nil {
 		return 0, err
@@ -121,8 +126,8 @@ func (s *Store) WriteBytes(name string, data []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if len(data) > maxFileBytes {
-		return 0, fmt.Errorf("conteúdo excede %d bytes", maxFileBytes)
+	if len(data) > MAX_FILE_BYTES {
+		return 0, fmt.Errorf("conteúdo excede %d bytes", MAX_FILE_BYTES)
 	}
 	if err := s.enforceLimits(full, len(data)); err != nil {
 		return 0, err
@@ -141,19 +146,22 @@ func (s *Store) Append(name, content string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var buf []byte
-	if fi, err := os.Stat(full); err == nil && !fi.IsDir() {
-		if fi.Size() > maxFileBytes {
-			return 0, fmt.Errorf("arquivo %s excede %d bytes", name, maxFileBytes)
+	buf := []byte{}
+	fi, serr := os.Stat(full)
+	if serr == nil {
+		if !fi.IsDir() {
+			if fi.Size() > MAX_FILE_BYTES {
+				return 0, fmt.Errorf("arquivo %s excede %d bytes", name, MAX_FILE_BYTES)
+			}
+			b, rerr := os.ReadFile(full)
+			if rerr != nil {
+				return 0, rerr
+			}
+			buf = b
 		}
-		b, err := os.ReadFile(full)
-		if err != nil {
-			return 0, err
-		}
-		buf = b
 	}
-	if len(buf)+len(content) > maxWriteBytes {
-		return 0, fmt.Errorf("conteúdo excede %d bytes", maxWriteBytes)
+	if len(buf)+len(content) > MAX_WRITE_BYTES {
+		return 0, fmt.Errorf("conteúdo excede %d bytes", MAX_WRITE_BYTES)
 	}
 	if err := s.enforceLimits(full, len(content)); err != nil {
 		return 0, err
@@ -225,23 +233,31 @@ func (s *Store) resolve(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	if rel == ".." {
+		return "", fmt.Errorf("arquivo fora da pasta do sandbox: %s", name)
+	}
+	if strings.HasPrefix(rel, fmt.Sprintf("..%c", os.PathSeparator)) {
 		return "", fmt.Errorf("arquivo fora da pasta do sandbox: %s", name)
 	}
 	return full, nil
 }
 
 func (s *Store) enforceLimits(full string, extraBytes int) error {
-	if s.MaxTotalBytes <= 0 && s.MaxFiles <= 0 {
-		return nil
+	if s.MaxTotalBytes <= 0 {
+		if s.MaxFiles <= 0 {
+			return nil
+		}
 	}
-	var total int64
+	total := int64(0)
 	count := 0
-	var targetSize int64
+	targetSize := int64(0)
 	targetExists := false
 	cleaned := filepath.Clean(full)
 	err := filepath.WalkDir(s.Root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		info, e := d.Info()
@@ -264,11 +280,15 @@ func (s *Store) enforceLimits(full string, extraBytes int) error {
 	if !targetExists {
 		countAfter++
 	}
-	if s.MaxTotalBytes > 0 && totalAfter > s.MaxTotalBytes {
-		return fmt.Errorf("limite de espaço do sandbox excedido (%d MiB)", s.MaxTotalBytes/(1024*1024))
+	if s.MaxTotalBytes > 0 {
+		if totalAfter > s.MaxTotalBytes {
+			return fmt.Errorf("limite de espaço do sandbox excedido (%d MiB)", s.MaxTotalBytes/(1024*1024))
+		}
 	}
-	if s.MaxFiles > 0 && countAfter > s.MaxFiles {
-		return fmt.Errorf("limite de arquivos do sandbox excedido (%d)", s.MaxFiles)
+	if s.MaxFiles > 0 {
+		if countAfter > s.MaxFiles {
+			return fmt.Errorf("limite de arquivos do sandbox excedido (%d)", s.MaxFiles)
+		}
 	}
 	return nil
 }

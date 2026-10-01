@@ -1,7 +1,9 @@
 package mcpserver
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,7 +31,7 @@ func truncate(s string, n int) string {
 	s = strings.TrimSpace(s)
 	r := []rune(s)
 	if len(r) > n {
-		return string(r[:n]) + "…"
+		return fmt.Sprintf("%s…", string(r[:n]))
 	}
 	return s
 }
@@ -86,11 +88,13 @@ func formatStatus(st git.Status) string {
 	}
 	sort.Strings(index)
 	sort.Strings(worktree)
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString("## Status\n\n")
-	if len(index) == 0 && len(worktree) == 0 {
-		b.WriteString("_Árvore de trabalho limpa (sem alterações)._")
-		return b.String()
+	if len(index) == 0 {
+		if len(worktree) == 0 {
+			b.WriteString("_Árvore de trabalho limpa (sem alterações)._")
+			return b.String()
+		}
 	}
 	if len(index) > 0 {
 		b.WriteString("### 📦 Index (staged)\n")
@@ -112,7 +116,7 @@ func formatLog(commits []*object.Commit) string {
 	if len(commits) == 0 {
 		return "## Log\n\n_Nenhum commit encontrado para os filtros informados._"
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "## Log (%d commits)\n\n", len(commits))
 	for _, c := range commits {
 		fmt.Fprintf(&b, "- `%s` **%s** — %s · %s\n", shortSHA(c.Hash), clean(truncate(firstLine(c.Message), 80)), clean(c.Author.Name), c.Author.When.Format("2006-01-02"))
@@ -126,12 +130,15 @@ func formatLogStat(commits []*object.Commit) string {
 	if len(commits) == 0 {
 		return "## Log\n\n_Nenhum commit encontrado para os filtros informados._"
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "## Log --stat (%d commits)\n\n", len(commits))
 	for _, c := range commits {
 		fmt.Fprintf(&b, "- `%s` **%s** — %s · %s\n", shortSHA(c.Hash), clean(truncate(firstLine(c.Message), 80)), clean(c.Author.Name), c.Author.When.Format("2006-01-02"))
 		stats, err := c.Stats()
-		if err != nil || len(stats) == 0 {
+		if err != nil {
+			continue
+		}
+		if len(stats) == 0 {
 			continue
 		}
 		if len(stats) > maxStatFiles {
@@ -145,25 +152,28 @@ func formatLogStat(commits []*object.Commit) string {
 }
 
 func formatShow(c *object.Commit, patch *object.Patch) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "## Commit `%s`\n\n", shortSHA(c.Hash))
 	fmt.Fprintf(&b, "- **Autor:** %s <%s>\n", c.Author.Name, c.Author.Email)
 	fmt.Fprintf(&b, "- **Committer:** %s <%s>\n", c.Committer.Name, c.Committer.Email)
 	fmt.Fprintf(&b, "- **Data:** %s\n", c.Author.When.Format(time.RFC1123))
 	fmt.Fprintf(&b, "- **Pais:** %d\n\n", len(c.ParentHashes))
 	fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(c.Message))
-	if stats, err := c.Stats(); err == nil && len(stats) > 0 {
-		totalA, totalD := 0, 0
-		for _, s := range stats {
-			totalA += s.Addition
-			totalD += s.Deletion
+	stats, err := c.Stats()
+	if err == nil {
+		if len(stats) > 0 {
+			totalA, totalD := 0, 0
+			for _, s := range stats {
+				totalA += s.Addition
+				totalD += s.Deletion
+			}
+			fmt.Fprintf(&b, "📊 **%d** arquivo(s) alterado(s): **+%d / -%d**\n\n", len(stats), totalA, totalD)
 		}
-		fmt.Fprintf(&b, "📊 **%d** arquivo(s) alterado(s): **+%d / -%d**\n\n", len(stats), totalA, totalD)
 	}
 	if patch != nil {
 		d := patch.String()
 		if len(d) > maxDiffBytes {
-			d = d[:maxDiffBytes] + "\n…(diff truncado)"
+			d = fmt.Sprintf("%s\n…(diff truncado)", d[:maxDiffBytes])
 		}
 		fmt.Fprintf(&b, "### Diff\n\n```diff\n%s\n```\n", d)
 	}
@@ -171,7 +181,7 @@ func formatShow(c *object.Commit, patch *object.Patch) string {
 }
 
 func formatPatch(patch *object.Patch, title string, context int) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "## %s\n\n", title)
 	stats := patch.Stats()
 	if len(stats) > 0 {
@@ -187,7 +197,7 @@ func formatPatch(patch *object.Patch, title string, context int) string {
 		text = compactPatchText(text, context)
 	}
 	if len(text) > maxDiffBytes {
-		text = text[:maxDiffBytes] + "\n…(diff truncado)"
+		text = fmt.Sprintf("%s\n…(diff truncado)", text[:maxDiffBytes])
 	}
 	if strings.TrimSpace(text) == "" {
 		b.WriteString("_Sem diferenças._\n")
@@ -220,7 +230,7 @@ func formatWorkingDiffStat(title string, rows []statRow, added, deleted int) str
 }
 
 func formatStatRows(title string, rows []statRow, added, deleted int) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "## %s\n\n", title)
 	if len(rows) == 0 {
 		b.WriteString("_Sem diferenças._\n")
@@ -244,6 +254,13 @@ type langShare struct {
 	Pct  int
 }
 
+func langPctMore(a, b langShare) bool {
+	if a.Pct != b.Pct {
+		return a.Pct > b.Pct
+	}
+	return a.Name < b.Name
+}
+
 func languageShares(counts map[string]int, total int) []langShare {
 	rows := make([]langShare, 0, len(counts))
 	for name, n := range counts {
@@ -253,15 +270,10 @@ func languageShares(counts map[string]int, total int) []langShare {
 		}
 		rows = append(rows, langShare{Name: name, Pct: pct})
 	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Pct != rows[j].Pct {
-			return rows[i].Pct > rows[j].Pct
-		}
-		return rows[i].Name < rows[j].Name
-	})
-	const top = 8
-	if len(rows) > top {
-		rows = rows[:top]
+	sort.Slice(rows, func(i, j int) bool { return langPctMore(rows[i], rows[j]) })
+	const TOP = 8
+	if len(rows) > TOP {
+		rows = rows[:TOP]
 	}
 	return rows
 }
@@ -271,7 +283,7 @@ func formatThousands(n int) string {
 	if len(s) <= 3 {
 		return s
 	}
-	var parts []string
+	parts := []string{}
 	for len(s) > 3 {
 		parts = append([]string{s[len(s)-3:]}, parts...)
 		s = s[:len(s)-3]
@@ -290,7 +302,7 @@ func formatBranches(rows []branchRow) string {
 	if len(rows) == 0 {
 		return "## Branches\n\n_Nenhuma branch encontrada._"
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString("## Branches\n\n")
 	for _, r := range rows {
 		mark := "  "
@@ -312,8 +324,8 @@ func formatTags(rows []tagRow) string {
 	if len(rows) == 0 {
 		return "## Tags\n\n_Nenhuma tag encontrada._"
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Date > rows[j].Date })
-	var b strings.Builder
+	slices.SortFunc(rows, func(a, b tagRow) int { return cmp.Compare(b.Date, a.Date) })
+	b := strings.Builder{}
 	b.WriteString("## Tags\n\n")
 	for _, r := range rows {
 		fmt.Fprintf(&b, "- **%s** — `%s` · %s\n", clean(r.Name), r.SHA, r.Date)
@@ -330,7 +342,7 @@ func formatRemotes(rows []remoteRow) string {
 	if len(rows) == 0 {
 		return "## Remotes\n\n_Nenhum remote configurado._"
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString("## Remotes\n\n")
 	for _, r := range rows {
 		fmt.Fprintf(&b, "- **%s** — %s\n", clean(r.Name), clean(r.URLs))
@@ -340,10 +352,12 @@ func formatRemotes(rows []remoteRow) string {
 
 func formatBlame(lines []string, blame []blameLine, maxLines int) string {
 	limit := len(lines)
-	if maxLines > 0 && maxLines < limit {
-		limit = maxLines
+	if maxLines > 0 {
+		if maxLines < limit {
+			limit = maxLines
+		}
 	}
-	var sb strings.Builder
+	sb := strings.Builder{}
 	fmt.Fprintf(&sb, "## Blame (%d linhas)\n\n", len(lines))
 	for i := range limit {
 		b := blame[i]
@@ -367,7 +381,7 @@ func formatLsFiles(paths []string) string {
 }
 
 func formatRevParse(rev, full, short, author, msg string) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "## Rev-parse: `%s`\n\n", rev)
 	fmt.Fprintf(&b, "- **SHA completo:** `%s`\n", full)
 	fmt.Fprintf(&b, "- **SHA curto:** `%s`\n", short)
@@ -409,7 +423,7 @@ func emojiTitle(typ string) string {
 }
 
 func unifiedDiff(path, oldText, newText string, context int) string {
-	var sb strings.Builder
+	sb := strings.Builder{}
 	fmt.Fprintf(&sb, "--- a/%s\n+++ b/%s\n", path, path)
 	for _, l := range filterDiffContext(diffLines(splitDiffLines(oldText), splitDiffLines(newText)), context) {
 		if l.text == "" {
@@ -453,10 +467,10 @@ func compactPatchText(text string, context int) string {
 	}
 	for line := range strings.SplitSeq(text, "\n") {
 		switch {
-		case strings.HasPrefix(line, "@@") || isDiffHeader(line):
+		case isHunkHeader(line):
 			flush()
 			out = append(out, line)
-		case strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "\\"):
+		case isDiffMarkLine(line):
 			flush()
 			out = append(out, line)
 		case strings.HasPrefix(line, " "):
@@ -472,6 +486,23 @@ func compactPatchText(text string, context int) string {
 	return strings.Join(out, "\n")
 }
 
+func isHunkHeader(line string) bool {
+	if strings.HasPrefix(line, "@@") {
+		return true
+	}
+	return isDiffHeader(line)
+}
+
+func isDiffMarkLine(line string) bool {
+	if strings.HasPrefix(line, "+") {
+		return true
+	}
+	if strings.HasPrefix(line, "-") {
+		return true
+	}
+	return strings.HasPrefix(line, "\\")
+}
+
 func isDiffHeader(line string) bool {
 	for _, prefix := range []string{
 		"diff --git ", "index ",
@@ -483,6 +514,26 @@ func isDiffHeader(line string) bool {
 		}
 	}
 	return false
+}
+
+func takeRight(k, d int, v []int, offset int) bool {
+	if k == -d {
+		return true
+	}
+	if k != d {
+		return v[offset+k-1] < v[offset+k+1]
+	}
+	return false
+}
+
+func takeLeft(k, d int, prev []int, offset int) bool {
+	if k == -d {
+		return false
+	}
+	if k == d {
+		return true
+	}
+	return prev[offset+k-1] >= prev[offset+k+1]
 }
 
 type diffLine struct {
@@ -499,13 +550,15 @@ func splitDiffLines(s string) []string {
 
 func diffLines(a, b []string) []diffLine {
 	n, m := len(a), len(b)
-	if n == 0 && m == 0 {
-		return nil
+	if n == 0 {
+		if m == 0 {
+			return nil
+		}
 	}
 	max := n + m
 	offset := max + 1
 	v := make([]int, 2*max+3)
-	var trace [][]int
+	trace := [][]int{}
 
 	solved := false
 	endD := 0
@@ -513,21 +566,30 @@ func diffLines(a, b []string) []diffLine {
 		trace = append(trace, append([]int(nil), v...))
 		for k := -d; k <= d; k += 2 {
 			x := 0
-			if k == -d || (k != d && v[offset+k-1] < v[offset+k+1]) {
+			if takeRight(k, d, v, offset) {
 				x = v[offset+k+1]
-			} else {
+			}
+			if !takeRight(k, d, v, offset) {
 				x = v[offset+k-1] + 1
 			}
 			y := x - k
-			for x < n && y < m && a[x] == b[y] {
-				x++
-				y++
+			for x < n {
+				if y < m {
+					if a[x] == b[y] {
+						x++
+						y++
+						continue
+					}
+				}
+				break
 			}
 			v[offset+k] = x
-			if x >= n && y >= m {
-				endD = d
-				solved = true
-				break
+			if x >= n {
+				if y >= m {
+					endD = d
+					solved = true
+					break
+				}
 			}
 		}
 		if solved {
@@ -541,30 +603,41 @@ func diffLines(a, b []string) []diffLine {
 		prev := trace[d]
 		k := x - y
 		prevK := k + 1
-		if k != -d && (k == d || prev[offset+k-1] >= prev[offset+k+1]) {
+		if takeLeft(k, d, prev, offset) {
 			prevK = k - 1
 		}
 		prevX := prev[offset+prevK]
 		prevY := prevX - prevK
-		for x > prevX && y > prevY {
-			out = append(out, diffLine{op: ' ', text: a[x-1]})
-			x--
-			y--
+		for x > prevX {
+			if y > prevY {
+				out = append(out, diffLine{op: ' ', text: a[x-1]})
+				x--
+				y--
+				continue
+			}
+			break
 		}
 		if x == prevX {
 			if y > 0 {
 				out = append(out, diffLine{op: '+', text: b[y-1]})
 				y--
 			}
-		} else if x > 0 {
-			out = append(out, diffLine{op: '-', text: a[x-1]})
-			x--
+		}
+		if x != prevX {
+			if x > 0 {
+				out = append(out, diffLine{op: '-', text: a[x-1]})
+				x--
+			}
 		}
 	}
-	for x > 0 && y > 0 {
-		out = append(out, diffLine{op: ' ', text: a[x-1]})
-		x--
-		y--
+	for x > 0 {
+		if y > 0 {
+			out = append(out, diffLine{op: ' ', text: a[x-1]})
+			x--
+			y--
+			continue
+		}
+		break
 	}
 	for x > 0 {
 		out = append(out, diffLine{op: '-', text: a[x-1]})
@@ -584,7 +657,7 @@ func formatWorkingDiff(title string, diffs []string, added, deleted int) string 
 	if len(diffs) == 0 {
 		return fmt.Sprintf("## %s\n\n_Sem alterações._\n", title)
 	}
-	var sb strings.Builder
+	sb := strings.Builder{}
 	fmt.Fprintf(&sb, "## %s\n\n", title)
 	fmt.Fprintf(&sb, "📊 **+%d / -%d** linhas\n\n```diff\n%s\n```\n", added, deleted, strings.Join(diffs, "\n"))
 	return sb.String()
@@ -609,16 +682,19 @@ type repoInfoData struct {
 }
 
 func formatRepoInfo(info repoInfoData) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString("## Informações do repositório\n\n")
 	if info.Root != "" {
 		fmt.Fprintf(&b, "- **Raiz da árvore de trabalho:** `%s`\n", info.Root)
 	}
 	headLabel := info.Head
 	if info.Detached {
-		headLabel = info.Head + " (detached)"
-	} else if info.Branch != "" {
-		headLabel = info.Branch + " (" + info.Head + ")"
+		headLabel = fmt.Sprintf("%s (detached)", info.Head)
+	}
+	if info.Branch != "" {
+		if !info.Detached {
+			headLabel = fmt.Sprintf("%s (%s)", info.Branch, info.Head)
+		}
 	}
 	fmt.Fprintf(&b, "- **HEAD:** `%s`\n", headLabel)
 	if info.HeadFull != "" {
@@ -652,6 +728,13 @@ func formatTree(paths []string) string {
 	return fmt.Sprintf("## Árvore (%d arquivos)\n\n```\n%s\n```\n", len(paths), strings.Join(paths, "\n"))
 }
 
+func isYAMLPath(path string) bool {
+	if strings.HasSuffix(path, ".yml") {
+		return true
+	}
+	return strings.HasSuffix(path, ".yaml")
+}
+
 func formatReadFile(path, at string, content string) string {
 	lang := ""
 	switch {
@@ -661,7 +744,7 @@ func formatReadFile(path, at string, content string) string {
 		lang = "markdown"
 	case strings.HasSuffix(path, ".json"):
 		lang = "json"
-	case strings.HasSuffix(path, ".yml") || strings.HasSuffix(path, ".yaml"):
+	case isYAMLPath(path):
 		lang = "yaml"
 	case strings.HasSuffix(path, ".ts"):
 		lang = "typescript"

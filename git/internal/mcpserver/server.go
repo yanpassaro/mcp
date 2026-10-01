@@ -1,11 +1,13 @@
 package mcpserver
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -130,11 +132,8 @@ func (s *Server) log(ctx context.Context, _ *mcp.CallToolRequest, in logInput) (
 	if err != nil {
 		return nil, nil, err
 	}
-	max := in.MaxCount
-	if max <= 0 {
-		max = 30
-	}
-	opts := &git.LogOptions{Order: git.LogOrderCommitterTime}
+	max := cmp.Or(in.MaxCount, DEFAULT_MAX_COMMITS)
+	opts := logOptions(repo)
 	if in.Path != "" {
 		p := in.Path
 		opts.FileName = &p
@@ -149,28 +148,18 @@ func (s *Server) log(ctx context.Context, _ *mcp.CallToolRequest, in logInput) (
 			opts.Until = &t
 		}
 	}
-	if head, err := repo.Head(); err == nil {
-		opts.From = head.Hash()
-	} else {
-		opts.All = true
-	}
 	iter, err := repo.Log(opts)
 	if err != nil {
 		return nil, nil, err
 	}
 	author := strings.ToLower(strings.TrimSpace(in.Author))
-	var commits []*object.Commit
-	for {
-		c, e := iter.Next()
-		if e == io.EOF {
-			break
-		}
+	commits := []*object.Commit{}
+	for c, e := iter.Next(); !errors.Is(e, io.EOF); c, e = iter.Next() {
 		if e != nil {
 			return nil, nil, e
 		}
 		if author != "" {
-			hay := strings.ToLower(c.Author.Name + " " + c.Author.Email)
-			if !strings.Contains(hay, author) {
+			if !strings.Contains(authorHay(c), author) {
 				continue
 			}
 		}
@@ -194,27 +183,7 @@ func (s *Server) show(ctx context.Context, _ *mcp.CallToolRequest, in showInput)
 	if err != nil {
 		return nil, nil, err
 	}
-	var patch *object.Patch
-	if len(c.ParentHashes) > 0 {
-		parent, e := repo.CommitObject(c.ParentHashes[0])
-		if e == nil {
-			if pt, e2 := parent.Tree(); e2 == nil {
-				if ct, e3 := c.Tree(); e3 == nil {
-					if pp, e4 := pt.Patch(ct); e4 == nil {
-						patch = pp
-					}
-				}
-			}
-		}
-	} else {
-		if ct, e := c.Tree(); e == nil {
-			empty := &object.Tree{}
-			if pp, e2 := empty.Patch(ct); e2 == nil {
-				patch = pp
-			}
-		}
-	}
-	return textResult(formatShow(c, patch))
+	return textResult(formatShow(c, commitPatch(repo, c)))
 }
 
 func (s *Server) diff(ctx context.Context, _ *mcp.CallToolRequest, in diffInput) (*mcp.CallToolResult, any, error) {
@@ -225,16 +194,8 @@ func (s *Server) diff(ctx context.Context, _ *mcp.CallToolRequest, in diffInput)
 	switch {
 	case in.Staged:
 		return s.diffStaged(repo, in.Path, in.Context, in.Stat)
-	case in.Base != "" || in.Head != "":
-		base := strings.TrimSpace(in.Base)
-		if base == "" {
-			base = "HEAD"
-		}
-		head := strings.TrimSpace(in.Head)
-		if head == "" {
-			head = "HEAD"
-		}
-		return s.diffRefs(repo, base, head, in.Path, in.Context, in.Stat)
+	case hasRefs(in):
+		return s.diffRefs(repo, cmp.Or(strings.TrimSpace(in.Base), "HEAD"), cmp.Or(strings.TrimSpace(in.Head), "HEAD"), in.Path, in.Context, in.Stat)
 	default:
 		return s.diffWorking(repo, in.Path, in.Context, in.Stat)
 	}
@@ -261,13 +222,9 @@ func (s *Server) diffRefs(repo *git.Repository, base, head, path string, context
 	if err != nil {
 		return nil, nil, err
 	}
-	var filtered object.Changes
+	filtered := object.Changes{}
 	for _, ch := range changes {
-		name := ch.To.Name
-		if name == "" {
-			name = ch.From.Name
-		}
-		if path == "" || strings.HasPrefix(name, path) {
+		if matchPrefix(path, changeName(ch)) {
 			filtered = append(filtered, ch)
 		}
 	}
@@ -275,13 +232,13 @@ func (s *Server) diffRefs(repo *git.Repository, base, head, path string, context
 	if err != nil {
 		return nil, nil, err
 	}
-	if patch == nil || len(patch.FilePatches()) == 0 {
-		return textResult("## Diff: " + base + " → " + head + "\n\n_Sem diferenças._\n")
+	if isEmptyPatch(patch) {
+		return textResult(fmt.Sprintf("## Diff: %s → %s\n\n_Sem diferenças._\n", base, head))
 	}
 	if stat {
-		return textResult(formatPatchStat(patch, "Diff --stat: "+base+" → "+head))
+		return textResult(formatPatchStat(patch, fmt.Sprintf("Diff --stat: %s → %s", base, head)))
 	}
-	return textResult(formatPatch(patch, "Diff: "+base+" → "+head, context))
+	return textResult(formatPatch(patch, fmt.Sprintf("Diff: %s → %s", base, head), context))
 }
 
 func (s *Server) diffWorking(repo *git.Repository, path string, context int, stat bool) (*mcp.CallToolResult, any, error) {
@@ -310,15 +267,14 @@ func (s *Server) diffWorking(repo *git.Repository, path string, context int, sta
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	var diffs []string
-	var srows []statRow
+	diffs := []string{}
+	srows := []statRow{}
 	added, deleted := 0, 0
 	for _, name := range keys {
-		fs := st[name]
-		if fs.Worktree == git.Unmodified && fs.Staging == git.Unmodified {
+		if unchanged(st[name]) {
 			continue
 		}
-		if path != "" && !strings.HasPrefix(name, path) {
+		if skipPath(path, name) {
 			continue
 		}
 		oldC := ""
@@ -361,11 +317,7 @@ func (s *Server) diffStaged(repo *git.Repository, path string, context int, stat
 	}
 	headFiles := map[string]bool{}
 	if iter := ht.Files(); iter != nil {
-		for {
-			f, e2 := iter.Next()
-			if e2 == io.EOF {
-				break
-			}
+		for f, e2 := iter.Next(); !errors.Is(e2, io.EOF); f, e2 = iter.Next() {
 			if e2 != nil {
 				break
 			}
@@ -380,8 +332,8 @@ func (s *Server) diffStaged(repo *git.Repository, path string, context int, stat
 	for _, e := range idx.Entries {
 		indexSet[e.Name] = true
 	}
-	var diffs []string
-	var srows []statRow
+	diffs := []string{}
+	srows := []statRow{}
 	added, deleted := 0, 0
 	addRow := func(name, oldC, newC string) {
 		u := unifiedDiff(name, oldC, newC, context)
@@ -393,7 +345,7 @@ func (s *Server) diffStaged(repo *git.Repository, path string, context int, stat
 		srows = append(srows, statRow{name: name, add: fa, del: fd})
 	}
 	for _, e := range idx.Entries {
-		if path != "" && !strings.HasPrefix(e.Name, path) {
+		if skipPath(path, e.Name) {
 			continue
 		}
 		oldC := ""
@@ -412,7 +364,7 @@ func (s *Server) diffStaged(repo *git.Repository, path string, context int, stat
 		addRow(e.Name, oldC, newC)
 	}
 	for name := range headFiles {
-		if path != "" && !strings.HasPrefix(name, path) {
+		if skipPath(path, name) {
 			continue
 		}
 		if indexSet[name] {
@@ -434,24 +386,14 @@ func (s *Server) diffStaged(repo *git.Repository, path string, context int, stat
 }
 
 func topContributors(repo *git.Repository, limit int) ([]contributorRow, int, error) {
-	opts := &git.LogOptions{Order: git.LogOrderCommitterTime}
-	if head, err := repo.Head(); err == nil {
-		opts.From = head.Hash()
-	} else {
-		opts.All = true
-	}
-	iter, err := repo.Log(opts)
+	iter, err := repo.Log(logOptions(repo))
 	if err != nil {
 		return nil, 0, err
 	}
 	counts := map[string]int{}
 	names := map[string]string{}
 	total := 0
-	for {
-		c, e := iter.Next()
-		if e == io.EOF {
-			break
-		}
+	for c, e := iter.Next(); !errors.Is(e, io.EOF); c, e = iter.Next() {
 		if e != nil {
 			return nil, 0, e
 		}
@@ -478,12 +420,7 @@ func topContributors(repo *git.Repository, limit int) ([]contributorRow, int, er
 		}
 		rows = append(rows, contributorRow{Name: name, Count: n})
 	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Count != rows[j].Count {
-			return rows[i].Count > rows[j].Count
-		}
-		return strings.ToLower(rows[i].Name) < strings.ToLower(rows[j].Name)
-	})
+	slices.SortFunc(rows, func(a, b contributorRow) int { return contribLess(a, b) })
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
@@ -501,16 +438,12 @@ func (s *Server) refs(ctx context.Context, _ *mcp.CallToolRequest, in refsInput)
 		if head, err := repo.Head(); err == nil {
 			current = head.Name().String()
 		}
-		var rows []branchRow
+		rows := []branchRow{}
 		iter, err := repo.Branches()
 		if err != nil {
 			return nil, nil, err
 		}
-		for {
-			ref, e := iter.Next()
-			if e == io.EOF {
-				break
-			}
+		for ref, e := iter.Next(); !errors.Is(e, io.EOF); ref, e = iter.Next() {
 			if e != nil {
 				return nil, nil, e
 			}
@@ -521,11 +454,7 @@ func (s *Server) refs(ctx context.Context, _ *mcp.CallToolRequest, in refsInput)
 			if err != nil {
 				return nil, nil, err
 			}
-			for {
-				ref, e := riter.Next()
-				if e == io.EOF {
-					break
-				}
+			for ref, e := riter.Next(); !errors.Is(e, io.EOF); ref, e = riter.Next() {
 				if e != nil {
 					return nil, nil, e
 				}
@@ -541,7 +470,7 @@ func (s *Server) refs(ctx context.Context, _ *mcp.CallToolRequest, in refsInput)
 		if err != nil {
 			return nil, nil, err
 		}
-		var rows []remoteRow
+		rows := []remoteRow{}
 		for _, r := range rs {
 			rows = append(rows, remoteRow{Name: r.Config().Name, URLs: strings.Join(r.Config().URLs, ", ")})
 		}
@@ -551,14 +480,10 @@ func (s *Server) refs(ctx context.Context, _ *mcp.CallToolRequest, in refsInput)
 		if err != nil {
 			return nil, nil, err
 		}
-		var rows []tagRow
-		for {
-			ref, e := iter.Next()
-			if e == io.EOF {
-				break
-			}
+		rows := []tagRow{}
+		for ref, e := iter.Next(); !errors.Is(e, io.EOF); ref, e = iter.Next() {
 			if e != nil {
-				return nil, nil, err
+				return nil, nil, e
 			}
 			ch := ref.Hash()
 			if t, e2 := repo.TagObject(ref.Hash()); e2 == nil {
@@ -585,22 +510,14 @@ func (s *Server) blame(ctx context.Context, _ *mcp.CallToolRequest, in blameInpu
 	if path == "" {
 		return nil, nil, errors.New("'path' é obrigatório para blame")
 	}
-	opts := &git.LogOptions{Order: git.LogOrderCommitterTime, FileName: &path}
-	if head, err := repo.Head(); err == nil {
-		opts.From = head.Hash()
-	} else {
-		opts.All = true
-	}
+	opts := logOptions(repo)
+	opts.FileName = &path
 	iter, err := repo.Log(opts)
 	if err != nil {
 		return nil, nil, err
 	}
-	var commits []*object.Commit
-	for {
-		c, e := iter.Next()
-		if e == io.EOF {
-			break
-		}
+	commits := []*object.Commit{}
+	for c, e := iter.Next(); !errors.Is(e, io.EOF); c, e = iter.Next() {
 		if e != nil {
 			return nil, nil, e
 		}
@@ -610,8 +527,8 @@ func (s *Server) blame(ctx context.Context, _ *mcp.CallToolRequest, in blameInpu
 		commits[i], commits[j] = commits[j], commits[i]
 	}
 
-	var lines []string
-	var authors []blameLine
+	lines := []string{}
+	authors := []blameLine{}
 	for _, c := range commits {
 		content, e := fileContentAt(repo, c, path)
 		if e != nil {
@@ -631,17 +548,20 @@ func (s *Server) blame(ctx context.Context, _ *mcp.CallToolRequest, in blameInpu
 		for i, nl := range newLines {
 			idx := -1
 			for j := range lines {
-				if !used[j] && lines[j] == nl {
+				if used[j] {
+					continue
+				}
+				if lines[j] == nl {
 					idx = j
 					break
 				}
 			}
-			if idx >= 0 {
-				newAuthors[i] = authors[idx]
-				used[idx] = true
-			} else {
+			if idx < 0 {
 				newAuthors[i] = blameLineOf(c)
+				continue
 			}
+			newAuthors[i] = authors[idx]
+			used[idx] = true
 		}
 		lines = newLines
 		authors = newAuthors
@@ -664,19 +584,19 @@ func (s *Server) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		return nil, nil, err
 	}
 	iter := t.Files()
-	var paths []string
+	paths := []string{}
 	if iter != nil {
-		for {
-			f, e := iter.Next()
-			if e == io.EOF {
-				break
-			}
+		for f, e := iter.Next(); !errors.Is(e, io.EOF); f, e = iter.Next() {
 			if e != nil {
 				break
 			}
-			if (in.Path == "" || strings.HasPrefix(f.Name, in.Path)) && (in.Pattern == "" || matchPath(in.Pattern, f.Name)) {
-				paths = append(paths, f.Name)
+			if !matchPrefix(in.Path, f.Name) {
+				continue
 			}
+			if !matchPattern(in.Pattern, f.Name) {
+				continue
+			}
+			paths = append(paths, f.Name)
 		}
 	}
 	sort.Strings(paths)
@@ -716,31 +636,19 @@ func (s *Server) findCommits(ctx context.Context, _ *mcp.CallToolRequest, in fin
 	if q == "" {
 		return nil, nil, errors.New("'query' é obrigatório (texto da mensagem)")
 	}
-	max := in.MaxCount
-	if max <= 0 {
-		max = 30
-	}
-	opts := &git.LogOptions{Order: git.LogOrderCommitterTime}
+	max := cmp.Or(in.MaxCount, DEFAULT_MAX_COMMITS)
+	opts := logOptions(repo)
 	if in.Path != "" {
 		p := in.Path
 		opts.FileName = &p
-	}
-	if head, err := repo.Head(); err == nil {
-		opts.From = head.Hash()
-	} else {
-		opts.All = true
 	}
 	iter, err := repo.Log(opts)
 	if err != nil {
 		return nil, nil, err
 	}
 	author := strings.ToLower(strings.TrimSpace(in.Author))
-	var commits []*object.Commit
-	for {
-		c, e := iter.Next()
-		if e == io.EOF {
-			break
-		}
+	commits := []*object.Commit{}
+	for c, e := iter.Next(); !errors.Is(e, io.EOF); c, e = iter.Next() {
 		if e != nil {
 			return nil, nil, e
 		}
@@ -748,8 +656,7 @@ func (s *Server) findCommits(ctx context.Context, _ *mcp.CallToolRequest, in fin
 			continue
 		}
 		if author != "" {
-			hay := strings.ToLower(c.Author.Name + " " + c.Author.Email)
-			if !strings.Contains(hay, author) {
+			if !strings.Contains(authorHay(c), author) {
 				continue
 			}
 		}
@@ -778,7 +685,9 @@ func countLines(u string, added, deleted *int) {
 	for l := range strings.SplitSeq(u, "\n") {
 		if strings.HasPrefix(l, "+") {
 			*added++
-		} else if strings.HasPrefix(l, "-") {
+			continue
+		}
+		if strings.HasPrefix(l, "-") {
 			*deleted++
 		}
 	}
@@ -788,11 +697,7 @@ func countIter(iter interface {
 	Next() (*plumbing.Reference, error)
 }) int {
 	n := 0
-	for {
-		_, e := iter.Next()
-		if e == io.EOF {
-			break
-		}
+	for _, e := iter.Next(); !errors.Is(e, io.EOF); _, e = iter.Next() {
 		if e != nil {
 			break
 		}
@@ -807,11 +712,7 @@ func countCommitsAll(repo *git.Repository) int {
 		return 0
 	}
 	n := 0
-	for {
-		_, e := iter.Next()
-		if e == io.EOF {
-			break
-		}
+	for _, e := iter.Next(); !errors.Is(e, io.EOF); _, e = iter.Next() {
 		if e != nil {
 			break
 		}
@@ -837,18 +738,18 @@ func matchPath(pattern, name string) bool {
 }
 
 func globRegexp(pattern string) (*regexp.Regexp, error) {
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString("^")
 	runes := []rune(pattern)
 	for i := 0; i < len(runes); i++ {
 		switch runes[i] {
 		case '*':
-			if i+1 < len(runes) && runes[i+1] == '*' {
+			if isNextStar(runes, i) {
 				b.WriteString("(?:.*/)?")
 				i++
-			} else {
-				b.WriteString("[^/]*")
+				continue
 			}
+			b.WriteString("[^/]*")
 		case '?':
 			b.WriteString("[^/]")
 		default:
@@ -857,6 +758,114 @@ func globRegexp(pattern string) (*regexp.Regexp, error) {
 	}
 	b.WriteString("$")
 	return regexp.Compile(b.String())
+}
+
+func isNextStar(runes []rune, i int) bool {
+	if i+1 >= len(runes) {
+		return false
+	}
+	return runes[i+1] == '*'
+}
+
+const DEFAULT_MAX_COMMITS = 30
+
+func logOptions(repo *git.Repository) *git.LogOptions {
+	opts := &git.LogOptions{Order: git.LogOrderCommitterTime}
+	head, err := repo.Head()
+	if err != nil {
+		opts.All = true
+		return opts
+	}
+	opts.From = head.Hash()
+	return opts
+}
+
+func commitPatch(repo *git.Repository, c *object.Commit) *object.Patch {
+	ct, err := c.Tree()
+	if err != nil {
+		return nil
+	}
+	if len(c.ParentHashes) == 0 {
+		empty := &object.Tree{}
+		pp, err := empty.Patch(ct)
+		if err != nil {
+			return nil
+		}
+		return pp
+	}
+	parent, err := repo.CommitObject(c.ParentHashes[0])
+	if err != nil {
+		return nil
+	}
+	pt, err := parent.Tree()
+	if err != nil {
+		return nil
+	}
+	pp, err := pt.Patch(ct)
+	if err != nil {
+		return nil
+	}
+	return pp
+}
+
+func isEmptyPatch(patch *object.Patch) bool {
+	if patch == nil {
+		return true
+	}
+	return len(patch.FilePatches()) == 0
+}
+
+func hasRefs(in diffInput) bool {
+	if in.Base != "" {
+		return true
+	}
+	return in.Head != ""
+}
+
+func changeName(ch *object.Change) string {
+	if ch.To.Name != "" {
+		return ch.To.Name
+	}
+	return ch.From.Name
+}
+
+func matchPrefix(path, name string) bool {
+	if path == "" {
+		return true
+	}
+	return strings.HasPrefix(name, path)
+}
+
+func skipPath(path, name string) bool {
+	if path == "" {
+		return false
+	}
+	return !strings.HasPrefix(name, path)
+}
+
+func matchPattern(pattern, name string) bool {
+	if pattern == "" {
+		return true
+	}
+	return matchPath(pattern, name)
+}
+
+func unchanged(fs *git.FileStatus) bool {
+	if fs.Worktree != git.Unmodified {
+		return false
+	}
+	return fs.Staging == git.Unmodified
+}
+
+func authorHay(c *object.Commit) string {
+	return strings.ToLower(fmt.Sprintf("%s %s", c.Author.Name, c.Author.Email))
+}
+
+func contribLess(a, b contributorRow) int {
+	if a.Count != b.Count {
+		return cmp.Compare(b.Count, a.Count)
+	}
+	return cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 }
 
 type repoInfoInput struct {

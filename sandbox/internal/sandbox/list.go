@@ -126,10 +126,11 @@ func buildList(L *lua.State) int {
 			return 1
 		}
 		start := 0
-		var acc any
+		acc := any(nil)
 		if l.Top() >= 3 {
 			acc = luaToAny(l, 3)
-		} else {
+		}
+		if l.Top() < 3 {
 			acc = arr[0]
 			start = 1
 		}
@@ -229,7 +230,8 @@ setGoFunc(L, t, "arange", func(l *lua.State) int {
 		for v := start; v < stop; v += step {
 			out = append(out, float64(v))
 		}
-	} else {
+	}
+	if step < 0 {
 		for v := start; v > stop; v += step {
 			out = append(out, float64(v))
 		}
@@ -256,7 +258,10 @@ setGoFunc(L, t, "zip", func(l *lua.State) int {
 	for i := 1; i <= l.Top(); i++ {
 		arr := luaArrayAny(l, i)
 		arrays = append(arrays, arr)
-		if min == -1 || len(arr) < min {
+		if min == -1 {
+			min = len(arr)
+		}
+		if len(arr) < min {
 			min = len(arr)
 		}
 	}
@@ -354,12 +359,9 @@ func chunk(arr []any, n int) [][]any {
 	if n <= 0 {
 		return [][]any{}
 	}
-	var out [][]any
+	out := [][]any{}
 	for i := 0; i < len(arr); i += n {
-		end := i + n
-		if end > len(arr) {
-			end = len(arr)
-		}
+		end := min(i+n, len(arr))
 		out = append(out, arr[i:end])
 	}
 	return out
@@ -367,7 +369,7 @@ func chunk(arr []any, n int) [][]any {
 
 func uniqueItems(arr []any) []any {
 	seen := map[string]bool{}
-	var out []any
+	out := []any{}
 	for _, v := range arr {
 		k := identityKey(v)
 		if seen[k] {
@@ -387,13 +389,14 @@ func identityKey(v any) string {
 }
 
 func flatten(arr []any) []any {
-	var out []any
+	out := []any{}
 	for _, v := range arr {
-		if sub, ok := v.([]any); ok {
+		sub, ok := v.([]any)
+		if ok {
 			out = append(out, flatten(sub)...)
-		} else {
-			out = append(out, v)
+			continue
 		}
+		out = append(out, v)
 	}
 	return out
 }

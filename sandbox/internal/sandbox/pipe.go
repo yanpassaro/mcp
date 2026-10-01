@@ -1,12 +1,20 @@
 package sandbox
 
 import (
+	"cmp"
 	"fmt"
 	"sort"
 	"strings"
 
 	lua "github.com/Shopify/go-lua"
 )
+
+func hasGrouping(sb *pipeBuilder) bool {
+	if len(sb.group) > 0 {
+		return true
+	}
+	return len(sb.aggs) > 0
+}
 
 type pipeBuilder struct {
 	rows  []any
@@ -101,11 +109,11 @@ func buildPipe(L *lua.State) int {
 			return self(l)
 		})
 		setGoFunc(L, b, "run", func(l *lua.State) int {
-			if len(sb.group) > 0 || len(sb.aggs) > 0 {
+			if hasGrouping(sb) {
 				pushAny(l, pipeGroup(sb.rows, sb.group, sb.aggs))
-			} else {
-				pushAny(l, sb.rows)
+				return 1
 			}
+			pushAny(l, sb.rows)
 			return 1
 		})
 
@@ -211,11 +219,12 @@ func pipeRename(rows []any, mapping map[string]any) []any {
 		}
 		nm := map[string]any{}
 		for k, v := range m {
-			if nk, has := mapping[k]; has {
-				nm[fmt.Sprint(nk)] = v
-			} else {
+			nk, has := mapping[k]
+			if !has {
 				nm[k] = v
+				continue
 			}
+			nm[fmt.Sprint(nk)] = v
 		}
 		out = append(out, nm)
 	}
@@ -348,7 +357,7 @@ func pipeGroup(rows []any, fields []string, aggs []any) []any {
 		all []any
 	}
 	groups := map[string]*group{}
-	var order []string
+	order := []string{}
 	for _, r := range rows {
 		m, ok := r.(map[string]any)
 		if !ok {
@@ -382,7 +391,10 @@ func pipeGroup(rows []any, fields []string, aggs []any) []any {
 		}
 		for _, a := range aggs {
 			arr, ok := a.([]any)
-			if !ok || len(arr) < 3 {
+			if !ok {
+				continue
+			}
+			if len(arr) < 3 {
 				continue
 			}
 			aggFn := fmt.Sprint(arr[0])
@@ -392,7 +404,7 @@ func pipeGroup(rows []any, fields []string, aggs []any) []any {
 				row[dest] = float64(len(g.all))
 				continue
 			}
-			var nums []float64
+			nums := []float64{}
 			for _, r := range g.all {
 				if n, ok := numOrNil(itemProp(r, src)); ok {
 					nums = append(nums, n)
@@ -408,7 +420,7 @@ func pipeGroup(rows []any, fields []string, aggs []any) []any {
 func aggregate(fn string, nums []float64) any {
 	switch fn {
 	case "sum":
-		var s float64
+		s := float64(0)
 		for _, n := range nums {
 			s += n
 		}
@@ -452,13 +464,13 @@ func aggregate(fn string, nums []float64) any {
 func pipeJoin(left, right []any, opts map[string]any) []any {
 	leftKey := optString(opts, "left_key")
 	rightKey := optString(opts, "right_key")
-	if leftKey == "" || rightKey == "" {
+	if leftKey == "" {
 		panic("pipe.join: left_key e right_key são obrigatórios")
 	}
-	how := optString(opts, "how")
-	if how == "" {
-		how = "inner"
+	if rightKey == "" {
+		panic("pipe.join: left_key e right_key são obrigatórios")
 	}
+	how := cmp.Or(optString(opts, "how"), "inner")
 	rightIdx := map[string][]any{}
 	for _, r := range right {
 		if m, ok := r.(map[string]any); ok {
@@ -533,7 +545,8 @@ func pipePivot(rows []any, opts map[string]any) []any {
 	if agg == "" {
 		if values == "" {
 			agg = "count"
-		} else {
+		}
+		if values != "" {
 			agg = "sum"
 		}
 	}
@@ -541,9 +554,9 @@ func pipePivot(rows []any, opts map[string]any) []any {
 		panic("pipe.pivot: columns é obrigatório")
 	}
 	idxRows := map[string]map[string]any{}
-	var order []string
+	order := []string{}
 	colSet := map[string]bool{}
-	var colOrder []string
+	colOrder := []string{}
 	groups := map[string]map[string][]any{}
 	for _, r := range rows {
 		m, ok := r.(map[string]any)
@@ -599,7 +612,7 @@ func pivotCell(agg string, vals []any) any {
 		}
 		return nil
 	default:
-		var nums []float64
+		nums := []float64{}
 		for _, v := range vals {
 			if n, ok := numOrNil(v); ok {
 				nums = append(nums, n)
@@ -612,14 +625,8 @@ func pivotCell(agg string, vals []any) any {
 func pipeUnpivot(rows []any, opts map[string]any) []any {
 	id := stringSlice(opts["id"])
 	cols := stringSlice(opts["cols"])
-	key := optString(opts, "key")
-	if key == "" {
-		key = "key"
-	}
-	value := optString(opts, "value")
-	if value == "" {
-		value = "value"
-	}
+	key := cmp.Or(optString(opts, "key"), "key")
+	value := cmp.Or(optString(opts, "value"), "value")
 	dropNil := asBool(opts["drop_nil"], false)
 	if len(cols) == 0 {
 		set := map[string]bool{}
@@ -630,10 +637,14 @@ func pipeUnpivot(rows []any, opts map[string]any) []any {
 		for _, r := range rows {
 			if m, ok := r.(map[string]any); ok {
 				for k := range m {
-					if !set[k] && !seen[k] {
-						cols = append(cols, k)
-						seen[k] = true
+					if set[k] {
+						continue
 					}
+					if seen[k] {
+						continue
+					}
+					cols = append(cols, k)
+					seen[k] = true
 				}
 			}
 		}
@@ -651,8 +662,10 @@ func pipeUnpivot(rows []any, opts map[string]any) []any {
 		}
 		for _, c := range cols {
 			cell := itemProp(m, c)
-			if dropNil && isNullVal(cell, map[string]any{}) {
-				continue
+			if dropNil {
+				if isNullVal(cell, map[string]any{}) {
+					continue
+				}
 			}
 			nm := map[string]any{}
 			for k, v := range base {

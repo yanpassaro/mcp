@@ -32,11 +32,17 @@ func defaultNetConfig() netConfig {
 		maxBody:    1 << 20,
 		cookieFile: filepath.Join(userLocalShare(), "mcp", "sandbox", "cookies.json"),
 	}
-	if v, err := strconv.Atoi(os.Getenv("SANDBOX_FETCH_TIMEOUT_SECONDS")); err == nil && v > 0 {
-		cfg.timeout = time.Duration(v) * time.Second
+	v, err := strconv.Atoi(os.Getenv("SANDBOX_FETCH_TIMEOUT_SECONDS"))
+	if err == nil {
+		if v > 0 {
+			cfg.timeout = time.Duration(v) * time.Second
+		}
 	}
-	if v, err := strconv.Atoi(os.Getenv("SANDBOX_FETCH_MAX_BODY_KB")); err == nil && v > 0 {
-		cfg.maxBody = int64(v) * 1024
+	kb, err := strconv.Atoi(os.Getenv("SANDBOX_FETCH_MAX_BODY_KB"))
+	if err == nil {
+		if kb > 0 {
+			cfg.maxBody = int64(kb) * 1024
+		}
 	}
 	if f := strings.TrimSpace(os.Getenv("SANDBOX_FETCH_COOKIE_FILE")); f != "" {
 		cfg.cookieFile = f
@@ -57,11 +63,13 @@ func userLocalShare() string {
 }
 
 func splitHosts(s string) []string {
-	var out []string
+	out := []string{}
 	for h := range strings.SplitSeq(s, ",") {
-		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
-			out = append(out, h)
+		h = strings.ToLower(strings.TrimSpace(h))
+		if h == "" {
+			continue
 		}
+		out = append(out, h)
 	}
 	return out
 }
@@ -116,11 +124,17 @@ func buildNet(L *lua.State, store *Store) int {
 	setGoFunc(L, t, "post", func(l *lua.State) int {
 		opts := toAnyMap(l, 3)
 		opts["method"] = "POST"
-		if s, ok := l.ToValue(2).(string); ok {
+		s, ok := l.ToValue(2).(string)
+		if ok {
 			opts["body"] = s
-		} else if l.Top() >= 2 && l.ToValue(2) != nil {
-			opts = toAnyMap(l, 2)
-			opts["method"] = "POST"
+		}
+		if !ok {
+			if l.Top() >= 2 {
+				if l.ToValue(2) != nil {
+					opts = toAnyMap(l, 2)
+					opts["method"] = "POST"
+				}
+			}
 		}
 		res, err := doNet(&cfg, argString(l, 1), opts)
 		if err != nil {
@@ -137,7 +151,7 @@ func buildNet(L *lua.State, store *Store) int {
 			panic(err)
 		}
 		body, _ := res["body"].(string)
-		var parsed any
+		parsed := any(nil)
 		if err := json.Unmarshal([]byte(body), &parsed); err != nil {
 			panic(fmt.Errorf("resposta não é JSON: %w", err))
 		}
@@ -190,7 +204,7 @@ func doNet(cfg *netConfig, urlStr string, opts map[string]any) (map[string]any, 
 }
 
 func netSave(cfg *netConfig, store *Store, urlStr, path string, opts map[string]any) (map[string]any, error) {
-	body, meta, err := netAttempts(cfg, urlStr, opts, maxFileBytes)
+	body, meta, err := netAttempts(cfg, urlStr, opts, MAX_FILE_BYTES)
 	if err != nil {
 		return nil, err
 	}
@@ -204,16 +218,22 @@ func netSave(cfg *netConfig, store *Store, urlStr, path string, opts map[string]
 
 func netAttempts(cfg *netConfig, urlStr string, opts map[string]any, limit int64) ([]byte, map[string]any, error) {
 	retries := 0
-	if d, ok := numOpt(opts["retries"]); ok && d > 0 {
-		retries = int(d)
+	d, ok := numOpt(opts["retries"])
+	if ok {
+		if d > 0 {
+			retries = int(d)
+		}
 	}
 	backoff := 250 * time.Millisecond
-	if d, ok := numOpt(opts["backoffMs"]); ok && d >= 0 {
-		backoff = time.Duration(d) * time.Millisecond
+	d, ok = numOpt(opts["backoffMs"])
+	if ok {
+		if d >= 0 {
+			backoff = time.Duration(d) * time.Millisecond
+		}
 	}
-	var lastErr error
-	var lastMeta map[string]any
-	var lastBody []byte
+	lastErr := error(nil)
+	lastMeta := map[string]any(nil)
+	lastBody := []byte{}
 	for attempt := 0; attempt <= retries; attempt++ {
 		body, meta, err := doAttempt(cfg, urlStr, opts, limit)
 		if err != nil {
@@ -225,7 +245,10 @@ func netAttempts(cfg *netConfig, urlStr string, opts map[string]any, limit int64
 			lastBody = body
 			okFlag, _ := meta["ok"].(bool)
 			status, _ := meta["status"].(int)
-			if okFlag || !isRetryableStatus(status) {
+			if okFlag {
+				return body, meta, nil
+			}
+			if !isRetryableStatus(status) {
 				return body, meta, nil
 			}
 			lastErr = fmt.Errorf("status %d", status)
@@ -241,7 +264,30 @@ func netAttempts(cfg *netConfig, urlStr string, opts map[string]any, limit int64
 }
 
 func isRetryableStatus(status int) bool {
-	return status == 429 || (status >= 500 && status < 600)
+	if status == 429 {
+		return true
+	}
+	if status < 500 {
+		return false
+	}
+	return status < 600
+}
+
+func isHTTPScheme(scheme string) bool {
+	if scheme == "http" {
+		return true
+	}
+	return scheme == "https"
+}
+
+func hasPayload(method, body string) bool {
+	if method == "GET" {
+		return false
+	}
+	if method == "HEAD" {
+		return false
+	}
+	return body != ""
 }
 
 func doAttempt(cfg *netConfig, urlStr string, opts map[string]any, limit int64) ([]byte, map[string]any, error) {
@@ -255,7 +301,7 @@ func doAttempt(cfg *netConfig, urlStr string, opts map[string]any, limit int64) 
 	if err != nil {
 		return nil, nil, fmt.Errorf("URL inválida: %w", err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
+	if !isHTTPScheme(u.Scheme) {
 		return nil, nil, fmt.Errorf("apenas http/https são permitidos (recebi %q)", u.Scheme)
 	}
 	if u.Host == "" {
@@ -266,18 +312,21 @@ func doAttempt(cfg *netConfig, urlStr string, opts map[string]any, limit int64) 
 	}
 
 	timeout := cfg.timeout
-	if d, ok := numOpt(opts["timeout"]); ok && d > 0 {
-		timeout = time.Duration(d) * time.Millisecond
+	d, ok := numOpt(opts["timeout"])
+	if ok {
+		if d > 0 {
+			timeout = time.Duration(d) * time.Millisecond
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	var body string
+	body := ""
 	if b, ok := opts["body"].(string); ok {
 		body = b
 	}
-	var rd io.Reader
-	if method != "GET" && method != "HEAD" && body != "" {
+	rd := io.Reader(nil)
+	if hasPayload(method, body) {
 		rd = strings.NewReader(body)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), rd)
@@ -298,21 +347,23 @@ func doAttempt(cfg *netConfig, urlStr string, opts map[string]any, limit int64) 
 			req.Header.Set(k, fmt.Sprint(v))
 		}
 	}
-	if method != "GET" && method != "HEAD" && body != "" && req.Header.Get("Content-Type") == "" {
-		t := strings.TrimSpace(body)
-		switch {
-		case strings.HasPrefix(t, "{"):
-			req.Header.Set("Content-Type", "application/json")
-		case strings.HasPrefix(t, "["):
-			req.Header.Set("Content-Type", "application/json")
-		case strings.HasPrefix(t, "<"):
-			req.Header.Set("Content-Type", "application/xml")
-		default:
-			req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	if hasPayload(method, body) {
+		if req.Header.Get("Content-Type") == "" {
+			t := strings.TrimSpace(body)
+			switch {
+			case strings.HasPrefix(t, "{"):
+				req.Header.Set("Content-Type", "application/json")
+			case strings.HasPrefix(t, "["):
+				req.Header.Set("Content-Type", "application/json")
+			case strings.HasPrefix(t, "<"):
+				req.Header.Set("Content-Type", "application/xml")
+			default:
+				req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+			}
 		}
 	}
 
-	client := &http.Client{
+client := &http.Client{
 		Timeout:   timeout,
 		Transport: &http.Transport{Proxy: nil},
 	}
@@ -351,7 +402,7 @@ func doAttempt(cfg *netConfig, urlStr string, opts map[string]any, limit int64) 
 	return raw, map[string]any{
 		"status":     resp.StatusCode,
 		"statusText": resp.Status,
-		"ok":         resp.StatusCode >= 200 && resp.StatusCode < 300,
+		"ok":         isOKStatus(resp.StatusCode),
 		"headers":    hdr,
 		"truncated":  trunc,
 		"bytes":      len(raw),
@@ -380,12 +431,19 @@ func newSandboxCookieStore(path string) *sandboxCookieStore {
 	return s
 }
 
+func isOKStatus(status int) bool {
+	if status < 200 {
+		return false
+	}
+	return status < 300
+}
+
 func (s *sandboxCookieStore) load() {
 	b, err := os.ReadFile(s.path)
 	if err != nil {
 		return
 	}
-	var raw map[string]map[string]cookieRec
+	raw := map[string]map[string]cookieRec{}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return
 	}
@@ -407,16 +465,20 @@ func (s *sandboxCookieStore) save() {
 }
 
 func (s *sandboxCookieStore) matches(host, reqPath string, secure bool, c cookieRec) bool {
-	if !c.Expires.IsZero() && time.Now().After(c.Expires) {
-		return false
+	if !c.Expires.IsZero() {
+		if time.Now().After(c.Expires) {
+			return false
+		}
 	}
 	dom := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(c.Domain), "."))
 	h := strings.ToLower(host)
 	if dom == "" {
 		dom = h
 	}
-	if dom != h && !strings.HasSuffix(h, "."+dom) {
-		return false
+	if dom != h {
+		if !strings.HasSuffix(h, fmt.Sprintf(".%s", dom)) {
+			return false
+		}
 	}
 	p := c.Path
 	if p == "" {
@@ -425,18 +487,20 @@ func (s *sandboxCookieStore) matches(host, reqPath string, secure bool, c cookie
 	if !strings.HasPrefix(reqPath, p) {
 		return false
 	}
-	if c.Secure && !secure {
-		return false
+	if c.Secure {
+		if !secure {
+			return false
+		}
 	}
 	return true
 }
 
 func (s *sandboxCookieStore) Header(host, reqPath string, secure bool) []string {
-	var out []string
+	out := []string{}
 	for _, cs := range s.jar {
 		for _, c := range cs {
 			if s.matches(host, reqPath, secure, c) {
-				out = append(out, c.Name+"="+c.Value)
+				out = append(out, fmt.Sprintf("%s=%s", c.Name, c.Value))
 			}
 		}
 	}
@@ -506,9 +570,13 @@ func (s *sandboxCookieStore) Clear(domain string) int {
 			n += len(cs)
 		}
 		s.jar = map[string]map[string]cookieRec{}
-	} else if cs, ok := s.jar[key]; ok {
-		n = len(cs)
-		delete(s.jar, key)
+	}
+	if key != "" {
+		cs, ok := s.jar[key]
+		if ok {
+			n = len(cs)
+			delete(s.jar, key)
+		}
 	}
 	if n > 0 {
 		s.save()
@@ -518,15 +586,20 @@ func (s *sandboxCookieStore) Clear(domain string) int {
 
 func (s *sandboxCookieStore) Set(domain, name, value string, opts map[string]any) bool {
 	key := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(domain), "."))
-	if key == "" || strings.TrimSpace(name) == "" {
+	if key == "" {
+		return false
+	}
+	if strings.TrimSpace(name) == "" {
 		return false
 	}
 	if s.jar[key] == nil {
 		s.jar[key] = map[string]cookieRec{}
 	}
 	rec := cookieRec{Name: name, Value: value, Domain: strings.TrimPrefix(strings.TrimSpace(domain), "."), Path: "/"}
-	if p, ok := opts["path"].(string); ok && p != "" {
-		rec.Path = p
+	if p, ok := opts["path"].(string); ok {
+		if p != "" {
+			rec.Path = p
+		}
 	}
 	if sec, ok := opts["secure"].(bool); ok {
 		rec.Secure = sec

@@ -18,21 +18,23 @@ func buildRegex(L *lua.State) int {
 
 	setGoFunc(L, t, "find", func(l *lua.State) int {
 		re := compileRegex(argString(l, 2))
-		if m := re.FindString(argString(l, 1)); m != "" {
-			l.PushString(m)
-		} else {
+		m := re.FindString(argString(l, 1))
+		if m == "" {
 			l.PushNil()
+			return 1
 		}
+		l.PushString(m)
 		return 1
 	})
 
 	setGoFunc(L, t, "findAll", func(l *lua.State) int {
 		re := compileRegex(argString(l, 2))
 		n := regexLimit(l, 3)
-		var res []string
+		res := []string{}
 		if n > 0 {
 			res = re.FindAllString(argString(l, 1), n)
-		} else {
+		}
+		if n <= 0 {
 			res = re.FindAllString(argString(l, 1), -1)
 		}
 		pushAny(l, res)
@@ -48,10 +50,11 @@ func buildRegex(L *lua.State) int {
 	setGoFunc(L, t, "split", func(l *lua.State) int {
 		re := compileRegex(argString(l, 2))
 		n := regexLimit(l, 3)
-		var res []string
+		res := []string{}
 		if n > 0 {
 			res = re.Split(argString(l, 1), n)
-		} else {
+		}
+		if n <= 0 {
 			res = re.Split(argString(l, 1), -1)
 		}
 		pushAny(l, res)

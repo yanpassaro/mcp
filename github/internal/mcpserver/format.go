@@ -1,8 +1,9 @@
 package mcpserver
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,7 +24,7 @@ func truncate(s string, n int) string {
 	s = strings.TrimSpace(s)
 	r := []rune(s)
 	if len(r) > n {
-		return string(r[:n]) + "…"
+		return fmt.Sprintf("%s…", string(r[:n]))
 	}
 	return s
 }
@@ -56,9 +57,14 @@ func toStr(v any) string {
 		return strings.Join(parts, ", ")
 	case map[string]any:
 		for _, k := range []string{"name", "login", "title", "full_name", "message", "description", "path"} {
-			if s, ok := t[k].(string); ok && s != "" {
-				return strings.TrimSpace(s)
+			s, ok := t[k].(string)
+			if !ok {
+				continue
 			}
+			if s == "" {
+				continue
+			}
+			return strings.TrimSpace(s)
 		}
 		return ""
 	default:
@@ -84,9 +90,14 @@ func toInt(v any) int {
 
 func userName(m map[string]any) string {
 	for _, k := range []string{"login", "name", "email"} {
-		if v, ok := m[k].(string); ok && v != "" {
-			return v
+		v, ok := m[k].(string)
+		if !ok {
+			continue
 		}
+		if v == "" {
+			continue
+		}
+		return v
 	}
 	return ""
 }
@@ -99,33 +110,45 @@ func nestedUser(m map[string]any, key string) string {
 }
 
 func labelsList(m map[string]any, key string) string {
-	if arr, ok := m[key].([]any); ok && len(arr) > 0 {
-		parts := make([]string, 0, len(arr))
-		for _, it := range arr {
-			if lm, ok := it.(map[string]any); ok {
-				if n := toStr(lm["name"]); n != "" {
-					parts = append(parts, n)
-				}
-			}
-		}
-		return strings.Join(parts, ", ")
+	arr, ok := m[key].([]any)
+	if !ok {
+		return ""
 	}
-	return ""
+	if len(arr) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(arr))
+	for _, it := range arr {
+		lm, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		if n := toStr(lm["name"]); n != "" {
+			parts = append(parts, n)
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func usersList(m map[string]any, key string) string {
-	if arr, ok := m[key].([]any); ok && len(arr) > 0 {
-		parts := make([]string, 0, len(arr))
-		for _, it := range arr {
-			if um, ok := it.(map[string]any); ok {
-				if n := userName(um); n != "" {
-					parts = append(parts, n)
-				}
-			}
-		}
-		return strings.Join(parts, ", ")
+	arr, ok := m[key].([]any)
+	if !ok {
+		return ""
 	}
-	return ""
+	if len(arr) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(arr))
+	for _, it := range arr {
+		um, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		if n := userName(um); n != "" {
+			parts = append(parts, n)
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func firstOf(m map[string]any, keys ...string) string {
@@ -182,21 +205,21 @@ func licenseName(v any) string {
 }
 
 func formatRepoDetail(m map[string]any) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	name := toStr(m["full_name"])
 	fmt.Fprintf(&b, "### [%s](%s)\n", name, toStr(m["html_url"]))
 	pieces := []string{}
-	if s := toStr(m["stargazers_count"]); s != "" && s != "0" {
-		pieces = append(pieces, s+" stars")
+	if s := toStr(m["stargazers_count"]); isNonZero(s) {
+		pieces = append(pieces, fmt.Sprintf("%s stars", s))
 	}
-	if f := toStr(m["forks_count"]); f != "" && f != "0" {
-		pieces = append(pieces, f+" forks")
+	if f := toStr(m["forks_count"]); isNonZero(f) {
+		pieces = append(pieces, fmt.Sprintf("%s forks", f))
 	}
-	if o := toStr(m["open_issues_count"]); o != "" && o != "0" {
-		pieces = append(pieces, o+" issues abertas")
+	if o := toStr(m["open_issues_count"]); isNonZero(o) {
+		pieces = append(pieces, fmt.Sprintf("%s issues abertas", o))
 	}
 	if l := toStr(m["language"]); l != "" {
-		pieces = append(pieces, "Linguagem: "+l)
+		pieces = append(pieces, fmt.Sprintf("Linguagem: %s", l))
 	}
 	if line := metaLine(pieces...); line != "" {
 		b.WriteString(line)
@@ -208,17 +231,26 @@ func formatRepoDetail(m map[string]any) string {
 	if u := toStr(m["updated_at"]); u != "" {
 		fmt.Fprintf(&b, "- **Atualizado:** %s\n", githubDate(u))
 	}
-	if topics, ok := m["topics"].([]any); ok && len(topics) > 0 {
-		parts := make([]string, 0, len(topics))
-		for _, tp := range topics {
-			parts = append(parts, toStr(tp))
+	if topics, ok := m["topics"].([]any); ok {
+		if len(topics) > 0 {
+			parts := make([]string, 0, len(topics))
+			for _, tp := range topics {
+				parts = append(parts, toStr(tp))
+			}
+			fmt.Fprintf(&b, "- **Topics:** %s\n", strings.Join(parts, ", "))
 		}
-		fmt.Fprintf(&b, "- **Topics:** %s\n", strings.Join(parts, ", "))
 	}
 	if d := toStr(m["description"]); d != "" {
 		fmt.Fprintf(&b, "\n%s\n", d)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func isNonZero(s string) bool {
+	if s == "" {
+		return false
+	}
+	return s != "0"
 }
 
 func orMissing(s string) string {
@@ -229,7 +261,7 @@ func orMissing(s string) string {
 }
 
 func formatIssueDetail(m map[string]any) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "## Issue #%s — %s\n", toStr(m["number"]), clean(toStr(m["title"])))
 	fmt.Fprintf(&b, "[abrir](%s)\n\n", toStr(m["html_url"]))
 	fmt.Fprintf(&b, "- **Estado:** %s\n", toStr(m["state"]))
@@ -252,20 +284,26 @@ func formatIssueDetail(m map[string]any) string {
 }
 
 func formatPullRequestDetail(m map[string]any) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "## PR #%s — %s\n", toStr(m["number"]), clean(toStr(m["title"])))
 	fmt.Fprintf(&b, "[abrir](%s)\n\n", toStr(m["html_url"]))
 	state := toStr(m["state"])
-	if state == "closed" && toStr(m["merged_at"]) != "" {
-		state = "merged"
+	if state == "closed" {
+		if toStr(m["merged_at"]) != "" {
+			state = "merged"
+		}
 	}
 	fmt.Fprintf(&b, "- **Estado:** %s\n", state)
 	fmt.Fprintf(&b, "- **Autor:** %s\n", orMissing(nestedUser(m, "user")))
 	if h, ok := m["head"].(map[string]any); ok {
-		if lbl := toStr(h["label"]); lbl != "" {
+		lbl := toStr(h["label"])
+		if lbl != "" {
 			fmt.Fprintf(&b, "- **De:** %s", lbl)
-		} else if repo, ok := h["repo"].(map[string]any); ok {
-			fmt.Fprintf(&b, "- **De:** %s:%s", toStr(repo["full_name"]), toStr(h["ref"]))
+		}
+		if lbl == "" {
+			if repo, ok := h["repo"].(map[string]any); ok {
+				fmt.Fprintf(&b, "- **De:** %s:%s", toStr(repo["full_name"]), toStr(h["ref"]))
+			}
 		}
 	}
 	if b2, ok := m["base"].(map[string]any); ok {
@@ -299,7 +337,7 @@ func metaLine(pieces ...string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return strings.Join(parts, " · ") + "\n"
+	return fmt.Sprintf("%s\n", strings.Join(parts, " · "))
 }
 
 func nestedRepoName(m map[string]any) string {
@@ -308,10 +346,12 @@ func nestedRepoName(m map[string]any) string {
 			return n
 		}
 	}
-	if v, ok := m["repository_url"].(string); ok && v != "" {
-		parts := strings.Split(v, "/repos/")
-		if len(parts) == 2 {
-			return parts[1]
+	if v, ok := m["repository_url"].(string); ok {
+		if v != "" {
+			parts := strings.Split(v, "/repos/")
+			if len(parts) == 2 {
+				return parts[1]
+			}
 		}
 	}
 	if v, ok := m["repository"].(map[string]any); ok {
@@ -324,17 +364,21 @@ func nestedRepoName(m map[string]any) string {
 
 func firstTextMatch(m map[string]any) string {
 	matches, ok := m["text_matches"].([]any)
-	if !ok || len(matches) == 0 {
+	if !ok {
 		return ""
 	}
-	if mm, ok := matches[0].(map[string]any); ok {
-		return clean(toStr(mm["fragment"]))
+	if len(matches) == 0 {
+		return ""
 	}
-	return ""
+	mm, ok := matches[0].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return clean(toStr(mm["fragment"]))
 }
 
 func formatCodeSearch(items []any, total int) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString(totalHeader(total))
 	for _, m := range mapItems(items) {
 		repo := nestedRepoName(m)
@@ -347,10 +391,10 @@ func formatCodeSearch(items []any, total int) string {
 		fmt.Fprintf(&b, "### [%s — %s](%s)\n", repo, path, htmlURL)
 		pieces := []string{}
 		if lang != "" {
-			pieces = append(pieces, "🏷️ `"+lang+"`")
+			pieces = append(pieces, fmt.Sprintf("🏷️ `%s`", lang))
 		}
 		if s := toStr(m["score"]); s != "" {
-			pieces = append(pieces, "📊 "+s)
+			pieces = append(pieces, fmt.Sprintf("📊 %s", s))
 		}
 		b.WriteString(metaLine(pieces...))
 		if frag := firstTextMatch(m); frag != "" {
@@ -362,7 +406,7 @@ func formatCodeSearch(items []any, total int) string {
 }
 
 func formatRepoSearch(items []any, total int) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString(totalHeader(total))
 	for _, m := range mapItems(items) {
 		name := toStr(m["full_name"])
@@ -370,13 +414,13 @@ func formatRepoSearch(items []any, total int) string {
 		fmt.Fprintf(&b, "### [%s](%s)\n", name, htmlURL)
 		pieces := []string{}
 		if s := toStr(m["stargazers_count"]); s != "" {
-			pieces = append(pieces, "⭐ "+s)
+			pieces = append(pieces, fmt.Sprintf("⭐ %s", s))
 		}
 		if f := toStr(m["forks_count"]); f != "" {
-			pieces = append(pieces, "🍴 "+f)
+			pieces = append(pieces, fmt.Sprintf("🍴 %s", f))
 		}
 		if l := toStr(m["language"]); l != "" {
-			pieces = append(pieces, "📝 "+l)
+			pieces = append(pieces, fmt.Sprintf("📝 %s", l))
 		}
 		b.WriteString(metaLine(pieces...))
 		if d := clean(toStr(m["description"])); d != "" {
@@ -388,7 +432,7 @@ func formatRepoSearch(items []any, total int) string {
 }
 
 func formatIssueSearch(items []any, total int) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString(totalHeader(total))
 	for _, m := range mapItems(items) {
 		tipo := "Issue"
@@ -411,29 +455,29 @@ func formatIssueSearch(items []any, total int) string {
 		case state == "closed":
 			stateIcon = "🔴"
 		}
-		pieces := []string{"🏷️ " + tipo, stateIcon + " " + state}
+		pieces := []string{fmt.Sprintf("🏷️ %s", tipo), fmt.Sprintf("%s %s", stateIcon, state)}
 		if a := nestedUser(m, "user"); a != "" {
-			pieces = append(pieces, "👤 "+a)
+			pieces = append(pieces, fmt.Sprintf("👤 %s", a))
 		}
 		if repo := nestedRepoName(m); repo != "" {
-			pieces = append(pieces, "📦 "+repo)
+			pieces = append(pieces, fmt.Sprintf("📦 %s", repo))
 		}
 		b.WriteString(metaLine(pieces...))
 		if labels := labelsList(m, "labels"); labels != "" {
 			fmt.Fprintf(&b, "🏷️ %s\n", labels)
 		}
 		sub := []string{}
-		if c := toStr(m["comments"]); c != "" && c != "0" {
-			sub = append(sub, "💬 "+c+" comentários")
+		if c := toStr(m["comments"]); isNonZero(c) {
+			sub = append(sub, fmt.Sprintf("💬 %s comentários", c))
 		}
 		if a := usersList(m, "assignees"); a != "" {
-			sub = append(sub, "👥 "+a)
+			sub = append(sub, fmt.Sprintf("👥 %s", a))
 		}
 		if created := githubDate(toStr(m["created_at"])); created != "" {
-			sub = append(sub, "🆕 "+created)
+			sub = append(sub, fmt.Sprintf("🆕 %s", created))
 		}
 		if updated := githubDate(toStr(m["updated_at"])); updated != "" {
-			sub = append(sub, "🕓 "+updated)
+			sub = append(sub, fmt.Sprintf("🕓 %s", updated))
 		}
 		b.WriteString(metaLine(sub...))
 		if frag := firstTextMatch(m); frag != "" {
@@ -445,7 +489,7 @@ func formatIssueSearch(items []any, total int) string {
 }
 
 func formatCommitSearch(items []any, total int) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString(totalHeader(total))
 	for _, m := range mapItems(items) {
 		sha := shortSHA(toStr(m["sha"]))
@@ -477,16 +521,16 @@ func formatCommitSearch(items []any, total int) string {
 		fmt.Fprintf(&b, "### [`%s`](%s) %s\n", sha, htmlURL, clean(truncate(msg, 200)))
 		pieces := []string{}
 		if author != "" {
-			pieces = append(pieces, "👤 "+author)
+			pieces = append(pieces, fmt.Sprintf("👤 %s", author))
 		}
-		if committer != "" && committer != author {
-			pieces = append(pieces, "✍️ "+committer)
+		if !sameUser(committer, author) {
+			pieces = append(pieces, fmt.Sprintf("✍️ %s", committer))
 		}
 		if date != "" {
-			pieces = append(pieces, "🕓 "+date)
+			pieces = append(pieces, fmt.Sprintf("🕓 %s", date))
 		}
 		if repo != "" {
-			pieces = append(pieces, "📦 "+repo)
+			pieces = append(pieces, fmt.Sprintf("📦 %s", repo))
 		}
 		if parents > 1 {
 			pieces = append(pieces, fmt.Sprintf("🔀 merge (%d pais)", parents))
@@ -503,37 +547,50 @@ func formatCommitSearch(items []any, total int) string {
 	return strings.TrimSpace(b.String())
 }
 
+func sameUser(a, b string) bool {
+	if a == "" {
+		return false
+	}
+	return a != b
+}
+
 func formatReleases(items []any) string {
 	entries := mapItems(items)
 	if len(entries) == 0 {
 		return "Nenhum release encontrado."
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "**Releases:** %d\n\n", len(entries))
 	for _, m := range entries {
 		tag := toStr(m["tag_name"])
 		name := clean(toStr(m["name"]))
 		htmlURL := toStr(m["html_url"])
 		title := tag
-		if name != "" && name != tag {
-			title = tag + " — " + name
+		if name != tag {
+			if name != "" {
+				title = fmt.Sprintf("%s — %s", tag, name)
+			}
 		}
 		if htmlURL != "" {
 			fmt.Fprintf(&b, "### [%s](%s)\n", title, htmlURL)
-		} else {
+		}
+		if htmlURL == "" {
 			fmt.Fprintf(&b, "### %s\n", title)
 		}
 		pieces := []string{}
 		if t := toStr(m["target_commitish"]); t != "" {
-			pieces = append(pieces, "📦 "+t)
+			pieces = append(pieces, fmt.Sprintf("📦 %s", t))
 		}
 		if a := nestedUser(m, "author"); a != "" {
-			pieces = append(pieces, "👤 "+a)
+			pieces = append(pieces, fmt.Sprintf("👤 %s", a))
 		}
 		if p := githubDate(toStr(m["published_at"])); p != "" {
-			pieces = append(pieces, "🕓 "+p)
-		} else if c := githubDate(toStr(m["created_at"])); c != "" {
-			pieces = append(pieces, "🕓 "+c)
+			pieces = append(pieces, fmt.Sprintf("🕓 %s", p))
+		}
+		if githubDate(toStr(m["published_at"])) == "" {
+			if c := githubDate(toStr(m["created_at"])); c != "" {
+				pieces = append(pieces, fmt.Sprintf("🕓 %s", c))
+			}
 		}
 		b.WriteString(metaLine(pieces...))
 		flags := []string{}
@@ -547,17 +604,21 @@ func formatReleases(items []any) string {
 		if body := clean(toStr(m["body"])); body != "" {
 			fmt.Fprintf(&b, "%s\n", truncate(body, 400))
 		}
-		if assets, ok := m["assets"].([]any); ok && len(assets) > 0 {
-			names := make([]string, 0, len(assets))
-			for _, it := range assets {
-				if am, ok := it.(map[string]any); ok {
+		if assets, ok := m["assets"].([]any); ok {
+			if len(assets) > 0 {
+				names := make([]string, 0, len(assets))
+				for _, it := range assets {
+					am, ok := it.(map[string]any)
+					if !ok {
+						continue
+					}
 					if n := toStr(am["name"]); n != "" {
 						names = append(names, n)
 					}
 				}
-			}
-			if len(names) > 0 {
-				fmt.Fprintf(&b, "📎 %d asset(s): %s\n", len(assets), strings.Join(names, ", "))
+				if len(names) > 0 {
+					fmt.Fprintf(&b, "📎 %d asset(s): %s\n", len(assets), strings.Join(names, ", "))
+				}
 			}
 		}
 		b.WriteString("\n")
@@ -603,7 +664,10 @@ func formatInsights(metric string, data any) string {
 
 func formatContributors(data any) string {
 	items, ok := data.([]any)
-	if !ok || len(items) == 0 {
+	if !ok {
+		return "Nenhum contribuidor encontrado (ou métrica ainda sendo calculada — resposta 202; tente novamente)."
+	}
+	if len(items) == 0 {
 		return "Nenhum contribuidor encontrado (ou métrica ainda sendo calculada — resposta 202; tente novamente)."
 	}
 	type row struct {
@@ -626,8 +690,8 @@ func formatContributors(data any) string {
 	if len(rows) == 0 {
 		return "Nenhum contribuidor encontrado."
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].total > rows[j].total })
-	var b strings.Builder
+	slices.SortFunc(rows, func(a, b row) int { return cmp.Compare(b.total, a.total) })
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "**Contribuidores:** %d\n\n", len(rows))
 	for _, r := range rows {
 		fmt.Fprintf(&b, "- %s — %d commits\n", r.login, r.total)
@@ -637,10 +701,13 @@ func formatContributors(data any) string {
 
 func formatCommitActivity(data any) string {
 	items, ok := data.([]any)
-	if !ok || len(items) == 0 {
+	if !ok {
 		return insightsPending("commit_activity")
 	}
-	var b strings.Builder
+	if len(items) == 0 {
+		return insightsPending("commit_activity")
+	}
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "**Atividade de commits (últimas %d semanas):**\n\n", len(items))
 	for _, it := range items {
 		m, ok := it.(map[string]any)
@@ -656,14 +723,20 @@ func formatCommitActivity(data any) string {
 
 func formatCodeFrequency(data any) string {
 	items, ok := data.([]any)
-	if !ok || len(items) == 0 {
+	if !ok {
 		return insightsPending("code_frequency")
 	}
-	var b strings.Builder
+	if len(items) == 0 {
+		return insightsPending("code_frequency")
+	}
+	b := strings.Builder{}
 	b.WriteString("**Frequência de código (adições/remoções por semana):**\n\n")
 	for _, it := range items {
 		arr, ok := it.([]any)
-		if !ok || len(arr) < 3 {
+		if !ok {
+			continue
+		}
+		if len(arr) < 3 {
 			continue
 		}
 		week := githubDateUnix(toInt(arr[0]))
@@ -679,7 +752,7 @@ func formatParticipation(data any) string {
 	if !ok {
 		return insightsPending("participation")
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString("**Participação semanal (últimas 52 semanas):**\n\n")
 	if owner, ok := m["owner"].([]any); ok {
 		fmt.Fprintf(&b, "👤 Commits do dono: %d (total %d)\n", len(owner), sumInts(owner))
@@ -692,7 +765,10 @@ func formatParticipation(data any) string {
 
 func formatPunchCard(data any) string {
 	items, ok := data.([]any)
-	if !ok || len(items) == 0 {
+	if !ok {
+		return insightsPending("punch_card")
+	}
+	if len(items) == 0 {
 		return insightsPending("punch_card")
 	}
 	days := []string{"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"}
@@ -703,7 +779,10 @@ func formatPunchCard(data any) string {
 	rows := make([]row, 0, len(items))
 	for _, it := range items {
 		arr, ok := it.([]any)
-		if !ok || len(arr) < 3 {
+		if !ok {
+			continue
+		}
+		if len(arr) < 3 {
 			continue
 		}
 		d := toInt(arr[0])
@@ -713,20 +792,22 @@ func formatPunchCard(data any) string {
 			continue
 		}
 		day := "?"
-		if d >= 0 && d < len(days) {
-			day = days[d]
+		if d >= 0 {
+			if d < len(days) {
+				day = days[d]
+			}
 		}
 		rows = append(rows, row{day, h, c})
 	}
 	if len(rows) == 0 {
 		return "Nenhum commit registrado no punch card."
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].count > rows[j].count })
-	const maxRows = 24
-	if len(rows) > maxRows {
-		rows = rows[:maxRows]
+	slices.SortFunc(rows, func(a, b row) int { return cmp.Compare(b.count, a.count) })
+	const MAX_ROWS = 24
+	if len(rows) > MAX_ROWS {
+		rows = rows[:MAX_ROWS]
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "**Punch card (top %d dias/horas com mais commits):**\n\n", len(rows))
 	for _, r := range rows {
 		fmt.Fprintf(&b, "- %s %02d:00 — %d commits\n", r.day, r.hour, r.count)
@@ -735,7 +816,7 @@ func formatPunchCard(data any) string {
 }
 
 func formatUserSearch(items []any, total int) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString(totalHeader(total))
 	for _, m := range mapItems(items) {
 		login := clean(toStr(m["login"]))
@@ -743,7 +824,8 @@ func formatUserSearch(items []any, total int) string {
 		typ := clean(toStr(m["type"]))
 		if htmlURL != "" {
 			fmt.Fprintf(&b, "### [%s](%s)\n", login, htmlURL)
-		} else {
+		}
+		if htmlURL == "" {
 			fmt.Fprintf(&b, "### %s\n", login)
 		}
 		if typ != "" {
@@ -799,72 +881,89 @@ func formatTree(items []any, total int) string {
 		cur := root
 		for i, p := range parts {
 			cur = cur.child(p)
-			if i < len(parts)-1 || typ == "tree" {
+			if i < len(parts)-1 {
+				cur.isDir = true
+				continue
+			}
+			if typ == "tree" {
 				cur.isDir = true
 			}
 		}
 		if typ == "tree" {
 			dirs++
-		} else {
-			files++
+			continue
 		}
+		files++
 	}
 
-	const maxTreeLines = 400
-	var lines []string
-	counter := 0
-	var walk func(n *fileTreeNode, prefix string)
-	walk = func(n *fileTreeNode, prefix string) {
-		if counter >= maxTreeLines {
-			return
-		}
-		names := make([]string, 0, len(n.children))
-		for k := range n.children {
-			names = append(names, k)
-		}
-		sort.Slice(names, func(i, j int) bool {
-			ci, cj := n.children[names[i]], n.children[names[j]]
-			if ci.isDir != cj.isDir {
-				return ci.isDir
-			}
-			return names[i] < names[j]
-		})
-		for i, name := range names {
-			if counter >= maxTreeLines {
-				return
-			}
-			last := i == len(names)-1
-			connector := "├── "
-			if last {
-				connector = "└── "
-			}
-			label := name
-			if n.children[name].isDir {
-				label += "/"
-			}
-			lines = append(lines, prefix+connector+label)
-			counter++
-			childPrefix := prefix
-			if last {
-				childPrefix += "    "
-			} else {
-				childPrefix += "│   "
-			}
-			walk(n.children[name], childPrefix)
-		}
-	}
-	walk(root, "")
+	tree := treeWalk{lines: []string{}}
+	tree.walk(root, "")
+	lines := tree.lines
+	counter := tree.counter
 
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "📊 %d entradas — %d diretórios, %d arquivos", len(entries), dirs, files)
-	if total > 0 && total != len(entries) {
-		fmt.Fprintf(&b, " (total relatado pela API: %d)", total)
+	if total > 0 {
+		if total != len(entries) {
+			fmt.Fprintf(&b, " (total relatado pela API: %d)", total)
+		}
 	}
 	b.WriteString("\n\n```\n")
 	b.WriteString(strings.Join(lines, "\n"))
 	if countNodes(root) > counter {
-		fmt.Fprintf(&b, "\n… lista truncada em %d linhas. Use recursive=false ou um ref/path mais específico.\n", maxTreeLines)
+		fmt.Fprintf(&b, "\n… lista truncada em %d linhas. Use recursive=false ou um ref/path mais específico.\n", MAX_TREE_LINES)
 	}
 	b.WriteString("\n```")
 	return strings.TrimSpace(b.String())
+}
+
+const MAX_TREE_LINES = 400
+
+type treeWalk struct {
+	lines   []string
+	counter int
+}
+
+func (t *treeWalk) walk(n *fileTreeNode, prefix string) {
+	if t.counter >= MAX_TREE_LINES {
+		return
+	}
+	names := make([]string, 0, len(n.children))
+	for k := range n.children {
+		names = append(names, k)
+	}
+	slices.SortFunc(names, func(a, b string) int { return childLess(n, a, b) })
+	for i, name := range names {
+		if t.counter >= MAX_TREE_LINES {
+			return
+		}
+		last := i == len(names)-1
+		connector := "├── "
+		if last {
+			connector = "└── "
+		}
+		label := name
+		if n.children[name].isDir {
+			label = fmt.Sprintf("%s/", name)
+		}
+		t.lines = append(t.lines, fmt.Sprintf("%s%s%s", prefix, connector, label))
+		t.counter++
+		childPrefix := fmt.Sprintf("%s    ", prefix)
+		if !last {
+			childPrefix = fmt.Sprintf("%s│   ", prefix)
+		}
+		t.walk(n.children[name], childPrefix)
+	}
+}
+
+func childLess(n *fileTreeNode, a, b string) int {
+	ca := n.children[a]
+	cb := n.children[b]
+	if ca.isDir != cb.isDir {
+		if ca.isDir {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(a, b)
 }

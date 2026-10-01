@@ -183,7 +183,8 @@ func tableToAny(l *lua.State, index int) any {
 			if keyNum > maxIdx {
 				maxIdx = keyNum
 			}
-		} else {
+		}
+		if keyNum < 1 {
 			isArray = false
 		}
 		count++
@@ -192,12 +193,14 @@ func tableToAny(l *lua.State, index int) any {
 	if count == 0 {
 		return map[string]any{}
 	}
-	if isArray && maxIdx == count {
-		arr := make([]any, maxIdx)
-		for i := 1; i <= maxIdx; i++ {
-			arr[i-1] = items[strconv.Itoa(i)]
+	if isArray {
+		if maxIdx == count {
+			arr := make([]any, maxIdx)
+			for i := 1; i <= maxIdx; i++ {
+				arr[i-1] = items[strconv.Itoa(i)]
+			}
+			return arr
 		}
-		return arr
 	}
 	return items
 }

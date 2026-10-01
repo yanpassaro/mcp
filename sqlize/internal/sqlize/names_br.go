@@ -5,7 +5,7 @@ import (
 )
 
 func normalizeWord(s string) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	for _, r := range strings.ToLower(s) {
 		switch r {
 		case 'á', 'à', 'â', 'ã', 'ä':

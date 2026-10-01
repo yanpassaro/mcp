@@ -23,7 +23,7 @@ func parseArgs(argStr string) any {
 	if s == "" {
 		return map[string]any{}
 	}
-	var v any
+	v := any(nil)
 	if err := json.Unmarshal([]byte(s), &v); err == nil {
 		return v
 	}
@@ -43,9 +43,10 @@ func renderData(v any) (string, bool) {
 	}
 	switch exp := v.(type) {
 	case string:
-		var parsed any
+		parsed := any(nil)
 		if err := json.Unmarshal([]byte(strings.TrimSpace(exp)), &parsed); err == nil {
-			if b, err := json.MarshalIndent(parseNestedJSON(parsed), "", "  "); err == nil {
+			b, merr := json.MarshalIndent(parseNestedJSON(parsed), "", "  ")
+			if merr == nil {
 				return string(b), true
 			}
 		}

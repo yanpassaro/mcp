@@ -60,7 +60,7 @@ func buildPath(L *lua.State) int {
 	setGoFunc(L, t, "within", func(l *lua.State) int {
 		base := path.Clean(argString(l, 1))
 		p := path.Clean(argString(l, 2))
-		l.PushBoolean(p == base || strings.HasPrefix(p, base+"/"))
+		l.PushBoolean(isWithin(base, p))
 		return 1
 	})
 
@@ -80,7 +80,13 @@ func pathRel(base, target string) (string, error) {
 	bSegs := pathSegments(b)
 	tSegs := pathSegments(t)
 	i := 0
-	for i < len(bSegs) && i < len(tSegs) && bSegs[i] == tSegs[i] {
+	for i < len(bSegs) {
+		if i >= len(tSegs) {
+			break
+		}
+		if bSegs[i] != tSegs[i] {
+			break
+		}
 		i++
 	}
 	parts := make([]string, 0, len(bSegs)-i+len(tSegs)-i)
@@ -99,8 +105,10 @@ func pathSegments(p string) []string {
 		return []string{}
 	}
 	segs := strings.Split(p, "/")
-	if len(segs) > 0 && segs[0] == "" {
-		segs = segs[1:]
+	if len(segs) > 0 {
+		if segs[0] == "" {
+			segs = segs[1:]
+		}
 	}
 	return segs
 }

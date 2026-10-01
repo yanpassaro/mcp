@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 	lua "github.com/Shopify/go-lua"
 )
 
-const defaultMaxSQLRows = 10000
+const DEFAULT_MAX_SQL_ROWS = 10000
 
 type sqlConn interface {
 	Exec(query string, args ...any) (sql.Result, error)
@@ -170,10 +171,12 @@ func addSQLConn(L *lua.State, t int, reg *sqlRegistry, bound string) {
 		if query == "" {
 			panic(fmt.Errorf("consulta SQL vazia"))
 		}
-		var args []any
-		if l.Top() >= 2 && !l.IsNil(2) {
-			for _, v := range luaArrayAny(l, 2) {
-				args = append(args, v)
+		args := []any{}
+		if l.Top() >= 2 {
+			if !l.IsNil(2) {
+				for _, v := range luaArrayAny(l, 2) {
+					args = append(args, v)
+				}
 			}
 		}
 		return path, query, args
@@ -239,9 +242,9 @@ func addSQLConn(L *lua.State, t int, reg *sqlRegistry, bound string) {
 		if err != nil {
 			panic(err)
 		}
-		var v any
+		v := any(nil)
 		if err := conn.QueryRow(query, args...).Scan(&v); err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, sql.ErrNoRows) {
 				l.PushNil()
 				return 1
 			}
@@ -280,17 +283,30 @@ func addSQLConn(L *lua.State, t int, reg *sqlRegistry, bound string) {
 		if err != nil {
 			panic(err)
 		}
-		rows, err := sqlQueryRows(conn, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name", nil)
+		rows, err := sqlQueryRows(conn, `
+			SELECT name
+			FROM sqlite_master
+			WHERE type = 'table'
+				AND name NOT LIKE 'sqlite_%'
+			ORDER BY name
+		`, nil)
 		if err != nil {
 			panic(err)
 		}
 		names := make([]any, 0, len(rows))
 		for _, r := range rows {
-			if m, ok := r.(map[string]any); ok {
-				if n, ok := m["name"].(string); ok && n != "" {
-					names = append(names, n)
-				}
+			m, ok := r.(map[string]any)
+			if !ok {
+				continue
 			}
+			n, ok := m["name"].(string)
+			if !ok {
+				continue
+			}
+			if n == "" {
+				continue
+			}
+			names = append(names, n)
 		}
 		pushAny(l, names)
 		return 1
@@ -304,7 +320,7 @@ func addSQLConn(L *lua.State, t int, reg *sqlRegistry, bound string) {
 		if err != nil {
 			panic(err)
 		}
-		rows, err := sqlQueryRows(conn, "PRAGMA table_info("+sqlQuote(tbl)+")", nil)
+		rows, err := sqlQueryRows(conn, fmt.Sprintf("PRAGMA table_info(%s)", sqlQuote(tbl)), nil)
 		if err != nil {
 			panic(err)
 		}
@@ -316,11 +332,17 @@ func addSQLConn(L *lua.State, t int, reg *sqlRegistry, bound string) {
 		if err != nil {
 			panic(err)
 		}
-		rows, err := sqlQueryRows(conn, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name", nil)
+		rows, err := sqlQueryRows(conn, `
+			SELECT name
+			FROM sqlite_master
+			WHERE type = 'table'
+				AND name NOT LIKE 'sqlite_%'
+			ORDER BY name
+		`, nil)
 		if err != nil {
 			panic(err)
 		}
-		var names []any
+		names := []any{}
 		cols := map[string]any{}
 		for _, r := range rows {
 			m, _ := r.(map[string]any)
@@ -329,7 +351,7 @@ func addSQLConn(L *lua.State, t int, reg *sqlRegistry, bound string) {
 				continue
 			}
 			names = append(names, n)
-			cc, err := sqlQueryRows(conn, "PRAGMA table_info("+sqlQuote(n)+")", nil)
+			cc, err := sqlQueryRows(conn, fmt.Sprintf("PRAGMA table_info(%s)", sqlQuote(n)), nil)
 			if err != nil {
 				panic(err)
 			}
@@ -400,7 +422,7 @@ func sqlPath(mnt, tmp *Store, p string) (string, error) {
 func openSQLite(path string) (*sql.DB, error) {
 	dsn := path
 	if path != ":memory:" {
-		dsn = path + "?_pragma=busy_timeout(5000)"
+		dsn = fmt.Sprintf("%s?_pragma=busy_timeout(5000)", path)
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -443,12 +465,16 @@ func sqlQueryRows(conn sqlConn, query string, args []any) ([]any, error) {
 }
 
 func sqlRowLimit() int {
-	if v := strings.TrimSpace(os.Getenv("SANDBOX_SQL_MAX_ROWS")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
+	v := strings.TrimSpace(os.Getenv("SANDBOX_SQL_MAX_ROWS"))
+	if v != "" {
+		n, err := strconv.Atoi(v)
+		if err == nil {
+			if n > 0 {
+				return n
+			}
 		}
 	}
-	return defaultMaxSQLRows
+	return DEFAULT_MAX_SQL_ROWS
 }
 
 func scanRow(rows *sql.Rows, cols []string) (map[string]any, error) {

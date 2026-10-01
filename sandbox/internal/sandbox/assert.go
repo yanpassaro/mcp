@@ -12,7 +12,10 @@ func buildAssert(L *lua.State) int {
 	t := newTable(L)
 	setGoFunc(L, t, "ok", func(l *lua.State) int {
 		v := l.ToValue(1)
-		if v == nil || v == false {
+		if v == nil {
+			panic(fmt.Errorf("assert.ok falhou: %s", argStr(l, 2, "esperado um valor truthy")))
+		}
+		if v == false {
 			panic(fmt.Errorf("assert.ok falhou: %s", argStr(l, 2, "esperado um valor truthy")))
 		}
 		return 0
@@ -82,7 +85,10 @@ func buildAssert(L *lua.State) int {
 	})
 	setGoFunc(L, t, "between", func(l *lua.State) int {
 		v, lo, hi := argNum(l, 1), argNum(l, 2), argNum(l, 3)
-		if v < lo || v > hi {
+		if v < lo {
+			panic(fmt.Errorf("assert.between falhou: %v fora de [%v, %v]", v, lo, hi))
+		}
+		if v > hi {
 			panic(fmt.Errorf("assert.between falhou: %v fora de [%v, %v]", v, lo, hi))
 		}
 		return 0
@@ -131,9 +137,11 @@ func luaKind(l *lua.State, i int) string {
 
 func callRecover(l *lua.State, nResults int) (err error) {
 	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("%v", r)
+		r := recover()
+		if r == nil {
+			return
 		}
+		err = fmt.Errorf("%v", r)
 	}()
 	l.Call(0, nResults)
 	return nil

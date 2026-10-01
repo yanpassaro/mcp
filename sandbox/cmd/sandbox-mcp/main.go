@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 	"ntdsk.com/mcp/sandbox/internal/mcpserver"
 	"ntdsk.com/mcp/sandbox/internal/sandbox"
 )
+
+const DEFAULT_MEM_LIMIT_MB = 512
 
 func main() {
 	setupLog("sandbox")
@@ -64,12 +67,16 @@ func mntDir() string {
 func memLimitMB() int64 {
 	v := strings.TrimSpace(os.Getenv("SANDBOX_MEM_LIMIT_MB"))
 	if v == "" {
-		return 512
+		return DEFAULT_MEM_LIMIT_MB
 	}
-	if n, err := strconv.Atoi(v); err == nil && n > 0 {
-		return int64(n)
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return DEFAULT_MEM_LIMIT_MB
 	}
-	return 512
+	if n <= 0 {
+		return DEFAULT_MEM_LIMIT_MB
+	}
+	return int64(n)
 }
 
 func tmpDir() string {
@@ -89,7 +96,7 @@ func setupLog(server string) {
 		log.Printf("warning: failed to create %s; log goes to stderr: %v", dir, err)
 		return
 	}
-	path := filepath.Join(dir, server+"-"+time.Now().Format("2006-01-02_15-04-05")+".log")
+	path := filepath.Join(dir, fmt.Sprintf("%s-%s.log", server, time.Now().Format("2006-01-02_15-04-05")))
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Printf("warning: failed to open %s; log goes to stderr: %v", path, err)

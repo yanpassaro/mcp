@@ -52,12 +52,12 @@ func lunaTopicNames() []string {
 }
 
 func renderLunaIndex() string {
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString("# Sandbox Lua — std (lunadoc)\n\n")
 	b.WriteString("> Isolated Lua sandbox: no OS/process; files in `mnt/`; network only via `std.net` (allowlist). Each script is `function main(std)` ending in `std.result.ok(...)`/`err(...)`. Inline `code` can be just the body — the wrapper is added for you.\n\n")
-	var names []string
+	names := []string{}
 	for _, m := range lunaOrder {
-		names = append(names, "`"+m.Name+"`")
+		names = append(names, fmt.Sprintf("`%s`", m.Name))
 	}
 	fmt.Fprintf(&b, "**Modules:** %s\n\n", strings.Join(names, ", "))
 	fmt.Fprintf(&b, "**Native (Lua):** %s\n\n", strings.Join(lunaNative, ", "))
@@ -75,7 +75,7 @@ func renderLunaIndex() string {
 }
 
 func renderLunaModule(m *lunaMod) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	if m.Body != "" {
 		b.WriteString(strings.ReplaceAll(m.Body, "~~~", "```"))
 		return b.String()
@@ -93,15 +93,15 @@ func renderLunaModule(m *lunaMod) string {
 			}
 			fn := f.Name
 			if m.Prefix != "" {
-				fn = m.Prefix + "." + fn
+				fn = fmt.Sprintf("%s.%s", m.Prefix, fn)
 			}
 			sig := fmt.Sprintf("`%s(%s)`", fn, args)
 			switch f.Returns {
 			case "", "-":
 			case "panics":
-				sig += " → ⚠️ *fails (panic)*"
+				sig = fmt.Sprintf("%s → ⚠️ *fails (panic)*", sig)
 			default:
-				sig += " → `" + f.Returns + "`"
+				sig = fmt.Sprintf("%s → `%s`", sig, f.Returns)
 			}
 			fmt.Fprintf(&b, "**%s**\n", sig)
 			if f.Desc != "" {
@@ -119,14 +119,18 @@ func renderLunaModule(m *lunaMod) string {
 }
 
 func prettyParam(s string) string {
-	if before, after, ok := strings.Cut(s, ":"); ok {
-		return before + ": " + after
+	before, after, ok := strings.Cut(s, ":")
+	if !ok {
+		return s
 	}
-	return s
+	return fmt.Sprintf("%s: %s", before, after)
 }
 
 func prettyArgs(args string) string {
-	if args == "" || args == "-" {
+	if args == "" {
+		return args
+	}
+	if args == "-" {
 		return args
 	}
 	parts := strings.Split(args, ",")

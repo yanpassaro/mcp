@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"cmp"
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
@@ -11,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	lua "github.com/Shopify/go-lua"
@@ -166,20 +166,23 @@ func dataRowsFromCSV(s, sep string) ([]any, error) {
 	for _, rec := range recs[1:] {
 		m := map[string]any{}
 		for i, col := range header {
-			if i < len(rec) {
-				m[col] = rec[i]
-			} else {
-				m[col] = ""
-			}
+			m[col] = recCell(rec, i)
 		}
 		out = append(out, m)
 	}
 	return out, nil
 }
 
+func recCell(rec []string, i int) string {
+	if i >= len(rec) {
+		return ""
+	}
+	return rec[i]
+}
+
 func dataRowsToCSV(rows []any, sep string) (string, error) {
 	keys := dataRowKeys(rows)
-	var b strings.Builder
+	b := strings.Builder{}
 	w := csv.NewWriter(&b)
 	if sep != "" {
 		runes := []rune(sep)
@@ -211,7 +214,7 @@ func dataRowsToCSV(rows []any, sep string) (string, error) {
 }
 
 func dataFromJSON(s string) (any, error) {
-	var v any
+	v := any(nil)
 	if err := json.Unmarshal([]byte(s), &v); err != nil {
 		return nil, fmt.Errorf("JSON inválido: %w", err)
 	}
@@ -227,26 +230,23 @@ func dataToJSON(v any) (string, error) {
 }
 
 func dataRowsFromJSONL(s string) ([]any, error) {
-	var out []any
+	out := []any{}
 	for _, raw := range strings.Split(s, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
 		}
-		var v any
+		v := any(nil)
 		if err := json.Unmarshal([]byte(line), &v); err != nil {
 			return nil, fmt.Errorf("linha JSONL inválida: %w", err)
 		}
 		out = append(out, v)
 	}
-	if out == nil {
-		out = []any{}
-	}
 	return out, nil
 }
 
 func dataRowsToJSONL(rows []any) (string, error) {
-	var b strings.Builder
+	b := strings.Builder{}
 	for i, r := range rows {
 		if i > 0 {
 			b.WriteByte('\n')
@@ -266,13 +266,15 @@ func dataRowsFromXML(s, row string) ([]any, error) {
 		return nil, err
 	}
 	rowName := strings.TrimSpace(row)
-	if rowName == "" && len(root.children) > 0 {
-		rowName = root.children[0].name
+	if rowName == "" {
+		if len(root.children) > 0 {
+			rowName = root.children[0].name
+		}
 	}
 	if rowName == "" {
 		return []any{}, nil
 	}
-	var out []any
+	out := []any{}
 	for _, child := range root.children {
 		if child.name != rowName {
 			continue
@@ -290,35 +292,38 @@ func dataRowsFromXML(s, row string) ([]any, error) {
 		}
 		out = append(out, m)
 	}
-	if out == nil {
-		out = []any{}
-	}
 	return out, nil
 }
 
 func dataRowsToXML(rows []any, root, row string) string {
-	if root == "" {
-		root = "root"
-	}
-	if row == "" {
-		row = "item"
-	}
-	var b strings.Builder
-	b.WriteByte('<'); b.WriteString(root); b.WriteByte('>')
+	root = cmp.Or(root, "root")
+	row = cmp.Or(row, "item")
+	b := strings.Builder{}
+	xmlTag(&b, root, false)
 	for _, r := range rows {
 		m, _ := r.(map[string]any)
-		b.WriteByte('<'); b.WriteString(row); b.WriteByte('>')
+		xmlTag(&b, row, false)
 		for _, k := range dataRowKeys([]any{r}) {
-			b.WriteByte('<'); b.WriteString(k); b.WriteByte('>')
-			if v := m[k]; v != nil && v != "" {
-				xmlEscape(&b, dataCellText(v))
+			xmlTag(&b, k, false)
+			if v := m[k]; v != nil {
+				if v != "" {
+					xmlEscape(&b, dataCellText(v))
+				}
 			}
-			b.WriteString("</"); b.WriteString(k); b.WriteByte('>')
+			xmlTag(&b, k, true)
 		}
-		b.WriteString("</"); b.WriteString(row); b.WriteByte('>')
+		xmlTag(&b, row, true)
 	}
-	b.WriteString("</"); b.WriteString(root); b.WriteByte('>')
+	xmlTag(&b, root, true)
 	return b.String()
+}
+
+func xmlTag(b *strings.Builder, name string, close bool) {
+	if close {
+		fmt.Fprintf(b, "</%s>", name)
+		return
+	}
+	fmt.Fprintf(b, "<%s>", name)
 }
 
 func dataRowsFromExcel(path, sheet string) ([]any, error) {
@@ -334,11 +339,7 @@ func dataRowsFromExcel(path, sheet string) ([]any, error) {
 	for _, rec := range rows[1:] {
 		m := map[string]any{}
 		for i, col := range header {
-			if i < len(rec) {
-				m[col] = rec[i]
-			} else {
-				m[col] = ""
-			}
+			m[col] = recCell(rec, i)
 		}
 		out = append(out, m)
 	}
@@ -367,14 +368,12 @@ func dataSQLImport(db *sql.DB, table string, rows []any, opts map[string]any) (i
 	if len(keys) == 0 {
 		return 0, fmt.Errorf("sem colunas para importar")
 	}
-	create := opts["create"] == true || opts["create"] == "true"
-	if create || !sqlTableExists(db, table) {
-		cols := make([]string, len(keys))
-		for i, k := range keys {
-			cols[i] = sqlQuote(k) + " TEXT"
-		}
-		if _, err := db.Exec("CREATE TABLE IF NOT EXISTS " + sqlQuote(table) + " (" + strings.Join(cols, ", ") + ")"); err != nil {
-			return 0, sqlErr(err)
+	if dataWantsCreate(opts) {
+		return 0, sqlCreateTable(db, table, keys)
+	}
+	if !sqlTableExists(db, table) {
+		if err := sqlCreateTable(db, table, keys); err != nil {
+			return 0, err
 		}
 	}
 	quoted := make([]string, len(keys))
@@ -382,7 +381,7 @@ func dataSQLImport(db *sql.DB, table string, rows []any, opts map[string]any) (i
 		quoted[i] = sqlQuote(k)
 	}
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(keys)), ",")
-	ins := "INSERT INTO " + sqlQuote(table) + " (" + strings.Join(quoted, ", ") + ") VALUES (" + placeholders + ")"
+	ins := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", sqlQuote(table), strings.Join(quoted, ", "), placeholders)
 	tx, err := db.Begin()
 	if err != nil {
 		return 0, sqlErr(err)
@@ -395,7 +394,9 @@ func dataSQLImport(db *sql.DB, table string, rows []any, opts map[string]any) (i
 			args[i] = dataCellSQL(m[k])
 		}
 		if _, err := tx.Exec(ins, args...); err != nil {
-			tx.Rollback()
+			if rerr := tx.Rollback(); rerr != nil {
+				return n, sqlErr(rerr)
+			}
 			return n, sqlErr(err)
 		}
 		n++
@@ -406,9 +407,34 @@ func dataSQLImport(db *sql.DB, table string, rows []any, opts map[string]any) (i
 	return n, nil
 }
 
+func dataWantsCreate(opts map[string]any) bool {
+	if opts["create"] == true {
+		return true
+	}
+	return opts["create"] == "true"
+}
+
+func sqlCreateTable(db *sql.DB, table string, keys []string) error {
+	cols := make([]string, len(keys))
+	for i, k := range keys {
+		cols[i] = fmt.Sprintf("%s TEXT", sqlQuote(k))
+	}
+	q := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)", sqlQuote(table), strings.Join(cols, ", "))
+	_, err := db.Exec(q)
+	if err != nil {
+		return sqlErr(err)
+	}
+	return nil
+}
+
 func sqlTableExists(db *sql.DB, table string) bool {
-	var name string
-	err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
+	name := ""
+	err := db.QueryRow(`
+		SELECT name
+		FROM sqlite_master
+		WHERE type = 'table'
+			AND name = ?
+	`, table).Scan(&name)
 	return err == nil
 }
 
@@ -417,7 +443,10 @@ func dataSQLExport(conn sqlConn, query string) ([]any, error) {
 }
 
 func dataConvert(mnt, tmp *Store, src, dst string, opts map[string]any) error {
-	if strings.TrimSpace(src) == "" || strings.TrimSpace(dst) == "" {
+	if strings.TrimSpace(src) == "" {
+		return fmt.Errorf("informe origem e destino")
+	}
+	if strings.TrimSpace(dst) == "" {
 		return fmt.Errorf("informe origem e destino")
 	}
 	extSrc := strings.ToLower(strings.TrimPrefix(filepath.Ext(src), "."))
@@ -432,7 +461,7 @@ func dataConvert(mnt, tmp *Store, src, dst string, opts map[string]any) error {
 		return err
 	}
 
-	var value any
+	value := any(nil)
 	switch extSrc {
 	case "csv":
 		content, err := os.ReadFile(fullSrc)
@@ -670,24 +699,27 @@ func dataRowsFromSQL(s string) ([]any, error) {
 		up := strings.ToUpper(line)
 		if strings.HasPrefix(up, "CREATE TABLE") {
 			cols = sqlTableColumns(line)
-		} else if strings.HasPrefix(up, "INSERT INTO") {
-			if len(cols) == 0 {
-				return nil, errors.New("INSERT sem CREATE TABLE anterior")
-			}
-			values, err := parseSQLValues(line)
-			if err != nil {
-				return nil, err
-			}
-			m := map[string]any{}
-			for i, c := range cols {
-				if i < len(values) {
-					m[c] = values[i]
-				} else {
-					m[c] = nil
-				}
-			}
-			out = append(out, m)
+			continue
 		}
+		if !strings.HasPrefix(up, "INSERT INTO") {
+			continue
+		}
+		if len(cols) == 0 {
+			return nil, errors.New("INSERT sem CREATE TABLE anterior")
+		}
+		values, err := parseSQLValues(line)
+		if err != nil {
+			return nil, err
+		}
+		m := map[string]any{}
+		for i, c := range cols {
+			if i < len(values) {
+				m[c] = values[i]
+				continue
+			}
+			m[c] = nil
+		}
+		out = append(out, m)
 	}
 	if out == nil {
 		out = []any{}
@@ -697,11 +729,17 @@ func dataRowsFromSQL(s string) ([]any, error) {
 
 func sqlTableColumns(line string) []string {
 	i := strings.Index(line, "(")
-	j := strings.LastIndex(line, ")")
-	if i < 0 || j < 0 || j <= i {
+	if i < 0 {
 		return nil
 	}
-	var cols []string
+	j := strings.LastIndex(line, ")")
+	if j < 0 {
+		return nil
+	}
+	if j <= i {
+		return nil
+	}
+	cols := []string{}
 	for _, part := range strings.Split(line[i+1:j], ",") {
 		if m := reSQLCol.FindStringSubmatch(part); len(m) == 2 {
 			cols = append(cols, m[1])
@@ -717,34 +755,45 @@ func parseSQLValues(line string) ([]any, error) {
 	}
 	rest := line[v+len("VALUES"):]
 	open := strings.Index(rest, "(")
+	if open < 0 {
+		return nil, errors.New("sem tupla VALUES")
+	}
 	close := strings.LastIndex(rest, ")")
-	if open < 0 || close < 0 || close < open {
+	if close < 0 {
+		return nil, errors.New("sem tupla VALUES")
+	}
+	if close < open {
 		return nil, errors.New("sem tupla VALUES")
 	}
 	return parseSQLTuple(rest[open+1 : close])
 }
 
 func parseSQLTuple(s string) ([]any, error) {
-	var out []any
+	out := []any{}
 	i := 0
-	for {
-		for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+	for i < len(s) {
+		for i < len(s) {
+			if !isTupleSpace(s[i]) {
+				break
+			}
 			i++
 		}
 		if i >= len(s) {
 			break
 		}
-		var val any
+		val := any(nil)
 		if s[i] == '\'' {
 			i++
-			var b strings.Builder
+			b := strings.Builder{}
 			closed := false
 			for i < len(s) {
 				if s[i] == '\'' {
-					if i+1 < len(s) && s[i+1] == '\'' {
-						b.WriteByte('\'')
-						i += 2
-						continue
+					if i+1 < len(s) {
+						if s[i+1] == '\'' {
+							b.WriteByte('\'')
+							i += 2
+							continue
+						}
 					}
 					i++
 					closed = true
@@ -757,30 +806,54 @@ func parseSQLTuple(s string) ([]any, error) {
 				return nil, errors.New("literal não fechado nas VALUES")
 			}
 			val = b.String()
-		} else {
+		}
+		if s[i] != '\'' {
 			j := i
-			for j < len(s) && s[j] != ',' && s[j] != ')' {
+			for j < len(s) {
+				if isTupleStop(s[j]) {
+					break
+				}
 				j++
 			}
 			token := strings.TrimSpace(s[i:j])
 			if strings.EqualFold(token, "NULL") {
 				val = nil
-			} else {
+			}
+			if !strings.EqualFold(token, "NULL") {
 				val = token
 			}
 			i = j
 		}
 		out = append(out, val)
-		for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		for i < len(s) {
+			if !isTupleSpace(s[i]) {
+				break
+			}
 			i++
 		}
-		if i < len(s) && s[i] == ',' {
-			i++
-			continue
+		if i < len(s) {
+			if s[i] == ',' {
+				i++
+				continue
+			}
 		}
 		break
 	}
 	return out, nil
+}
+
+func isTupleStop(c byte) bool {
+	if c == ',' {
+		return true
+	}
+	return c == ')'
+}
+
+func isTupleSpace(c byte) bool {
+	if c == ' ' {
+		return true
+	}
+	return c == '\t'
 }
 
 func dataRowsFromHTML(s string) ([]any, error) {
@@ -801,7 +874,7 @@ func dataRowsFromHTML(s string) ([]any, error) {
 	for _, rec := range rows[1:] {
 		m := map[string]any{}
 		for i, v := range rec {
-			key := "col" + strconv.Itoa(i)
+			key := fmt.Sprintf("col%d", i)
 			if i < len(header) {
 				if h := strings.TrimSpace(header[i]); h != "" {
 					key = h
@@ -825,16 +898,18 @@ func dataRowsToHTML(rows []any, opts map[string]any) string {
 	zebra := truthyOpt(opts, "zebra")
 	thStyle := "padding:4px 8px"
 	if headerColor != "" {
-		thStyle += ";background:" + headerColor
+		thStyle = fmt.Sprintf("%s;background:%s", thStyle, headerColor)
 	}
 	tdStyle := "padding:4px 8px"
 	if rowColor != "" {
-		tdStyle += ";background:" + rowColor
+		tdStyle = fmt.Sprintf("%s;background:%s", tdStyle, rowColor)
 	}
-	if zebra && altColor == "" {
-		altColor = "#f5f5f5"
+	if altColor == "" {
+		if zebra {
+			altColor = "#f5f5f5"
+		}
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString("<table border=\"1\" style=\"border-collapse:collapse\">\n<thead>\n<tr>")
 	for _, k := range keys {
 		b.WriteString("<th style=\"")
@@ -847,8 +922,10 @@ func dataRowsToHTML(rows []any, opts map[string]any) string {
 	for ri, r := range rows {
 		m, _ := r.(map[string]any)
 		cellStyle := tdStyle
-		if zebra && ri%2 == 1 {
-			cellStyle += ";background:" + altColor
+		if ri%2 == 1 {
+			if zebra {
+				cellStyle = fmt.Sprintf("%s;background:%s", cellStyle, altColor)
+			}
 		}
 		b.WriteString("<tr>")
 		for _, k := range keys {
@@ -866,9 +943,14 @@ func dataRowsToHTML(rows []any, opts map[string]any) string {
 
 func optColor(opts map[string]any, keys ...string) string {
 	for _, k := range keys {
-		if s, ok := opts[k].(string); ok && s != "" {
-			return s
+		s, ok := opts[k].(string)
+		if !ok {
+			continue
 		}
+		if s == "" {
+			continue
+		}
+		return s
 	}
 	return ""
 }
@@ -878,14 +960,19 @@ func truthyOpt(opts map[string]any, key string) bool {
 	case bool:
 		return v
 	case string:
-		return v == "true" || v == "1"
+		if v == "true" {
+			return true
+		}
+		return v == "1"
 	}
 	return false
 }
 
 func findFirstTable(n *xhtml.Node) *xhtml.Node {
-	if n.Type == xhtml.ElementNode && n.DataAtom == atom.Table {
-		return n
+	if n.Type == xhtml.ElementNode {
+		if n.DataAtom == atom.Table {
+			return n
+		}
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		if t := findFirstTable(c); t != nil {
@@ -896,7 +983,7 @@ func findFirstTable(n *xhtml.Node) *xhtml.Node {
 }
 
 func tableRows(table *xhtml.Node) [][]string {
-	var rows [][]string
+	rows := [][]string{}
 	for c := table.FirstChild; c != nil; c = c.NextSibling {
 		if c.Type != xhtml.ElementNode {
 			continue
@@ -904,10 +991,12 @@ func tableRows(table *xhtml.Node) [][]string {
 		if c.DataAtom == atom.Tr {
 			rows = append(rows, rowCells(c))
 		}
-		if c.DataAtom == atom.Tbody || c.DataAtom == atom.Thead || c.DataAtom == atom.Tfoot {
+		if isRowGroup(c.DataAtom) {
 			for cc := c.FirstChild; cc != nil; cc = cc.NextSibling {
-				if cc.Type == xhtml.ElementNode && cc.DataAtom == atom.Tr {
-					rows = append(rows, rowCells(cc))
+				if cc.Type == xhtml.ElementNode {
+					if cc.DataAtom == atom.Tr {
+						rows = append(rows, rowCells(cc))
+					}
 				}
 			}
 		}
@@ -915,27 +1004,50 @@ func tableRows(table *xhtml.Node) [][]string {
 	return rows
 }
 
+func isRowGroup(a atom.Atom) bool {
+	if a == atom.Tbody {
+		return true
+	}
+	if a == atom.Thead {
+		return true
+	}
+	return a == atom.Tfoot
+}
+
 func rowCells(tr *xhtml.Node) []string {
-	var cells []string
+	cells := []string{}
 	for c := tr.FirstChild; c != nil; c = c.NextSibling {
-		if c.Type == xhtml.ElementNode && (c.DataAtom == atom.Td || c.DataAtom == atom.Th) {
-			cells = append(cells, strings.TrimSpace(nodeText(c)))
+		if c.Type == xhtml.ElementNode {
+			if isTableCell(c.DataAtom) {
+				cells = append(cells, strings.TrimSpace(nodeText(c)))
+			}
 		}
 	}
 	return cells
 }
 
-func nodeText(root *xhtml.Node) string {
-	var b strings.Builder
-	var walk func(*xhtml.Node)
-	walk = func(n *xhtml.Node) {
-		if n.Type == xhtml.TextNode {
-			b.WriteString(n.Data)
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
+func isTableCell(a atom.Atom) bool {
+	if a == atom.Td {
+		return true
 	}
-	walk(root)
-	return b.String()
+	return a == atom.Th
+}
+
+func nodeText(root *xhtml.Node) string {
+	t := htmlText{}
+	t.walk(root)
+	return t.b.String()
+}
+
+type htmlText struct {
+	b strings.Builder
+}
+
+func (t *htmlText) walk(n *xhtml.Node) {
+	if n.Type == xhtml.TextNode {
+		t.b.WriteString(n.Data)
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		t.walk(c)
+	}
 }

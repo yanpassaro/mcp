@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -79,11 +80,11 @@ func (s *Store) DeleteAll(name string) error {
 func (s *Store) Tree(rel string) (TreeNode, error) {
 	fullRoot := s.Root
 	if strings.TrimSpace(rel) != "" {
-		var err error
-		fullRoot, err = s.resolve(rel)
+		resolved, err := s.resolve(rel)
 		if err != nil {
 			return TreeNode{}, err
 		}
+		fullRoot = resolved
 	}
 	fi, err := os.Lstat(fullRoot)
 	if err != nil {
@@ -204,7 +205,7 @@ func (s *Store) Glob(pattern string) ([]string, error) {
 		if err != nil {
 			continue
 		}
-		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		if isOutside(rel) {
 			continue
 		}
 		out = append(out, rel)
@@ -213,30 +214,38 @@ func (s *Store) Glob(pattern string) ([]string, error) {
 	return out, nil
 }
 
-func (s *Store) Walk(root string, files, dirs bool, ext string) ([]string, error) {
-	root = strings.TrimSpace(root)
-	if root == "" {
-		root = "."
+func isOutside(rel string) bool {
+	if rel == ".." {
+		return true
 	}
+	return strings.HasPrefix(rel, fmt.Sprintf("..%c", os.PathSeparator))
+}
+
+func (s *Store) Walk(root string, files, dirs bool, ext string) ([]string, error) {
+	root = cmp.Or(strings.TrimSpace(root), ".")
 	full, err := s.resolve(root)
 	if err != nil {
 		return nil, err
 	}
-	var out []string
+	out := []string{}
 	err = filepath.Walk(full, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
-		if path != full && strings.HasPrefix(info.Name(), ".") {
-			if info.IsDir() {
-				return filepath.SkipDir
+		if path != full {
+			if strings.HasPrefix(info.Name(), ".") {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
-			return nil
 		}
 		if info.IsDir() {
-			if dirs && path != full {
-				if rel, e := filepath.Rel(s.Root, path); e == nil {
-					out = append(out, rel)
+			if dirs {
+				if path != full {
+					if rel, e := filepath.Rel(s.Root, path); e == nil {
+						out = append(out, rel)
+					}
 				}
 			}
 			return nil
@@ -244,7 +253,7 @@ func (s *Store) Walk(root string, files, dirs bool, ext string) ([]string, error
 		if !files {
 			return nil
 		}
-		if ext != "" && !strings.EqualFold(filepath.Ext(info.Name()), ext) {
+		if !matchExt(ext, info.Name()) {
 			return nil
 		}
 		if rel, e := filepath.Rel(s.Root, path); e == nil {
@@ -291,12 +300,19 @@ func filterGlob(store *Store, names []string, files, dirs bool, ext string) ([]s
 		if !files {
 			continue
 		}
-		if ext != "" && !strings.EqualFold(filepath.Ext(n), ext) {
+		if !matchExt(ext, n) {
 			continue
 		}
 		out = append(out, n)
 	}
 	return out, nil
+}
+
+func matchExt(ext, name string) bool {
+	if ext == "" {
+		return true
+	}
+	return strings.EqualFold(filepath.Ext(name), ext)
 }
 
 func (s *Store) Clear() (int, error) {
@@ -317,7 +333,10 @@ func (s *Store) Clear() (int, error) {
 func samePath(a, b string) bool {
 	ca, errA := filepath.Abs(filepath.Clean(a))
 	cb, errB := filepath.Abs(filepath.Clean(b))
-	if errA != nil || errB != nil {
+	if errA != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	if errB != nil {
 		return filepath.Clean(a) == filepath.Clean(b)
 	}
 	return ca == cb

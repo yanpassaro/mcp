@@ -1,7 +1,8 @@
 package sandbox
 
 import (
-	"strconv"
+	"cmp"
+	"fmt"
 	"strings"
 
 	lua "github.com/Shopify/go-lua"
@@ -51,15 +52,18 @@ func humanBytes(n float64) string {
 		n = 0
 	}
 	if n < 1024 {
-		return strconv.FormatInt(int64(n), 10) + " B"
+		return fmt.Sprintf("%d B", int64(n))
 	}
 	val := n
 	i := -1
-	for val >= 1024 && i < len(humanUnits)-1 {
+	for val >= 1024 {
+		if i >= len(humanUnits)-1 {
+			break
+		}
 		val /= 1024
 		i++
 	}
-	return trimZeroDec(formatNum(val, 1, "pt-br")) + " " + humanUnits[i]
+	return fmt.Sprintf("%s %s", trimZeroDec(formatNum(val, 1, "pt-br")), humanUnits[i])
 }
 
 func humanDuration(ms float64) string {
@@ -67,32 +71,34 @@ func humanDuration(ms float64) string {
 		ms = 0
 	}
 	if ms < 1000 {
-		return strconv.FormatInt(int64(ms), 10) + " ms"
+		return fmt.Sprintf("%d ms", int64(ms))
 	}
 	if ms < 60000 {
-		return trimZeroDec(formatNum(ms/1000, 1, "pt-br")) + " s"
+		return fmt.Sprintf("%s s", trimZeroDec(formatNum(ms/1000, 1, "pt-br")))
 	}
 	totalMin := int64(ms / 60000)
 	if totalMin < 60 {
-		return strconv.FormatInt(totalMin, 10) + " min"
+		return fmt.Sprintf("%d min", totalMin)
 	}
 	h := totalMin / 60
 	m := totalMin % 60
 	if h >= 24 {
 		d := h / 24
 		h = h % 24
-		if h == 0 && m == 0 {
-			return strconv.FormatInt(d, 10) + " d"
+		if h == 0 {
+			if m == 0 {
+				return fmt.Sprintf("%d d", d)
+			}
 		}
 		if m == 0 {
-			return strconv.FormatInt(d, 10) + " d " + strconv.FormatInt(h, 10) + " h"
+			return fmt.Sprintf("%d d %d h", d, h)
 		}
-		return strconv.FormatInt(d, 10) + " d " + strconv.FormatInt(h, 10) + " h " + strconv.FormatInt(m, 10) + " min"
+		return fmt.Sprintf("%d d %d h %d min", d, h, m)
 	}
 	if m == 0 {
-		return strconv.FormatInt(h, 10) + " h"
+		return fmt.Sprintf("%d h", h)
 	}
-	return strconv.FormatInt(h, 10) + " h " + strconv.FormatInt(m, 10) + " min"
+	return fmt.Sprintf("%d h %d min", h, m)
 }
 
 func humanCompact(n float64) string {
@@ -105,22 +111,22 @@ func humanCompact(n float64) string {
 	units := []string{"mil", "mi", "bi", "tri"}
 	val := n
 	i := -1
-	for val >= 1000 && i < len(units)-1 {
+	for val >= 1000 {
+		if i >= len(units)-1 {
+			break
+		}
 		val /= 1000
 		i++
 	}
-	return trimZeroDec(formatNum(val, 1, "pt-br")) + " " + units[i]
+	return fmt.Sprintf("%s %s", trimZeroDec(formatNum(val, 1, "pt-br")), units[i])
 }
 
 func humanMoney(n float64, cur string) string {
-	if cur == "" {
-		cur = "R$"
-	}
-	return cur + " " + formatNum(n, 2, "pt-br")
+	return fmt.Sprintf("%s %s", cmp.Or(cur, "R$"), formatNum(n, 2, "pt-br"))
 }
 
 func humanOrdinal(n int64) string {
-	return strconv.FormatInt(n, 10) + "º"
+	return fmt.Sprintf("%dº", n)
 }
 
 func humanPlural(n float64, one, many string) string {
@@ -143,9 +149,9 @@ func humanList(items []any) string {
 		return parts[0]
 	}
 	if n == 2 {
-		return parts[0] + " e " + parts[1]
+		return fmt.Sprintf("%s e %s", parts[0], parts[1])
 	}
-	return strings.Join(parts[:n-1], ", ") + " e " + parts[n-1]
+	return fmt.Sprintf("%s e %s", strings.Join(parts[:n-1], ", "), parts[n-1])
 }
 
 func trimZeroDec(s string) string {

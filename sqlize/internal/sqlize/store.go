@@ -106,11 +106,11 @@ func (s *store) Close() error {
 }
 
 func quoteIdent(name string) string {
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+	return fmt.Sprintf("%s%s%s", `"`, strings.ReplaceAll(name, `"`, `""`), `"`)
 }
 
 func quoteLit(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+	return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''"))
 }
 
 func sanitizeReadQuery(q string) (string, error) {
@@ -119,8 +119,10 @@ func sanitizeReadQuery(q string) (string, error) {
 		return "", fmt.Errorf("consulta vazia")
 	}
 	lower := strings.ToLower(t)
-	if !strings.HasPrefix(lower, "select") && !strings.HasPrefix(lower, "with") {
-		return "", fmt.Errorf("apenas consultas SELECT ou WITH são permitidas")
+	if !strings.HasPrefix(lower, "select") {
+		if !strings.HasPrefix(lower, "with") {
+			return "", fmt.Errorf("apenas consultas SELECT ou WITH são permitidas")
+		}
 	}
 	if strings.Contains(t, ";") {
 		return "", fmt.Errorf("consultas não podem conter ';' (apenas uma instrução por vez)")
@@ -184,8 +186,10 @@ func sanitizeStoreQuery(q string, args []string) (string, error) {
 	if strings.Contains(t, ";") {
 		return "", fmt.Errorf("consultas não podem conter ';' (apenas uma instrução por vez)")
 	}
-	if len(args) > 0 && !strings.Contains(t, "?") {
-		return "", fmt.Errorf("'args' informado mas o SQL não contém placeholders; use ? e passe os valores em 'args'")
+	if len(args) > 0 {
+		if !strings.Contains(t, "?") {
+			return "", fmt.Errorf("'args' informado mas o SQL não contém placeholders; use ? e passe os valores em 'args'")
+		}
 	}
 	return t, nil
 }
@@ -200,9 +204,7 @@ func (s *store) runQuery(ctx context.Context, q string, args []string) (string, 
 		params[i] = a
 	}
 	lower := strings.ToLower(strings.TrimSpace(clean))
-	isRow := strings.HasPrefix(lower, "select") || strings.HasPrefix(lower, "with") ||
-		strings.HasPrefix(lower, "values") || strings.HasPrefix(lower, "pragma")
-	if isRow {
+	if isRowQuery(lower) {
 		rs, err := s.db.QueryContext(ctx, clean, params...)
 		if err != nil {
 			return "", fmt.Errorf("executar consulta: %w", err)
@@ -233,18 +235,19 @@ func (s *store) runQuery(ctx context.Context, q string, args []string) (string, 
 		if err := rs.Err(); err != nil {
 			return "", err
 		}
-		const max = 200
+		const MAX_ROWS = 200
 		shown := out
-		if len(out) > max {
-			shown = out[:max]
+		if len(out) > MAX_ROWS {
+			shown = out[:MAX_ROWS]
 		}
 		shown = RedactRows(cols, shown)
-		label := " (mascaradas)"
-		var b strings.Builder
+		const label = " (mascaradas)"
+		b := strings.Builder{}
 		b.WriteString(markdownTable(cols, shown))
-		if len(out) > max {
-			fmt.Fprintf(&b, "\n... %d linhas no total (mostrando %d%s).\n", len(out), max, label)
-		} else {
+		if len(out) > MAX_ROWS {
+			fmt.Fprintf(&b, "\n... %d linhas no total (mostrando %d%s).\n", len(out), MAX_ROWS, label)
+		}
+		if len(out) <= MAX_ROWS {
 			fmt.Fprintf(&b, "\n%d linha(s)%s.\n", len(out), label)
 		}
 		return b.String(), nil
@@ -260,22 +263,30 @@ func (s *store) runQuery(ctx context.Context, q string, args []string) (string, 
 	return fmt.Sprintf("OK. %d linha(s) afetada(s).", n), nil
 }
 
+func isRowQuery(lower string) bool {
+	if strings.HasPrefix(lower, "select") {
+		return true
+	}
+	if strings.HasPrefix(lower, "with") {
+		return true
+	}
+	if strings.HasPrefix(lower, "values") {
+		return true
+	}
+	return strings.HasPrefix(lower, "pragma")
+}
+
 func (s *store) listTables(ctx context.Context) ([]tableInfo, error) {
-	var out []tableInfo
+	out := []tableInfo{}
 	schemas := append([]string{"main"}, s.attached...)
 	for _, sch := range schemas {
-		var q string
-		if sch == "main" {
-			q = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-		} else {
-			q = "SELECT name FROM " + quoteIdent(sch) + ".sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-		}
+		q := fmt.Sprintf("SELECT name FROM %s.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%%' ORDER BY name", quoteIdent(sch))
 		rows, err := s.db.QueryContext(ctx, q)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
-			var name string
+			name := ""
 			if err := rows.Scan(&name); err != nil {
 				rows.Close()
 				return nil, err
@@ -292,14 +303,22 @@ func (s *store) listTables(ctx context.Context) ([]tableInfo, error) {
 }
 
 func (s *store) tableColumns(ctx context.Context, schema, name string) ([]columnInfo, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, type, CAST("notnull" AS TEXT), COALESCE(dflt_value, ''), CAST(pk AS TEXT) FROM pragma_table_info(?, ?)`, name, schema)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			name,
+			type,
+			CAST("notnull" AS TEXT),
+			COALESCE(dflt_value, ''),
+			CAST(pk AS TEXT)
+		FROM pragma_table_info(?, ?)
+	`, name, schema)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []columnInfo
+	out := []columnInfo{}
 	for rows.Next() {
-		var c columnInfo
+		c := columnInfo{}
 		if err := rows.Scan(&c.Name, &c.Type, &c.NotNull, &c.Default, &c.PK); err != nil {
 			return nil, err
 		}
@@ -309,14 +328,21 @@ func (s *store) tableColumns(ctx context.Context, schema, name string) ([]column
 }
 
 func (s *store) tableForeignKeys(ctx context.Context, schema, name string) ([]fkInfo, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT "from", "table" AS ref_table, "to" AS ref_column FROM pragma_foreign_key_list(?, ?) ORDER BY id, seq`, name, schema)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			"from",
+			"table" AS ref_table,
+			"to" AS ref_column
+		FROM pragma_foreign_key_list(?, ?)
+		ORDER BY id, seq
+	`, name, schema)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []fkInfo
+	out := []fkInfo{}
 	for rows.Next() {
-		var f fkInfo
+		f := fkInfo{}
 		if err := rows.Scan(&f.Column, &f.RefTable, &f.RefColumn); err != nil {
 			return nil, err
 		}
@@ -326,14 +352,21 @@ func (s *store) tableForeignKeys(ctx context.Context, schema, name string) ([]fk
 }
 
 func (s *store) tableIndexes(ctx context.Context, schema, name string) ([]indexInfo, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, "unique", origin FROM pragma_index_list(?, ?) ORDER BY name`, name, schema)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			name,
+			"unique",
+			origin
+		FROM pragma_index_list(?, ?)
+		ORDER BY name
+	`, name, schema)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var idx []indexInfo
+	idx := []indexInfo{}
 	for rows.Next() {
-		var ix indexInfo
+		ix := indexInfo{}
 		if err := rows.Scan(&ix.Name, &ix.Unique, &ix.Origin); err != nil {
 			return nil, err
 		}
@@ -343,12 +376,16 @@ func (s *store) tableIndexes(ctx context.Context, schema, name string) ([]indexI
 		return nil, err
 	}
 	for i := range idx {
-		crows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_index_info(?) ORDER BY seqno`, idx[i].Name)
+		crows, err := s.db.QueryContext(ctx, `
+			SELECT name
+			FROM pragma_index_info(?)
+			ORDER BY seqno
+		`, idx[i].Name)
 		if err != nil {
 			return nil, err
 		}
 		for crows.Next() {
-			var c string
+			c := ""
 			if err := crows.Scan(&c); err != nil {
 				crows.Close()
 				return nil, err
@@ -381,7 +418,7 @@ func (s *store) attachDB(ctx context.Context, path string) (string, error) {
 	if _, err := os.Stat(path); err != nil {
 		return "", fmt.Errorf("arquivo não encontrado: %w", err)
 	}
-	alias := "db" + strconv.Itoa(s.attachSeq)
+	alias := fmt.Sprintf("db%d", s.attachSeq)
 	s.attachSeq++
 	s.attached = append(s.attached, alias)
 	q := fmt.Sprintf("ATTACH DATABASE %s AS %s", quoteLit(path), quoteIdent(alias))
@@ -416,7 +453,13 @@ func inferColumnType(values []string) string {
 				allDate = false
 			}
 		}
-		if !allInt && !allFloat && !allDate {
+		if allInt {
+			if allFloat {
+				continue
+			}
+			if allDate {
+				continue
+			}
 			break
 		}
 	}
@@ -450,6 +493,13 @@ func isDateLike(s string) bool {
 	return false
 }
 
+func rowCell(row []string, i int) string {
+	if i >= len(row) {
+		return ""
+	}
+	return row[i]
+}
+
 func (s *store) loadTable(ctx context.Context, name string, columns []string, rows [][]string) error {
 	if len(columns) == 0 {
 		return fmt.Errorf("nenhuma coluna detectada")
@@ -463,18 +513,14 @@ func (s *store) loadTable(ctx context.Context, name string, columns []string, ro
 	}
 	for _, r := range rows {
 		for i := range columns {
-			if i < len(r) {
-				colData[i] = append(colData[i], r[i])
-			} else {
-				colData[i] = append(colData[i], "")
-			}
+			colData[i] = append(colData[i], rowCell(r, i))
 		}
 	}
 	types := make([]string, len(columns))
 	for i := range columns {
 		types[i] = inferColumnType(colData[i])
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	b.WriteString("CREATE TABLE ")
 	b.WriteString(quoteIdent(name))
 	b.WriteString(" (")
@@ -492,29 +538,41 @@ func (s *store) loadTable(ctx context.Context, name string, columns []string, ro
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "DROP TABLE IF EXISTS "+quoteIdent(name)); err != nil {
-		tx.Rollback()
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteIdent(name))); err != nil {
+		if err := tx.Rollback(); err != nil {
+			return fmt.Errorf("recriar tabela: %w", err)
+		}
 		return fmt.Errorf("recriar tabela: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, b.String()); err != nil {
-		tx.Rollback()
+		if err := tx.Rollback(); err != nil {
+			return fmt.Errorf("criar tabela: %w", err)
+		}
 		return fmt.Errorf("criar tabela: %w", err)
 	}
-	placeholder := "(" + strings.TrimRight(strings.Repeat("?,", len(columns)), ",") + ")"
-	insertSQL := "INSERT INTO " + quoteIdent(name) + " VALUES " + placeholder
+	placeholder := fmt.Sprintf("(%s)", strings.TrimRight(strings.Repeat("?,", len(columns)), ","))
+	insertSQL := fmt.Sprintf("INSERT INTO %s VALUES %s", quoteIdent(name), placeholder)
 	for _, r := range rows {
 		args := make([]any, len(columns))
 		for i := range columns {
-			if i < len(r) && r[i] != "" {
-				args[i] = r[i]
-			} else {
-				args[i] = nil
-			}
+			args[i] = cellArg(r, i)
 		}
 		if _, err := tx.ExecContext(ctx, insertSQL, args...); err != nil {
-			tx.Rollback()
+			if err := tx.Rollback(); err != nil {
+				return fmt.Errorf("inserir linha em %q: %w", name, err)
+			}
 			return fmt.Errorf("inserir linha em %q: %w", name, err)
 		}
 	}
 	return tx.Commit()
+}
+
+func cellArg(row []string, i int) any {
+	if i >= len(row) {
+		return nil
+	}
+	if row[i] == "" {
+		return nil
+	}
+	return row[i]
 }

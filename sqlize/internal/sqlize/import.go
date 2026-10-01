@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -78,16 +79,20 @@ func (s *store) importFile(ctx context.Context, path, table, sheet string) (stri
 			return "", err
 		}
 		tableName := strings.TrimSpace(table)
-		if tableName != "" && len(sheets) == 1 {
-			for name, d := range sheets {
-				if err := s.loadTable(ctx, tableName, d.cols, d.rows); err != nil {
-					return "", err
+		if len(sheets) == 1 {
+			if tableName != "" {
+				for name, d := range sheets {
+					if err := s.loadTable(ctx, tableName, d.cols, d.rows); err != nil {
+						return "", err
+					}
+					return fmt.Sprintf("Aba %q importada como tabela %q: %d colunas, %d linhas.", name, tableName, len(d.cols), len(d.rows)), nil
 				}
-				return fmt.Sprintf("Aba %q importada como tabela %q: %d colunas, %d linhas.", name, tableName, len(d.cols), len(d.rows)), nil
 			}
 		}
-		if tableName != "" && strings.TrimSpace(sheet) != "" {
-			return "", fmt.Errorf("sheet + table só valem para uma aba; aba(s) encontradas: %d", len(sheets))
+		if tableName != "" {
+			if strings.TrimSpace(sheet) != "" {
+				return "", fmt.Errorf("sheet + table só valem para uma aba; aba(s) encontradas: %d", len(sheets))
+			}
 		}
 		created := make([]string, 0, len(sheets))
 		for name, d := range sheets {
@@ -136,13 +141,14 @@ func resolveImportPath(path string) (string, error) {
 }
 
 func deriveTableName(given, path, fallback string) string {
-	if strings.TrimSpace(given) != "" {
-		return strings.TrimSpace(given)
+	given = strings.TrimSpace(given)
+	if given != "" {
+		return given
 	}
 	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	base = strings.Join(strings.Fields(base), "_")
 	if base == "" {
-		base = fallback
+		return fallback
 	}
 	return base
 }
@@ -184,7 +190,7 @@ func parseJSON(path string) ([]string, [][]string, error) {
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
-	var v any
+	v := any(nil)
 	if err := dec.Decode(&v); err != nil {
 		return nil, nil, fmt.Errorf("decodificar JSON: %w", err)
 	}
@@ -220,7 +226,7 @@ func parseJSONL(path string) ([]string, [][]string, error) {
 		}
 		dec := json.NewDecoder(strings.NewReader(line))
 		dec.UseNumber()
-		var v any
+		v := any(nil)
 		if err := dec.Decode(&v); err != nil {
 			return nil, nil, fmt.Errorf("JSONL: linha %d inválida: %w", i+1, err)
 		}
@@ -264,7 +270,11 @@ func rowsFromArray(t []any) ([]string, [][]string, error) {
 	case []any:
 		maxW := 0
 		for _, item := range t {
-			if arr, ok := item.([]any); ok && len(arr) > maxW {
+			arr, ok := item.([]any)
+			if !ok {
+				continue
+			}
+			if len(arr) > maxW {
 				maxW = len(arr)
 			}
 		}
@@ -308,7 +318,10 @@ func cellToString(v any) string {
 	case json.Number:
 		return t.String()
 	case float64:
-		if math.IsInf(t, 0) || math.IsNaN(t) {
+		if math.IsInf(t, 0) {
+			return ""
+		}
+		if math.IsNaN(t) {
 			return ""
 		}
 		if t == math.Trunc(t) {
@@ -354,7 +367,10 @@ func parseExcel(path, only string) (map[string]sheetData, error) {
 	}
 	for _, sheet := range names {
 		recs, err := f.GetRows(sheet)
-		if err != nil || len(recs) == 0 {
+		if err != nil {
+			continue
+		}
+		if len(recs) == 0 {
 			continue
 		}
 		name := sheetToTable(sheet, used)
@@ -378,7 +394,7 @@ func parseExcel(path, only string) (map[string]sheetData, error) {
 
 func parseWorkbook(path, only string) (map[string]sheetData, error) {
 	ext := strings.ToLower(filepath.Ext(path))
-	if ext == ".xlsx" || ext == ".xlsm" {
+	if isExcelExt(ext) {
 		return parseExcel(path, only)
 	}
 	head, err := readFileHead(path, 64*1024)
@@ -394,6 +410,13 @@ func parseWorkbook(path, only string) (map[string]sheetData, error) {
 	return nil, fmt.Errorf("formato não reconhecido (o binário legado BIFF do .xls não é suportado). Converta para .xlsx ou use um .html/.htm contendo <table>.")
 }
 
+func isExcelExt(ext string) bool {
+	if ext == ".xlsx" {
+		return true
+	}
+	return ext == ".xlsm"
+}
+
 func readFileHead(path string, n int) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -402,8 +425,10 @@ func readFileHead(path string, n int) ([]byte, error) {
 	defer f.Close()
 	buf := make([]byte, n)
 	read, err := f.Read(buf)
-	if err != nil && err != io.EOF {
-		return nil, err
+	if err != nil {
+		if !errors.Is(err, io.EOF) {
+			return nil, err
+		}
 	}
 	return buf[:read], nil
 }
@@ -427,17 +452,9 @@ func parseHTMLWorkbook(path string) (map[string]sheetData, error) {
 	if err != nil {
 		return nil, fmt.Errorf("analisar HTML: %w", err)
 	}
-	var tables []*html.Node
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "table" {
-			tables = append(tables, n)
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
-	}
-	walk(doc)
+	tables := []*html.Node{}
+	collectTables := &nodeCollector{tag: "table", out: &tables}
+	collectTables.walk(doc)
 	if len(tables) == 0 {
 		return nil, fmt.Errorf("arquivo sem tabela <table>: %s", filepath.Base(path))
 	}
@@ -465,42 +482,83 @@ func parseHTMLWorkbook(path string) (map[string]sheetData, error) {
 }
 
 func extractHTMLRows(table *html.Node) [][]string {
-	var rows [][]string
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "tr" {
-			var cells []string
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				if c.Type == html.ElementNode && (c.Data == "td" || c.Data == "th") {
-					cells = append(cells, strings.TrimSpace(htmlCellText(c)))
-				}
-			}
-			if len(cells) > 0 {
-				rows = append(rows, cells)
-			}
-			return
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
+	c := rowCollector{out: [][]string{}}
+	c.walk(table)
+	return c.out
+}
+
+type nodeCollector struct {
+	tag string
+	out *[]*html.Node
+}
+
+func (c *nodeCollector) walk(n *html.Node) {
+	if n.Type == html.ElementNode {
+		if n.Data == c.tag {
+			*c.out = append(*c.out, n)
 		}
 	}
-	walk(table)
-	return rows
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		c.walk(child)
+	}
+}
+
+type rowCollector struct {
+	out [][]string
+}
+
+func (c *rowCollector) walk(n *html.Node) {
+	if n.Type == html.ElementNode {
+		if n.Data == "tr" {
+			c.appendRow(n)
+			return
+		}
+	}
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		c.walk(child)
+	}
+}
+
+func (c *rowCollector) appendRow(n *html.Node) {
+	cells := []string{}
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type != html.ElementNode {
+			continue
+		}
+		if isTableCell(child.Data) {
+			cells = append(cells, strings.TrimSpace(htmlCellText(child)))
+		}
+	}
+	if len(cells) == 0 {
+		return
+	}
+	c.out = append(c.out, cells)
+}
+
+func isTableCell(tag string) bool {
+	if tag == "td" {
+		return true
+	}
+	return tag == "th"
 }
 
 func htmlCellText(n *html.Node) string {
-	var b strings.Builder
-	var collect func(*html.Node)
-	collect = func(x *html.Node) {
-		if x.Type == html.TextNode {
-			b.WriteString(x.Data)
-		}
-		for c := x.FirstChild; c != nil; c = c.NextSibling {
-			collect(c)
-		}
+	t := textCollector{b: strings.Builder{}}
+	t.walk(n)
+	return t.b.String()
+}
+
+type textCollector struct {
+	b strings.Builder
+}
+
+func (t *textCollector) walk(n *html.Node) {
+	if n.Type == html.TextNode {
+		t.b.WriteString(n.Data)
 	}
-	collect(n)
-	return b.String()
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		t.walk(child)
+	}
 }
 
 func sheetToTable(sheet string, used map[string]int) string {
@@ -538,22 +596,31 @@ func (s *store) runSQLScript(ctx context.Context, path string) (int, error) {
 }
 
 func splitSQL(s string) []string {
-	var out []string
-	var b strings.Builder
+	out := []string{}
+	b := strings.Builder{}
 	inSingle, inDouble := false, false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
-		case c == '\'' && !inDouble:
-			inSingle = !inSingle
+		case c == '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
 			b.WriteByte(c)
-		case c == '"' && !inSingle:
-			inDouble = !inDouble
+		case c == '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
 			b.WriteByte(c)
-		case inSingle || inDouble:
+		case inSingle:
 			b.WriteByte(c)
-		case c == '-' && i+1 < len(s) && s[i+1] == '-':
-			for i < len(s) && s[i] != '\n' {
+		case inDouble:
+			b.WriteByte(c)
+		case isLineComment(c, s, i):
+			for i < len(s) {
+				if s[i] == '\n' {
+					break
+				}
 				i++
 			}
 			if i < len(s) {
@@ -570,4 +637,14 @@ func splitSQL(s string) []string {
 		out = append(out, b.String())
 	}
 	return out
+}
+
+func isLineComment(c byte, s string, i int) bool {
+	if c != '-' {
+		return false
+	}
+	if i+1 >= len(s) {
+		return false
+	}
+	return s[i+1] == '-'
 }

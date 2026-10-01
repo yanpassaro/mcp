@@ -22,10 +22,11 @@ func buildSchema(L *lua.State) int {
 	setGoFunc(L, t, "validate", func(l *lua.State) int {
 		val := luaToAny(l, 1)
 		spec := luaArrayAny(l, 2)
-		var rows []any
+		rows := []any{}
 		if arr, ok := val.([]any); ok {
 			rows = arr
-		} else if m, ok := val.(map[string]any); ok {
+		}
+		if m, ok := val.(map[string]any); ok {
 			rows = []any{m}
 		}
 		pushAny(l, schemaValidateRows(rows, spec))
@@ -146,30 +147,44 @@ func checkRule(rule map[string]any, value any, fieldPath string) []string {
 	nullable := asBool(rule["nullable"], false)
 	required := asBool(rule["required"], false)
 	if value == nil {
-		if required && !nullable {
-			return []string{fmt.Sprintf("%s é obrigatório", fieldPath)}
+		if required {
+			if !nullable {
+				return []string{fmt.Sprintf("%s é obrigatório", fieldPath)}
+			}
 		}
 		return nil
 	}
 
-	var msgs []string
+	msgs := []string{}
 	typ := optString(rule, "type")
-	if typ != "" && !typeOK(value, typ) {
-		return []string{fmt.Sprintf("%s deve ser %s", fieldPath, typ)}
+	if typ != "" {
+		if !typeOK(value, typ) {
+			return []string{fmt.Sprintf("%s deve ser %s", fieldPath, typ)}
+		}
 	}
 
 	switch typ {
 	case "string":
 		s := fmt.Sprint(value)
-		if n, ok := numOpt(rule["min_len"]); ok && float64(len(s)) < n {
-			msgs = append(msgs, fmt.Sprintf("%s deve ter tamanho >= %d", fieldPath, int(n)))
+		n, ok := numOpt(rule["min_len"])
+		if ok {
+			if float64(len(s)) < n {
+				msgs = append(msgs, fmt.Sprintf("%s deve ter tamanho >= %d", fieldPath, int(n)))
+			}
 		}
-		if n, ok := numOpt(rule["max_len"]); ok && float64(len(s)) > n {
-			msgs = append(msgs, fmt.Sprintf("%s deve ter tamanho <= %d", fieldPath, int(n)))
+		n, ok = numOpt(rule["max_len"])
+		if ok {
+			if float64(len(s)) > n {
+				msgs = append(msgs, fmt.Sprintf("%s deve ter tamanho <= %d", fieldPath, int(n)))
+			}
 		}
-		if pat := optString(rule, "pattern"); pat != "" {
-			if re, err := regexp.Compile(pat); err == nil && !re.MatchString(s) {
-				msgs = append(msgs, fmt.Sprintf("%s não corresponde ao padrão", fieldPath))
+		pat := optString(rule, "pattern")
+		if pat != "" {
+			re, err := regexp.Compile(pat)
+			if err == nil {
+				if !re.MatchString(s) {
+					msgs = append(msgs, fmt.Sprintf("%s não corresponde ao padrão", fieldPath))
+				}
 			}
 		}
 	case "email":
@@ -187,11 +202,17 @@ func checkRule(rule map[string]any, value any, fieldPath string) []string {
 		}
 	case "number", "integer":
 		n, _ := numOpt(value)
-		if min, ok := numOpt(rule["min"]); ok && n < min {
-			msgs = append(msgs, fmt.Sprintf("%s deve ser >= %g", fieldPath, min))
+		min, ok := numOpt(rule["min"])
+		if ok {
+			if n < min {
+				msgs = append(msgs, fmt.Sprintf("%s deve ser >= %g", fieldPath, min))
+			}
 		}
-		if max, ok := numOpt(rule["max"]); ok && n > max {
-			msgs = append(msgs, fmt.Sprintf("%s deve ser <= %g", fieldPath, max))
+		max, ok := numOpt(rule["max"])
+		if ok {
+			if n > max {
+				msgs = append(msgs, fmt.Sprintf("%s deve ser <= %g", fieldPath, max))
+			}
 		}
 	case "array":
 		if items, ok := rule["items"].(map[string]any); ok {
@@ -245,7 +266,10 @@ func typeOK(value any, typ string) bool {
 		return ok
 	case "integer":
 		n, ok := numOpt(value)
-		return ok && n == math.Trunc(n)
+		if !ok {
+			return false
+		}
+		return n == math.Trunc(n)
 	case "boolean":
 		_, ok := value.(bool)
 		return ok

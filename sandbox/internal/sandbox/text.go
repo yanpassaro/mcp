@@ -28,7 +28,9 @@ func buildText(L *lua.State) int {
 		for _, m := range re.FindAllStringSubmatch(s, -1) {
 			if group == 0 {
 				out = append(out, m[0])
-			} else if group < len(m) {
+				continue
+			}
+			if group < len(m) {
 				out = append(out, m[group])
 			}
 		}
@@ -52,7 +54,8 @@ func buildText(L *lua.State) int {
 			for _, tk := range toks {
 				out = append(out, tk)
 			}
-		} else {
+		}
+		if n > 1 {
 			for i := 0; i+n <= len(toks); i++ {
 				out = append(out, strings.Join(toks[i:i+n], " "))
 			}

@@ -1,12 +1,13 @@
 package sqlize
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
 	"os"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -14,10 +15,11 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-const liveHardLimit = 500
+const LIVE_HARD_LIMIT = 500
 
 func enforceLimit(q string, hard int) string {
-	if m := reLimit.FindStringSubmatch(q); m != nil {
+	m := reLimit.FindStringSubmatch(q)
+	if m != nil {
 		n, _ := strconv.Atoi(m[1])
 		if n > hard {
 			return reLimit.ReplaceAllString(q, fmt.Sprintf("LIMIT %d", hard))
@@ -27,7 +29,7 @@ func enforceLimit(q string, hard int) string {
 	if reLimitPH.MatchString(q) {
 		return reLimitPH.ReplaceAllString(q, fmt.Sprintf("LIMIT LEAST($1, %d)", hard))
 	}
-	return strings.TrimRight(q, " \n\t;") + " LIMIT " + strconv.Itoa(hard)
+	return fmt.Sprintf("%s LIMIT %d", strings.TrimRight(q, " \n\t;"), hard)
 }
 
 var reLimit = regexp.MustCompile(`(?i)\blimit\s+(\d+)`)
@@ -117,18 +119,50 @@ var sqlFuncAllowlist = map[string]bool{
 
 func prevWord(q string, start int) string {
 	i := start - 1
-	for i >= 0 && (q[i] == ' ' || q[i] == '\t' || q[i] == '\n' || q[i] == '\r') {
+	for i >= 0 {
+		if !isSpace(q[i]) {
+			break
+		}
 		i--
 	}
 	j := i + 1
-	for i >= 0 && (isWordChar(rune(q[i]))) {
+	for i >= 0 {
+		if !isWordChar(rune(q[i])) {
+			break
+		}
 		i--
 	}
 	return strings.ToLower(q[i+1 : j])
 }
 
+func isSpace(c byte) bool {
+	if c == ' ' {
+		return true
+	}
+	if c == '\t' {
+		return true
+	}
+	if c == '\n' {
+		return true
+	}
+	return c == '\r'
+}
+
 func isWordChar(r rune) bool {
-	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_'
+	if r == '_' {
+		return true
+	}
+	if r >= 'a' {
+		if r <= 'z' {
+			return true
+		}
+	}
+	if r >= 'A' {
+		if r <= 'Z' {
+			return true
+		}
+	}
+	return isDigit(r)
 }
 
 func checkFuncAllowlist(q string) error {
@@ -138,7 +172,10 @@ func checkFuncAllowlist(q string) error {
 		if i := strings.LastIndexByte(name, '.'); i >= 0 {
 			name = name[i+1:]
 		}
-		if sqlFuncToken[name] || sqlFuncAllowlist[name] {
+		if sqlFuncToken[name] {
+			continue
+		}
+		if sqlFuncAllowlist[name] {
 			continue
 		}
 		if tableKeywords[prevWord(q, start)] {
@@ -156,19 +193,19 @@ func hasPlaceholderToken(clean, placeholder string) bool {
 	return rePgPlaceholder.MatchString(clean)
 }
 
-// enforceQueryRules aplica as regras anti-injeção compartilhadas pelas consultas
-// parametrizadas (SQLite local e bancos ao vivo): nada de literais de string ou
-// valores brutos no WHERE, placeholders obrigatórios quando há 'args', e rejeição
-// de padrões suspeitos de injeção.
 func enforceQueryRules(clean string, args []string, placeholder string) error {
 	if reStringInWhere.MatchString(clean) {
 		return fmt.Errorf("consulta rejeitada: não inclua literais de string na cláusula WHERE; passe valores dinâmicos via 'args' (use %s)", placeholder)
 	}
-	if reWhereLiteral.MatchString(clean) && !hasPlaceholderToken(clean, placeholder) {
-		return fmt.Errorf("consulta rejeitada: cláusula WHERE compara valores; parametrize com %s e passe os valores em 'args'", placeholder)
+	if reWhereLiteral.MatchString(clean) {
+		if !hasPlaceholderToken(clean, placeholder) {
+			return fmt.Errorf("consulta rejeitada: cláusula WHERE compara valores; parametrize com %s e passe os valores em 'args'", placeholder)
+		}
 	}
-	if len(args) > 0 && !hasPlaceholderToken(clean, placeholder) {
-		return fmt.Errorf("'args' informado mas o SQL não contém placeholders; use %s e passe os valores em 'args'", placeholder)
+	if len(args) > 0 {
+		if !hasPlaceholderToken(clean, placeholder) {
+			return fmt.Errorf("'args' informado mas o SQL não contém placeholders; use %s e passe os valores em 'args'", placeholder)
+		}
 	}
 	if reInjection.MatchString(clean) {
 		return fmt.Errorf("consulta rejeitada: padrão suspeito de injeção de SQL (aspas seguidas de comentário ou de UNION/INTO); passe valores dinâmicos via 'args'")
@@ -221,11 +258,10 @@ type liveDBConfig struct {
 }
 
 func (c liveDBConfig) ToolPrefix() string {
-	name := c.Engine
-	if c.Alias != "" {
-		name += "_" + c.Alias
+	if c.Alias == "" {
+		return c.Engine
 	}
-	return name
+	return fmt.Sprintf("%s_%s", c.Engine, c.Alias)
 }
 
 func discoverLiveDBs() []liveDBConfig {
@@ -240,9 +276,12 @@ func discoverLiveDBs() []liveDBConfig {
 			continue
 		}
 		alias := normalizeAlias(prefix)
-		k := engine + "|" + alias
-		if prev, exists := byKey[k]; exists && prev.Kind == "url" {
-			continue
+		k := fmt.Sprintf("%s|%s", engine, alias)
+		prev, exists := byKey[k]
+		if exists {
+			if prev.Kind == "url" {
+				continue
+			}
 		}
 		byKey[k] = liveDBConfig{Engine: engine, Alias: alias, EnvVar: key, Kind: kind, DSN: strings.TrimSpace(val)}
 	}
@@ -250,13 +289,15 @@ func discoverLiveDBs() []liveDBConfig {
 	for _, cfg := range byKey {
 		out = append(out, cfg)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Engine != out[j].Engine {
-			return out[i].Engine < out[j].Engine
-		}
-		return out[i].Alias < out[j].Alias
-	})
+	slices.SortFunc(out, func(a, b liveDBConfig) int { return liveConfigLess(a, b) })
 	return out
+}
+
+func liveConfigLess(a, b liveDBConfig) int {
+	if a.Engine != b.Engine {
+		return cmp.Compare(a.Engine, b.Engine)
+	}
+	return cmp.Compare(a.Alias, b.Alias)
 }
 
 func parseLiveEnv(key string) (engine, prefix, kind string, ok bool) {
@@ -274,7 +315,7 @@ func parseLiveEnv(key string) (engine, prefix, kind string, ok bool) {
 	for _, engine := range []string{"postgres", "mysql"} {
 		upper := strings.ToUpper(engine)
 		for _, k := range []string{"URL", "DSN"} {
-			suffix := "_" + upper + "_" + k
+			suffix := fmt.Sprintf("_%s_%s", upper, k)
 			if strings.HasSuffix(up, suffix) {
 				return engine, strings.TrimSuffix(up, suffix), strings.ToLower(k), true
 			}
@@ -285,19 +326,30 @@ func parseLiveEnv(key string) (engine, prefix, kind string, ok bool) {
 
 func normalizeAlias(prefix string) string {
 	a := strings.ToLower(strings.TrimSpace(prefix))
-	if a == "" || a == "db" {
+	if a == "" {
 		return ""
 	}
-	var b strings.Builder
+	if a == "db" {
+		return ""
+	}
+	b := strings.Builder{}
 	for _, r := range a {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+		if isLowerAlphaNum(r) {
 			b.WriteRune(r)
-		default:
-			b.WriteRune('_')
+			continue
 		}
+		b.WriteRune('_')
 	}
 	return strings.Trim(b.String(), "_")
+}
+
+func isLowerAlphaNum(r rune) bool {
+	if r >= 'a' {
+		if r <= 'z' {
+			return true
+		}
+	}
+	return isDigit(r)
 }
 
 func driverFor(engine string) string {
@@ -320,7 +372,7 @@ func (c *liveDB) query(ctx context.Context, q string, args []string, strict, noL
 		return nil, nil, err
 	}
 	if !noLimit {
-		clean = enforceLimit(clean, liveHardLimit)
+		clean = enforceLimit(clean, LIVE_HARD_LIMIT)
 	}
 	db, err := sql.Open(c.driver, c.dsn)
 	if err != nil {
@@ -375,39 +427,59 @@ func (c *liveDB) query(ctx context.Context, q string, args []string, strict, noL
 
 
 func (c *liveDB) tables(ctx context.Context) (string, error) {
-	var q string
-	switch c.driver {
-	case "pgx":
-		q = "SELECT table_schema, table_name FROM information_schema.tables " +
-			"WHERE table_schema NOT IN ('pg_catalog','information_schema') AND table_type='BASE TABLE' ORDER BY table_schema, table_name"
-	case "mysql":
-		q = "SELECT table_schema, table_name FROM information_schema.tables " +
-			"WHERE table_schema = DATABASE() AND table_type='BASE TABLE' ORDER BY table_name"
+	q := qTables
+	if c.driver == "mysql" {
+		q = qTablesMySQL
 	}
 	_, rows, err := c.query(ctx, q, nil, false, false)
 	if err != nil {
 		return "", err
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	for _, r := range rows {
-		schema, name := "", ""
+		schema := ""
 		if len(r) > 0 {
 			schema = r[0]
 		}
+		name := ""
 		if len(r) > 1 {
 			name = r[1]
 		}
-		if schema != "" && schema != name {
-			fmt.Fprintf(&b, "- %s.%s\n", schema, name)
-		} else {
+		if schema == name {
 			fmt.Fprintf(&b, "- %s\n", name)
+			continue
 		}
+		if schema != "" {
+			fmt.Fprintf(&b, "- %s.%s\n", schema, name)
+			continue
+		}
+		fmt.Fprintf(&b, "- %s\n", name)
 	}
 	if b.Len() == 0 {
 		return "Nenhuma tabela encontrada (verifique o usuário/conexão).", nil
 	}
 	return b.String(), nil
 }
+
+const qTables = `
+	SELECT
+		table_schema,
+		table_name
+	FROM information_schema.tables
+	WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+		AND table_type = 'BASE TABLE'
+	ORDER BY table_schema, table_name
+`
+
+const qTablesMySQL = `
+	SELECT
+		table_schema,
+		table_name
+	FROM information_schema.tables
+	WHERE table_schema = DATABASE()
+		AND table_type = 'BASE TABLE'
+	ORDER BY table_name
+`
 
 func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 	if strings.TrimSpace(table) == "" {
@@ -418,62 +490,32 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 		schema = table[:i]
 		table = table[i+1:]
 	}
-	var colsQ, fkQ, idxQ string
-	var args []string
+	colsQ, fkQ, idxQ := qColsMySQL, qFKMySQL, qIdxMySQL
 	if c.driver == "pgx" {
-		schemaExpr := "COALESCE(NULLIF($2,''), 'public')"
-		colsQ = "SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, " +
-			"EXISTS (SELECT 1 FROM information_schema.table_constraints tc " +
-			"JOIN information_schema.key_column_usage kcu " +
-			"ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name " +
-			"WHERE tc.table_name = c.table_name AND tc.table_schema = c.table_schema " +
-			"AND tc.constraint_type = 'PRIMARY KEY' AND kcu.column_name = c.column_name) AS is_pk, " +
-			"(c.is_identity = 'YES' OR c.column_default LIKE 'nextval(%') AS is_auto " +
-			"FROM information_schema.columns c WHERE c.table_name = $1 AND c.table_schema = " + schemaExpr + " ORDER BY c.ordinal_position"
-		fkQ = "SELECT att.attname AS col, fns.nspname AS ref_schema, ft.relname AS ref_table, fatt.attname AS ref_col " +
-			"FROM pg_constraint con " +
-			"JOIN pg_class rel ON rel.oid = con.conrelid " +
-			"JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace " +
-			"JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey) " +
-			"JOIN pg_class ft ON ft.oid = con.confrelid " +
-			"JOIN pg_namespace fns ON fns.oid = ft.relnamespace " +
-			"JOIN pg_attribute fatt ON fatt.attrelid = con.confrelid AND fatt.attnum = ANY(con.confkey) " +
-			"WHERE con.contype = 'f' AND rel.relname = $1 AND nsp.nspname = " + schemaExpr + " ORDER BY con.conname, att.attnum"
-		idxQ = "SELECT i.relname, ix.indisunique, ix.indisprimary, " +
-			"string_agg(a.attname, ',' ORDER BY k.ord) " +
-			"FROM pg_index ix " +
-			"JOIN pg_class i ON i.oid = ix.indexrelid " +
-			"JOIN pg_class t ON t.oid = ix.indrelid " +
-			"JOIN pg_namespace n ON n.oid = t.relnamespace " +
-			"JOIN LATERAL unnest(ix.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) ON true " +
-			"JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum AND k.attnum <> 0 " +
-			"WHERE t.relname = $1 AND n.nspname = " + schemaExpr + " " +
-			"GROUP BY i.relname, ix.indisunique, ix.indisprimary ORDER BY i.relname"
-		args = []string{table, schema}
-	} else {
-		schemaExpr := "COALESCE(NULLIF(?,''), DATABASE())"
-		colsQ = "SELECT column_name, data_type, is_nullable, column_default, (column_key = 'PRI') AS is_pk, " +
-			"(LOWER(extra) LIKE '%auto_increment%') AS is_auto " +
-			"FROM information_schema.columns WHERE table_name = ? AND table_schema = " + schemaExpr + " ORDER BY ordinal_position"
-		fkQ = "SELECT column_name AS col, referenced_table_schema AS ref_schema, referenced_table_name AS ref_table, referenced_column_name AS ref_col " +
-			"FROM information_schema.key_column_usage WHERE table_name = ? AND table_schema = " + schemaExpr + " AND referenced_table_name IS NOT NULL " +
-			"ORDER BY constraint_name, ordinal_position"
-		idxQ = "SELECT index_name, GROUP_CONCAT(column_name ORDER BY seq_in_index), MIN(non_unique), (index_name = 'PRIMARY') " +
-			"FROM information_schema.statistics WHERE table_name = ? AND table_schema = " + schemaExpr + " GROUP BY index_name ORDER BY index_name"
-		args = []string{table, schema}
+		colsQ, fkQ, idxQ = qColsPg, qFKPg, qIdxPg
 	}
+	args := []string{table, schema}
 
 	engine := "postgres"
 	if c.driver == "mysql" {
 		engine = "mysql"
 	}
 	display := schema
-	if display == "" && engine == "postgres" {
-		display = "public"
+	if display == "" {
+		if engine == "postgres" {
+			display = "public"
+		}
 	}
-	if display == "" && engine == "mysql" {
-		if _, r, e := c.query(ctx, "SELECT DATABASE()", nil, false, true); e == nil && len(r) > 0 && len(r[0]) > 0 {
-			display = r[0][0]
+	if display == "" {
+		if engine == "mysql" {
+			_, r, e := c.query(ctx, "SELECT DATABASE()", nil, false, true)
+			if e == nil {
+				if len(r) > 0 {
+					if len(r[0]) > 0 {
+						display = r[0][0]
+					}
+				}
+			}
 		}
 	}
 
@@ -487,22 +529,27 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 		return fmt.Sprintf("Tabela %q não encontrada.", table), nil
 	}
 	for _, r := range rows {
-		name, typ, nullable, def, pk, auto := "", "", "", "", "", ""
+		name := ""
 		if len(r) > 0 {
 			name = r[0]
 		}
+		typ := ""
 		if len(r) > 1 {
 			typ = r[1]
 		}
+		nullable := ""
 		if len(r) > 2 {
 			nullable = r[2]
 		}
+		def := ""
 		if len(r) > 3 {
 			def = r[3]
 		}
+		pk := ""
 		if len(r) > 4 {
 			pk = r[4]
 		}
+		auto := ""
 		if len(r) > 5 {
 			auto = r[5]
 		}
@@ -522,7 +569,7 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 			if len(r) == 0 {
 				continue
 			}
-			var fk structColumn
+			fk := structColumn{}
 			col := r[0]
 			if len(r) > 1 {
 				fk.RefSchema = r[1]
@@ -563,7 +610,8 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 				if len(r) > 3 {
 					colsStr = r[3]
 				}
-			} else {
+			}
+			if c.driver != "pgx" {
 				if len(r) > 1 {
 					colsStr = r[1]
 				}
@@ -575,10 +623,12 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 				}
 			}
 			if colsStr != "" {
-				for _, c := range strings.Split(colsStr, ",") {
-					if c = strings.TrimSpace(c); c != "" {
-						ix.Columns = append(ix.Columns, c)
+				for _, col := range strings.Split(colsStr, ",") {
+					col = strings.TrimSpace(col)
+					if col == "" {
+						continue
 					}
+					ix.Columns = append(ix.Columns, col)
 				}
 			}
 			st.Idx = append(st.Idx, ix)
@@ -587,3 +637,105 @@ func (c *liveDB) structure(ctx context.Context, table string) (string, error) {
 
 	return renderStructureTable(st), nil
 }
+
+const qColsPg = `
+	SELECT
+		c.column_name,
+		c.data_type,
+		c.is_nullable,
+		c.column_default,
+		EXISTS (
+			SELECT 1
+			FROM information_schema.table_constraints tc
+			JOIN information_schema.key_column_usage kcu
+				ON tc.constraint_name = kcu.constraint_name
+				AND tc.table_schema = kcu.table_schema
+				AND tc.table_name = kcu.table_name
+			WHERE tc.table_name = c.table_name
+				AND tc.table_schema = c.table_schema
+				AND tc.constraint_type = 'PRIMARY KEY'
+				AND kcu.column_name = c.column_name
+		) AS is_pk,
+		(c.is_identity = 'YES' OR c.column_default LIKE 'nextval(%') AS is_auto
+	FROM information_schema.columns c
+	WHERE c.table_name = $1
+		AND c.table_schema = COALESCE(NULLIF($2, ''), 'public')
+	ORDER BY c.ordinal_position
+`
+
+const qFKPg = `
+	SELECT
+		att.attname AS col,
+		fns.nspname AS ref_schema,
+		ft.relname AS ref_table,
+		fatt.attname AS ref_col
+	FROM pg_constraint con
+	JOIN pg_class rel ON rel.oid = con.conrelid
+	JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+	JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey)
+	JOIN pg_class ft ON ft.oid = con.confrelid
+	JOIN pg_namespace fns ON fns.oid = ft.relnamespace
+	JOIN pg_attribute fatt ON fatt.attrelid = con.confrelid AND fatt.attnum = ANY(con.confkey)
+	WHERE con.contype = 'f'
+		AND rel.relname = $1
+		AND nsp.nspname = COALESCE(NULLIF($2, ''), 'public')
+	ORDER BY con.conname, att.attnum
+`
+
+const qIdxPg = `
+	SELECT
+		i.relname,
+		ix.indisunique,
+		ix.indisprimary,
+		string_agg(a.attname, ',' ORDER BY k.ord)
+	FROM pg_index ix
+	JOIN pg_class i ON i.oid = ix.indexrelid
+	JOIN pg_class t ON t.oid = ix.indrelid
+	JOIN pg_namespace n ON n.oid = t.relnamespace
+	JOIN LATERAL unnest(ix.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) ON true
+	JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum AND k.attnum <> 0
+	WHERE t.relname = $1
+		AND n.nspname = COALESCE(NULLIF($2, ''), 'public')
+	GROUP BY i.relname, ix.indisunique, ix.indisprimary
+	ORDER BY i.relname
+`
+
+const qColsMySQL = `
+	SELECT
+		column_name,
+		data_type,
+		is_nullable,
+		column_default,
+		(column_key = 'PRI') AS is_pk,
+		(LOWER(extra) LIKE '%auto_increment%') AS is_auto
+	FROM information_schema.columns
+	WHERE table_name = ?
+		AND table_schema = COALESCE(NULLIF(?, ''), DATABASE())
+	ORDER BY ordinal_position
+`
+
+const qFKMySQL = `
+	SELECT
+		column_name AS col,
+		referenced_table_schema AS ref_schema,
+		referenced_table_name AS ref_table,
+		referenced_column_name AS ref_col
+	FROM information_schema.key_column_usage
+	WHERE table_name = ?
+		AND table_schema = COALESCE(NULLIF(?, ''), DATABASE())
+		AND referenced_table_name IS NOT NULL
+	ORDER BY constraint_name, ordinal_position
+`
+
+const qIdxMySQL = `
+	SELECT
+		index_name,
+		GROUP_CONCAT(column_name ORDER BY seq_in_index),
+		MIN(non_unique),
+		(index_name = 'PRIMARY')
+	FROM information_schema.statistics
+	WHERE table_name = ?
+		AND table_schema = COALESCE(NULLIF(?, ''), DATABASE())
+	GROUP BY index_name
+	ORDER BY index_name
+`

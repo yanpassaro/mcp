@@ -17,9 +17,15 @@ import (
 
 const (
 	defaultBaseURL        = "https://api.github.com"
+	defaultAccept         = "application/vnd.github+json"
 	maxJSONResponseBytes  = 32 * 1024 * 1024
 	maxErrorResponseBytes = 8 * 1024
 	maxFileBytes          = 200 * 1024
+)
+
+const (
+	DEFAULT_PER_PAGE = 30
+	MAX_PER_PAGE     = 100
 )
 
 type httpStatusError struct {
@@ -32,7 +38,7 @@ func (e *httpStatusError) Error() string {
 }
 
 func isNotFound(err error) bool {
-	var e *httpStatusError
+	e := &httpStatusError{}
 	if errors.As(err, &e) {
 		return e.Status == 404
 	}
@@ -87,8 +93,10 @@ func NewClient(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid GITHUB_BASE_URL: %w", err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, errors.New("GITHUB_BASE_URL must use http or https")
+	if u.Scheme != "http" {
+		if u.Scheme != "https" {
+			return nil, errors.New("GITHUB_BASE_URL must use http or https")
+		}
 	}
 	if u.Host == "" {
 		return nil, errors.New("GITHUB_BASE_URL must include a host")
@@ -115,7 +123,7 @@ func (c *Client) getWithAccept(ctx context.Context, endpoint string, query url.V
 	if err != nil {
 		return nil, err
 	}
-	var result any
+	result := any(nil)
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("decode GitHub response: %w", err)
 	}
@@ -128,10 +136,10 @@ func (c *Client) getBytesWithAccept(ctx context.Context, endpoint string, query 
 		return nil, fmt.Errorf("create GitHub request: %w", err)
 	}
 	if strings.TrimSpace(accept) == "" {
-		accept = "application/vnd.github+json"
+		accept = defaultAccept
 	}
 	req.Header.Set("Accept", accept)
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.token))
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 	resp, err := c.httpClient.Do(req)
@@ -141,20 +149,37 @@ func (c *Client) getBytesWithAccept(ctx context.Context, endpoint string, query 
 	defer resp.Body.Close()
 	c.noteRateLimit(resp)
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		detail, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorResponseBytes))
-		message := strings.TrimSpace(string(detail))
-		if message == "" {
-			message = http.StatusText(resp.StatusCode)
-		}
-		return nil, &httpStatusError{Status: resp.StatusCode, Message: message}
+	if resp.StatusCode < 200 {
+		return nil, c.statusError(resp)
+	}
+	if resp.StatusCode >= 300 {
+		return nil, c.statusError(resp)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, maxJSONResponseBytes))
 }
 
+func (c *Client) statusError(resp *http.Response) error {
+	detail, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorResponseBytes))
+	if err != nil {
+		return fmt.Errorf("read GitHub error response: %w", err)
+	}
+	return &httpStatusError{Status: resp.StatusCode, Message: statusMessage(resp.StatusCode, detail)}
+}
+
+func statusMessage(code int, detail []byte) string {
+	message := strings.TrimSpace(string(detail))
+	if message != "" {
+		return message
+	}
+	return http.StatusText(code)
+}
+
 func (c *Client) endpointURL(endpoint string, query url.Values) string {
-	u, _ := url.Parse(c.baseURL)
-	u.Path = strings.TrimRight(u.Path, "/") + "/" + strings.TrimLeft(endpoint, "/")
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return ""
+	}
+	u.Path = fmt.Sprintf("%s/%s", strings.TrimRight(u.Path, "/"), strings.TrimLeft(endpoint, "/"))
 	u.RawQuery = query.Encode()
 	return u.String()
 }
@@ -167,7 +192,7 @@ func (c *Client) get(ctx context.Context, endpoint string, query url.Values) (an
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	var result any
+	result := any(nil)
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("decode GitHub response: %w", err)
 	}
@@ -179,8 +204,8 @@ func (c *Client) getBytes(ctx context.Context, endpoint string, query url.Values
 	if err != nil {
 		return nil, fmt.Errorf("create GitHub request: %w", err)
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", defaultAccept)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.token))
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 	resp, err := c.httpClient.Do(req)
@@ -190,13 +215,11 @@ func (c *Client) getBytes(ctx context.Context, endpoint string, query url.Values
 	defer resp.Body.Close()
 	c.noteRateLimit(resp)
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		detail, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorResponseBytes))
-		message := strings.TrimSpace(string(detail))
-		if message == "" {
-			message = http.StatusText(resp.StatusCode)
-		}
-		return nil, &httpStatusError{Status: resp.StatusCode, Message: message}
+	if resp.StatusCode < 200 {
+		return nil, c.statusError(resp)
+	}
+	if resp.StatusCode >= 300 {
+		return nil, c.statusError(resp)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, maxJSONResponseBytes))
 }
@@ -204,7 +227,7 @@ func (c *Client) getBytes(ctx context.Context, endpoint string, query url.Values
 const searchAccept = "application/vnd.github+json, application/vnd.github.text-match+json"
 
 func (c *Client) Search(ctx context.Context, kind string, params url.Values) ([]any, int, error) {
-	raw, err := c.getWithAccept(ctx, "/search/"+strings.TrimLeft(kind, "/"), params, searchAccept)
+	raw, err := c.getWithAccept(ctx, fmt.Sprintf("/search/%s", strings.TrimLeft(kind, "/")), params, searchAccept)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -218,7 +241,7 @@ func (c *Client) Search(ctx context.Context, kind string, params url.Values) ([]
 }
 
 func (c *Client) GetDefaultBranch(ctx context.Context, owner, repo string) (string, error) {
-	raw, err := c.get(ctx, "/repos/"+owner+"/"+repo, nil)
+	raw, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s", owner, repo), nil)
 	if err != nil {
 		return "", err
 	}
@@ -235,12 +258,14 @@ func (c *Client) GetTree(ctx context.Context, owner, repo, ref string, recursive
 	if ref != "" {
 		candidates = append(candidates, ref)
 	}
-	if def, err := c.GetDefaultBranch(ctx, owner, repo); err == nil && def != "" {
-		if ref == "" || def != ref {
-			candidates = append(candidates, def)
+	if def, err := c.GetDefaultBranch(ctx, owner, repo); err == nil {
+		if def != "" {
+			if ref != def {
+				candidates = append(candidates, def)
+			}
 		}
 	}
-	var lastErr error
+	lastErr := error(nil)
 	for _, r := range candidates {
 		treeSHA, err := c.resolveTreeSHA(ctx, owner, repo, r)
 		if err != nil {
@@ -271,7 +296,7 @@ func (c *Client) fetchTreeItems(ctx context.Context, owner, repo, treeSHA string
 	if recursive {
 		params.Set("recursive", "1")
 	}
-	raw, err := c.get(ctx, "/repos/"+owner+"/"+repo+"/git/trees/"+treeSHA, params)
+	raw, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/git/trees/%s", owner, repo, treeSHA), params)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +309,7 @@ func (c *Client) fetchTreeItems(ctx context.Context, owner, repo, treeSHA string
 }
 
 func (c *Client) resolveTreeSHA(ctx context.Context, owner, repo, ref string) (string, error) {
-	raw, err := c.get(ctx, "/repos/"+owner+"/"+repo+"/commits/"+ref, nil)
+	raw, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/commits/%s", owner, repo, ref), nil)
 	if err != nil {
 		return "", err
 	}
@@ -305,13 +330,26 @@ func (c *Client) resolveTreeSHA(ctx context.Context, owner, repo, ref string) (s
 func (c *Client) GetFile(ctx context.Context, owner, repo, path, ref string) (content string, truncated bool, err error) {
 	ref = strings.TrimSpace(ref)
 	content, truncated, err = c.getFileAtRef(ctx, owner, repo, path, ref)
-	if err != nil && ref != "" && isNotFound(err) {
-		def, derr := c.GetDefaultBranch(ctx, owner, repo)
-		if derr == nil && def != "" && def != ref {
-			return c.getFileAtRef(ctx, owner, repo, path, def)
-		}
+	if err == nil {
+		return content, truncated, err
 	}
-	return content, truncated, err
+	if ref == "" {
+		return content, truncated, err
+	}
+	if !isNotFound(err) {
+		return content, truncated, err
+	}
+	def, derr := c.GetDefaultBranch(ctx, owner, repo)
+	if derr != nil {
+		return content, truncated, err
+	}
+	if def == "" {
+		return content, truncated, err
+	}
+	if def == ref {
+		return content, truncated, err
+	}
+	return c.getFileAtRef(ctx, owner, repo, path, def)
 }
 
 func (c *Client) getFileAtRef(ctx context.Context, owner, repo, path, ref string) (content string, truncated bool, err error) {
@@ -319,13 +357,14 @@ func (c *Client) getFileAtRef(ctx context.Context, owner, repo, path, ref string
 	if strings.TrimSpace(ref) != "" {
 		params.Set("ref", ref)
 	}
-	raw, err := c.getBytes(ctx, "/repos/"+owner+"/"+repo+"/contents/"+strings.TrimLeft(path, "/"), params)
+	raw, err := c.getBytes(ctx, fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, strings.TrimLeft(path, "/")), params)
 	if err != nil {
 		return "", false, err
 	}
 
-	var m map[string]any
-	if json.Unmarshal(raw, &m) == nil {
+	m := map[string]any{}
+	uerr := json.Unmarshal(raw, &m)
+	if uerr == nil {
 		if enc, _ := m["encoding"].(string); enc == "base64" {
 			if b64, _ := m["content"].(string); b64 != "" {
 				b64 = strings.ReplaceAll(b64, "\n", "")
@@ -350,7 +389,7 @@ func (c *Client) ListReleases(ctx context.Context, owner, repo string, perPage, 
 	if page > 0 {
 		params.Set("page", strconv.Itoa(page))
 	}
-	raw, err := c.get(ctx, "/repos/"+owner+"/"+repo+"/releases", params)
+	raw, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/releases", owner, repo), params)
 	if err != nil {
 		return nil, err
 	}
@@ -362,7 +401,7 @@ func (c *Client) ListReleases(ctx context.Context, owner, repo string, perPage, 
 }
 
 func (c *Client) GetLatestRelease(ctx context.Context, owner, repo string) (map[string]any, error) {
-	raw, err := c.get(ctx, "/repos/"+owner+"/"+repo+"/releases/latest", nil)
+	raw, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/releases/latest", owner, repo), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +413,7 @@ func (c *Client) GetLatestRelease(ctx context.Context, owner, repo string) (map[
 }
 
 func (c *Client) ListCommits(ctx context.Context, owner, repo string, params url.Values) ([]any, error) {
-	raw, err := c.get(ctx, "/repos/"+owner+"/"+repo+"/commits", params)
+	raw, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/commits", owner, repo), params)
 	if err != nil {
 		return nil, err
 	}
@@ -388,15 +427,15 @@ func (c *Client) ListCommits(ctx context.Context, owner, repo string, params url
 func (c *Client) GetInsight(ctx context.Context, owner, repo, metric string) (any, error) {
 	switch strings.ToLower(strings.TrimSpace(metric)) {
 	case "contributors":
-		return c.get(ctx, "/repos/"+owner+"/"+repo+"/contributors", url.Values{"per_page": []string{"100"}})
+		return c.get(ctx, fmt.Sprintf("/repos/%s/%s/contributors", owner, repo), url.Values{"per_page": []string{"100"}})
 	case "commit_activity":
-		return c.get(ctx, "/repos/"+owner+"/"+repo+"/stats/commit_activity", nil)
+		return c.get(ctx, fmt.Sprintf("/repos/%s/%s/stats/commit_activity", owner, repo), nil)
 	case "code_frequency":
-		return c.get(ctx, "/repos/"+owner+"/"+repo+"/stats/code_frequency", nil)
+		return c.get(ctx, fmt.Sprintf("/repos/%s/%s/stats/code_frequency", owner, repo), nil)
 	case "participation":
-		return c.get(ctx, "/repos/"+owner+"/"+repo+"/stats/participation", nil)
+		return c.get(ctx, fmt.Sprintf("/repos/%s/%s/stats/participation", owner, repo), nil)
 	case "punch_card":
-		return c.get(ctx, "/repos/"+owner+"/"+repo+"/stats/punch_card", nil)
+		return c.get(ctx, fmt.Sprintf("/repos/%s/%s/stats/punch_card", owner, repo), nil)
 	default:
 		return nil, fmt.Errorf("metric de insights inválida: %s (use contributors, commit_activity, code_frequency, participation ou punch_card)", metric)
 	}
@@ -437,9 +476,14 @@ func toStr(v any) string {
 		return strings.Join(parts, ", ")
 	case map[string]any:
 		for _, k := range []string{"name", "login", "title", "full_name", "message", "description", "path"} {
-			if s, ok := t[k].(string); ok && s != "" {
-				return strings.TrimSpace(s)
+			s, ok := t[k].(string)
+			if !ok {
+				continue
 			}
+			if s == "" {
+				continue
+			}
+			return strings.TrimSpace(s)
 		}
 		return ""
 	default:
@@ -465,10 +509,10 @@ func toInt(v any) int {
 
 func clampPerPage(p int) int {
 	if p <= 0 {
-		return 30
+		return DEFAULT_PER_PAGE
 	}
-	if p > 100 {
-		return 100
+	if p > MAX_PER_PAGE {
+		return MAX_PER_PAGE
 	}
 	return p
 }

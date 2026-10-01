@@ -86,7 +86,10 @@ func buildUnit(L *lua.State) int {
 func unitConvert(v float64, from, to string) (float64, error) {
 	from = unitAlias[strings.ToLower(strings.TrimSpace(from))]
 	to = unitAlias[strings.ToLower(strings.TrimSpace(to))]
-	if from == "" || to == "" {
+	if from == "" {
+		return 0, fmt.Errorf("unidade desconhecida")
+	}
+	if to == "" {
 		return 0, fmt.Errorf("unidade desconhecida")
 	}
 	if from == to {
@@ -94,11 +97,14 @@ func unitConvert(v float64, from, to string) (float64, error) {
 	}
 	fcat := unitCategoryOf(from)
 	tcat := unitCategoryOf(to)
-	if fcat == "" || fcat != tcat {
+	if fcat == "" {
+		return 0, fmt.Errorf("categorias diferentes (%s ≠ %s)", fcat, tcat)
+	}
+	if fcat != tcat {
 		return 0, fmt.Errorf("categorias diferentes (%s ≠ %s)", fcat, tcat)
 	}
 	if fcat == "temp" {
-		var k float64
+		k := float64(0)
 		switch from {
 		case "c":
 			k = v + 273.15
@@ -126,15 +132,28 @@ func unitCategoryOf(unit string) string {
 			return cat
 		}
 	}
-	if unit == "c" || unit == "f" || unit == "k" {
+	if isTempUnit(unit) {
 		return "temp"
 	}
 	return ""
 }
 
+func isTempUnit(unit string) bool {
+	if unit == "c" {
+		return true
+	}
+	if unit == "f" {
+		return true
+	}
+	return unit == "k"
+}
+
 func sortStrings(s []string) {
 	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+		for j := i; j > 0; j-- {
+			if s[j] >= s[j-1] {
+				break
+			}
 			s[j], s[j-1] = s[j-1], s[j]
 		}
 	}

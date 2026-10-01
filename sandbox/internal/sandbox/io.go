@@ -46,7 +46,7 @@ func buildIO(L *lua.State, store *Store) int {
 		if err != nil {
 			panic(ioErr("ler", name, err))
 		}
-		var v any
+		v := any(nil)
 		if err := json.Unmarshal([]byte(content), &v); err != nil {
 			panic(fmt.Errorf("JSON inválido em %q: %w", name, err))
 		}
@@ -220,10 +220,17 @@ func buildIO(L *lua.State, store *Store) int {
 	setGoFunc(L, t, "within", func(l *lua.State) int {
 		base := path.Clean(argString(l, 1))
 		p := path.Clean(argString(l, 2))
-		l.PushBoolean(p == base || strings.HasPrefix(p, base+"/"))
+		l.PushBoolean(isWithin(base, p))
 		return 1
 	})
 	return t
+}
+
+func isWithin(base, p string) bool {
+	if p == base {
+		return true
+	}
+	return strings.HasPrefix(p, fmt.Sprintf("%s/", base))
 }
 
 func ioGlob(store *Store, pattern string, opts map[string]any) ([]string, error) {

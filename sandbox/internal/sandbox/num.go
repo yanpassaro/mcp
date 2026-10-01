@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -43,24 +44,30 @@ func buildNum(L *lua.State) int {
 	})
 	setGoFunc(L, t, "parse", func(l *lua.State) int {
 		s := strings.TrimSpace(argString(l, 1))
-		if v, err := strconv.ParseFloat(s, 64); err == nil {
+		v, err := strconv.ParseFloat(s, 64)
+		if err == nil {
 			l.PushNumber(v)
-		} else if iv, err := strconv.ParseInt(s, 10, 64); err == nil {
-			l.PushNumber(float64(iv))
-		} else {
-			l.PushNumber(math.NaN())
+			return 1
 		}
+		iv, ierr := strconv.ParseInt(s, 10, 64)
+		if ierr == nil {
+			l.PushNumber(float64(iv))
+			return 1
+		}
+		l.PushNumber(math.NaN())
 		return 1
 	})
 	setGoFunc(L, t, "fmt", func(l *lua.State) int {
 		dec, loc := 2, ""
 		if l.Top() >= 2 {
-			if _, isStr := l.ToValue(2).(string); isStr {
+			_, isStr := l.ToValue(2).(string)
+			if isStr {
 				loc = argString(l, 2)
 				if l.Top() >= 3 {
 					dec = int(argNum(l, 3))
 				}
-			} else {
+			}
+			if !isStr {
 				dec = int(argNum(l, 2))
 				if l.Top() >= 3 {
 					loc = argString(l, 3)
@@ -186,7 +193,7 @@ func buildNum(L *lua.State) int {
 }
 
 func sumNums(l *lua.State, index int) float64 {
-	var s float64
+	s := float64(0)
 	for _, e := range luaArrayAny(l, index) {
 		if n, ok := numOpt(e); ok {
 			s += n
@@ -224,37 +231,57 @@ func formatNum(n float64, dec int, loc string) string {
 	if dec > 20 {
 		dec = 20
 	}
-	neg := n < 0 || (n == 0 && math.Signbit(n))
+	neg := n < 0
+	if n == 0 {
+		neg = math.Signbit(n)
+	}
 	s := strconv.FormatFloat(math.Abs(n), 'f', dec, 64)
-	var intPart, decPart string
-	if before, after, ok := strings.Cut(s, "."); ok {
+	intPart, decPart := "", ""
+	before, after, ok := strings.Cut(s, ".")
+	if ok {
 		intPart, decPart = before, after
-	} else {
+	}
+	if !ok {
 		intPart = s
 	}
 	thousandSep, decimalSep := ",", "."
-	l := strings.ToLower(loc)
-	if l == "pt-br" || l == "pt_br" || l == "pt" {
+	if isPTLoc(locale(loc)) {
 		thousandSep, decimalSep = ".", ","
 	}
 	grouped := groupThousands(intPart, thousandSep, 3)
 	if neg {
-		grouped = "-" + grouped
+		grouped = fmt.Sprintf("-%s", grouped)
 	}
 	if decPart != "" {
-		return grouped + decimalSep + decPart
+		return fmt.Sprintf("%s%s%s", grouped, decimalSep, decPart)
 	}
 	return grouped
+}
+
+func locale(loc string) string {
+	return strings.ToLower(loc)
+}
+
+func isPTLoc(l string) bool {
+	if l == "pt-br" {
+		return true
+	}
+	if l == "pt_br" {
+		return true
+	}
+	return l == "pt"
 }
 
 func groupThousands(s, sep string, width int) string {
 	if len(s) <= width {
 		return s
 	}
-	var b strings.Builder
+	b := strings.Builder{}
 	for i, c := range s {
-		if i > 0 && (len(s)-i)%width == 0 {
-			b.WriteString(sep)
+		if i > 0 {
+			if (len(s)-i)%width == 0 {
+				b.WriteString(sep)
+			}
 		}
 		b.WriteRune(c)
 	}

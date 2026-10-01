@@ -75,14 +75,18 @@ func tokenizeTemplate(s string) []tmplTok {
 	}
 	i := 0
 	for i < len(s) {
-		if s[i] == '{' && i+1 < len(s) && s[i+1] == '{' {
-			if end := strings.Index(s[i+2:], "}}"); end >= 0 {
-				flush()
-				addBlock(s[i+2 : i+2+end])
-				i += 2 + end + 2
-				continue
+		if s[i] == '{' {
+			if i+1 < len(s) {
+				if s[i+1] == '{' {
+					end := strings.Index(s[i+2:], "}}")
+					if end >= 0 {
+						flush()
+						addBlock(s[i+2 : i+2+end])
+						i += 2 + end + 2
+						continue
+					}
+				}
 			}
-		} else if s[i] == '{' {
 			if end := strings.Index(s[i+1:], "}"); end >= 0 {
 				flush()
 				addBlock(s[i+1 : i+1+end])
@@ -128,11 +132,11 @@ func parseTemplate(toks []tmplTok) []*tmplNode {
 			}
 			if len(stack) == 0 {
 				cur = &root
-			} else {
+			}
+			if len(stack) != 0 {
 				top := stack[len(stack)-1]
-				if top.branch == 0 {
-					cur = &top.node.then
-				} else {
+				cur = &top.node.then
+				if top.branch != 0 {
 					cur = &top.node.els
 				}
 			}
@@ -142,7 +146,7 @@ func parseTemplate(toks []tmplTok) []*tmplNode {
 }
 
 func renderNodes(nodes []*tmplNode, ctx map[string]any) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	for _, n := range nodes {
 		switch n.kind {
 		case tokText:
@@ -152,37 +156,53 @@ func renderNodes(nodes []*tmplNode, ctx map[string]any) string {
 				b.WriteString(tmplText(v))
 			}
 		case tokIf:
-			if v, ok := jsonPath(ctx, n.path); ok && truthyVal(v) {
-				b.WriteString(renderNodes(n.then, ctx))
-			} else {
-				b.WriteString(renderNodes(n.els, ctx))
+			v, ok := jsonPath(ctx, n.path)
+			if ok {
+				if truthyVal(v) {
+					b.WriteString(renderNodes(n.then, ctx))
+					break
+				}
 			}
+			b.WriteString(renderNodes(n.els, ctx))
 		case tokUnless:
-			if v, ok := jsonPath(ctx, n.path); !ok || !truthyVal(v) {
+			v, ok := jsonPath(ctx, n.path)
+			if !ok {
 				b.WriteString(renderNodes(n.then, ctx))
-			} else {
-				b.WriteString(renderNodes(n.els, ctx))
+				break
 			}
+			if !truthyVal(v) {
+				b.WriteString(renderNodes(n.then, ctx))
+				break
+			}
+			b.WriteString(renderNodes(n.els, ctx))
 		case tokEach:
 			v, ok := jsonPath(ctx, n.path)
 			arr, isArr := v.([]any)
-			if ok && isArr && len(arr) > 0 {
-				for i, item := range arr {
-					m := map[string]any{}
-					for k, v := range ctx {
+			if !ok {
+				b.WriteString(renderNodes(n.els, ctx))
+				break
+			}
+			if !isArr {
+				b.WriteString(renderNodes(n.els, ctx))
+				break
+			}
+			if len(arr) == 0 {
+				b.WriteString(renderNodes(n.els, ctx))
+				break
+			}
+			for i, item := range arr {
+				m := map[string]any{}
+				for k, v := range ctx {
+					m[k] = v
+				}
+				if im, ok := item.(map[string]any); ok {
+					for k, v := range im {
 						m[k] = v
 					}
-					if im, ok := item.(map[string]any); ok {
-						for k, v := range im {
-							m[k] = v
-						}
-					}
-					m["this"] = item
-					m["@index"] = float64(i)
-					b.WriteString(renderNodes(n.then, m))
 				}
-			} else {
-				b.WriteString(renderNodes(n.els, ctx))
+				m["this"] = item
+				m["@index"] = float64(i)
+				b.WriteString(renderNodes(n.then, m))
 			}
 		}
 	}
@@ -211,8 +231,10 @@ func tmplText(v any) string {
 		}
 		return "false"
 	case float64:
-		if x == math.Trunc(x) && math.Abs(x) < 1e15 {
-			return strconv.FormatInt(int64(x), 10)
+		if math.Abs(x) < 1e15 {
+			if x == math.Trunc(x) {
+				return strconv.FormatInt(int64(x), 10)
+			}
 		}
 		return strconv.FormatFloat(x, 'f', -1, 64)
 	case map[string]any, []any:

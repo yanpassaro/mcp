@@ -1,12 +1,13 @@
 package sqlize
 
 import (
+	"cmp"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
-const maskThreshold = 0.5
+const MASK_THRESHOLD = 0.5
 
 type match struct {
 	start  int
@@ -99,9 +100,7 @@ func validCNPJ(doc string) bool {
 		sum += int(d[i]-'0') * w1[i]
 	}
 	r := sum % 11
-	if r < 2 {
-		r = 0
-	} else {
+	if r >= 2 {
 		r = 11 - r
 	}
 	if r != int(d[12]-'0') {
@@ -113,9 +112,7 @@ func validCNPJ(doc string) bool {
 		sum += int(d[i]-'0') * w2[i]
 	}
 	r = sum % 11
-	if r < 2 {
-		r = 0
-	} else {
+	if r >= 2 {
 		r = 11 - r
 	}
 	return r == int(d[13]-'0')
@@ -142,46 +139,32 @@ func luhn(s string) bool {
 }
 
 func columnEntity(name string) (string, bool) {
-	ent, ok := columnEntityMap[colKey(name)]
+	ent, ok := pii.columnEntityMap[colKey(name)]
 	return ent, ok
 }
 
 func analyzeCell(colName, cell string) []match {
-	var ms []match
+	ms := []match{}
 	for _, r := range patternRules {
 		for _, idx := range r.re.FindAllStringIndex(cell, -1) {
-			if r.skipIfAlphaParen && afterAlphaParen(cell, idx[1]) {
-				continue
-			}
-			text := cell[idx[0]:idx[1]]
-			score := r.score
-			switch r.entity {
-			case "CPF":
-				if validCPF(text) {
-					score = 1.0
-				} else {
-					score = 0.15
-				}
-			case "CNPJ":
-				if validCNPJ(text) {
-					score = 1.0
-				} else {
-					score = 0.15
-				}
-			case "CARD":
-				if luhn(text) {
-					score = 1.0
-				} else {
-					score = 0.15
+			if r.skipIfAlphaParen {
+				if afterAlphaParen(cell, idx[1]) {
+					continue
 				}
 			}
+			score := ruleScore(r, cell[idx[0]:idx[1]])
 			if score < 1.0 {
-				if ent, ok := columnEntity(colName); ok && ent == r.entity {
-					score = 1.0
+				ent, ok := columnEntity(colName)
+				if ok {
+					if ent == r.entity {
+						score = 1.0
+					}
 				}
 			}
-			if score < 0.85 && contextBoost(r.entity, cell, idx[0], idx[1]) {
-				score = 0.85
+			if score < 0.85 {
+				if contextBoost(r.entity, cell, idx[0], idx[1]) {
+					score = 0.85
+				}
 			}
 			ms = append(ms, match{start: idx[0], end: idx[1], entity: r.entity, score: score})
 		}
@@ -190,10 +173,30 @@ func analyzeCell(colName, cell string) []match {
 	return ms
 }
 
+func ruleScore(r patternRule, text string) float64 {
+	switch r.entity {
+	case "CPF":
+		return cmp.Or(checkScore(validCPF(text)), 0.15)
+	case "CNPJ":
+		return cmp.Or(checkScore(validCNPJ(text)), 0.15)
+	case "CARD":
+		return cmp.Or(checkScore(luhn(text)), 0.15)
+	default:
+		return r.score
+	}
+}
+
+func checkScore(ok bool) float64 {
+	if !ok {
+		return 0
+	}
+	return 1.0
+}
+
 var reAddressSpan = regexp.MustCompile(`\b(?i:rua|r\.|av\.|avenida|travessa|alameda|estrada|rodovia|praca|praça|p[çc]a\.|beco|largo|viela|condominio|condomínio|conjunto|residencial|loteamento|chacara|chácara|sitio|sítio|fazenda)\s+[A-Za-z0-9á-úÁ-Ú.\-']+(?:\s+[A-Za-z0-9á-úÁ-Ú.\-']+){0,4}(?:[,\s]+\d{1,6}(?:[-\s/]\d{1,5})?)?(?:\s*,\s*[A-ZÀ-Ú]\p{Ll}+(?:\s+[A-ZÀ-Ú]\p{Ll}+)*)?`)
 
 func findAddressMatches(cell string) []match {
-	var out []match
+	out := []match{}
 	for _, idx := range reAddressSpan.FindAllStringIndex(cell, -1) {
 		span := cell[idx[0]:idx[1]]
 		if addrStartsWithPrep(span) {
@@ -206,7 +209,10 @@ func findAddressMatches(cell string) []match {
 
 func addrStartsWithPrep(span string) bool {
 	words := strings.Fields(normalizeWord(span))
-	return len(words) >= 2 && addressPreps[words[1]]
+	if len(words) < 2 {
+		return false
+	}
+	return pii.addressPreps[words[1]]
 }
 
 func resolveSpans(spans []match) []match {
@@ -214,15 +220,7 @@ func resolveSpans(spans []match) []match {
 		return spans
 	}
 	ss := append([]match(nil), spans...)
-	sort.Slice(ss, func(i, j int) bool {
-		if ss[i].start != ss[j].start {
-			return ss[i].start < ss[j].start
-		}
-		if ss[i].score != ss[j].score {
-			return ss[i].score > ss[j].score
-		}
-		return ss[i].end > ss[j].end
-	})
+	slices.SortFunc(ss, func(a, b match) int { return matchLess(a, b) })
 	out := []match{}
 	lastEnd := -1
 	for _, m := range ss {
@@ -235,6 +233,16 @@ func resolveSpans(spans []match) []match {
 	return out
 }
 
+func matchLess(a, b match) int {
+	if a.start != b.start {
+		return cmp.Compare(a.start, b.start)
+	}
+	if a.score != b.score {
+		return cmp.Compare(b.score, a.score)
+	}
+	return cmp.Compare(b.end, a.end)
+}
+
 func maskSpan(entity, _ string) string {
 	return labelFor(entity)
 }
@@ -243,20 +251,21 @@ func applyColumnMask(colName, cell string, spans []match) string {
 	if cell == "" {
 		return cell
 	}
-	var usable []match
+	usable := []match{}
 	for _, m := range spans {
-		if m.score >= maskThreshold {
+		if m.score >= MASK_THRESHOLD {
 			usable = append(usable, m)
 		}
 	}
 	if len(usable) == 0 {
-		if ent, ok := columnEntity(colName); ok {
-			return labelFor(ent)
+		ent, ok := columnEntity(colName)
+		if !ok {
+			return cell
 		}
-		return cell
+		return labelFor(ent)
 	}
 	usable = resolveSpans(usable)
-	var b strings.Builder
+	b := strings.Builder{}
 	last := 0
 	for _, m := range usable {
 		b.WriteString(cell[last:m.start])
@@ -287,21 +296,36 @@ func redactCell(colName, cell string) string {
 }
 
 func afterAlphaParen(s string, end int) bool {
-	if end < 0 || end >= len(s) {
+	if end < 0 {
+		return false
+	}
+	if end >= len(s) {
 		return false
 	}
 	c := s[end]
 	if c == '(' {
 		return true
 	}
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+	if c >= 'a' {
+		if c <= 'z' {
+			return true
+		}
+	}
+	if c >= 'A' {
+		if c <= 'Z' {
+			return true
+		}
+	}
+	return isDigit(rune(c))
 }
 
 func digitsOnly(s string) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			b.WriteRune(r)
+		if r >= '0' {
+			if r <= '9' {
+				b.WriteRune(r)
+			}
 		}
 	}
 	return b.String()

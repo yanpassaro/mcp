@@ -1,6 +1,7 @@
 package sqlize
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -54,7 +55,10 @@ func displaySchema(schema, engine string) string {
 
 func isNullDefault(v string) bool {
 	t := strings.ToLower(strings.TrimSpace(v))
-	return t == "null" || strings.HasPrefix(t, "null::")
+	if t == "null" {
+		return true
+	}
+	return strings.HasPrefix(t, "null::")
 }
 
 func isPkVal(v string) bool {
@@ -66,40 +70,57 @@ func isPkVal(v string) bool {
 }
 
 func refTarget(fk structColumn) string {
-	col := fk.RefColumn
-	if col == "" {
-		col = "?"
-	}
-	target := col
+	target := cmp.Or(fk.RefColumn, "?")
 	if fk.RefTable != "" {
-		target = fk.RefTable + "." + target
+		target = fmt.Sprintf("%s.%s", fk.RefTable, target)
 	}
 	sc := fk.RefSchema
-	if sc != "" && sc != "public" && sc != "main" {
-		target = sc + "." + target
+	if sc != "" {
+		if sc != "public" {
+			if sc != "main" {
+				target = fmt.Sprintf("%s.%s", sc, target)
+			}
+		}
 	}
 	return strings.ToUpper(strings.TrimSpace(target))
 }
 
+func hasRef(c structColumn) bool {
+	if c.RefTable != "" {
+		return true
+	}
+	return c.RefColumn != ""
+}
+
 func structFlags(c structColumn, compositePK bool, unique, indexed map[string]bool) string {
-	var flags []string
-	if c.PK && !compositePK {
-		flags = append(flags, "🔑")
+	flags := []string{}
+	if c.PK {
+		if !compositePK {
+			flags = append(flags, "🔑")
+		}
 	}
 	if c.Auto {
 		flags = append(flags, "🔢")
 	}
-	if c.NotNull || c.PK {
+	if c.NotNull {
 		flags = append(flags, "🔒")
 	}
-	if d := strings.TrimSpace(c.Default); d != "" && !c.Auto && !isNullDefault(d) {
-		flags = append(flags, "🔄 "+short(d))
+	if c.PK {
+		flags = append(flags, "🔒")
+	}
+	d := strings.TrimSpace(c.Default)
+	if d != "" {
+		if !c.Auto {
+			if !isNullDefault(d) {
+				flags = append(flags, fmt.Sprintf("🔄 %s", short(d)))
+			}
+		}
 	}
 	if unique[c.Name] {
 		flags = append(flags, "⭐")
 	}
-	if c.RefTable != "" || c.RefColumn != "" {
-		flags = append(flags, "🔗 "+refTarget(c))
+	if hasRef(c) {
+		flags = append(flags, fmt.Sprintf("🔗 %s", refTarget(c)))
 	}
 	if indexed[c.Name] {
 		flags = append(flags, "⚡")
@@ -108,23 +129,21 @@ func structFlags(c structColumn, compositePK bool, unique, indexed map[string]bo
 }
 
 func renderStructureTable(t structTable) string {
-	var b strings.Builder
+	b := strings.Builder{}
 	fmt.Fprintf(&b, "# 📋 %s\n\n", t.Name)
 
 	schema := displaySchema(t.Schema, t.Engine)
-	icon := engineIcon[t.Engine]
-	if icon == "" {
-		icon = "🏡"
-	}
+	icon := cmp.Or(engineIcon[t.Engine], "🏡")
 	if schema != "" {
 		fmt.Fprintf(&b, "▶️ `%s` %s\n\n", schema, icon)
-	} else {
+	}
+	if schema == "" {
 		fmt.Fprintf(&b, "▶️ %s\n\n", icon)
 	}
 
 	unique := map[string]bool{}
 	indexed := map[string]bool{}
-	var compositeUniques [][]string
+	compositeUniques := [][]string{}
 	for _, ix := range t.Idx {
 		if ix.IsPK {
 			continue
@@ -135,9 +154,9 @@ func renderStructureTable(t structTable) string {
 		if ix.Unique {
 			if len(ix.Columns) == 1 {
 				unique[ix.Columns[0]] = true
-			} else {
-				compositeUniques = append(compositeUniques, ix.Columns)
+				continue
 			}
+			compositeUniques = append(compositeUniques, ix.Columns)
 			continue
 		}
 		for _, c := range ix.Columns {
@@ -145,7 +164,7 @@ func renderStructureTable(t structTable) string {
 		}
 	}
 
-	var pkCols []string
+	pkCols := []string{}
 	for _, c := range t.Cols {
 		if c.PK {
 			pkCols = append(pkCols, c.Name)
@@ -155,14 +174,15 @@ func renderStructureTable(t structTable) string {
 
 	width := 0
 	for _, c := range t.Cols {
-		if w := utf8.RuneCountInString(c.Name) + 2; w > width {
+		w := utf8.RuneCountInString(c.Name) + 2
+		if w > width {
 			width = w
 		}
 	}
 
 	for _, c := range t.Cols {
-		b.WriteString("- `");
-		b.WriteString(c.Name);
+		b.WriteString("- `")
+		b.WriteString(c.Name)
 		b.WriteString("`")
 		pad := width - (utf8.RuneCountInString(c.Name) + 2)
 		for range pad {
