@@ -49,16 +49,16 @@ tasks:
       - go build -o ../{{.DIST}}/sqlize-mcp.exe ./cmd/sqlize-mcp
 
   build:anydoc:
-    desc: Build anydoc-mcp.exe into dist/ (Rust, cross-compiled for Windows)
+    desc: Build anydoc-mcp.exe into dist/ (Rust, Windows x64 only)
     dir: anydoc
     deps: [prep]
     env:
       RUSTFLAGS: '{{.RUSTFLAGS}}'
     cmds:
       - cargo build --release --target {{.ANYDOC_TARGET}}
-      - cmd: cp target\{{.ANYDOC_TARGET}}\release\anydoc-mcp.exe ../{{.DIST}}/anydoc-mcp.exe
-        platforms: [linux, mac]
       - cmd: cp target/{{.ANYDOC_TARGET}}/release/anydoc-mcp.exe ../{{.DIST}}/anydoc-mcp.exe
+        platforms: [linux, darwin]
+      - cmd: copy /Y target\{{.ANYDOC_TARGET}}\release\anydoc-mcp.exe ..\{{.DIST}}\anydoc-mcp.exe
         platforms: [windows]
 
   format:anydoc:
