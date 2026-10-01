@@ -42,7 +42,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             anydoc/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('anydoc/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('anydoc/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Setup Task

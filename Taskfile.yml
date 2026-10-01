@@ -56,10 +56,7 @@ tasks:
       RUSTFLAGS: '{{.RUSTFLAGS}}'
     cmds:
       - cargo build --release --target {{.ANYDOC_TARGET}}
-      - cmd: cp target/{{.ANYDOC_TARGET}}/release/anydoc-mcp.exe ../{{.DIST}}/anydoc-mcp.exe
-        platforms: [linux, darwin]
-      - cmd: copy /Y target\{{.ANYDOC_TARGET}}\release\anydoc-mcp.exe ..\{{.DIST}}\anydoc-mcp.exe
-        platforms: [windows]
+      - cp target/{{.ANYDOC_TARGET}}/release/anydoc-mcp.exe ../{{.DIST}}/anydoc-mcp.exe
 
   format:anydoc:
       desc: Format the anydoc module
