@@ -91,7 +91,7 @@ func tmpDir() string {
 
 
 func setupLog(server string) {
-	dir := filepath.Join(userLocalDir(), "mcp", server, "logs")
+	dir := filepath.Join(userStateDir(), "logs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		log.Printf("warning: failed to create %s; log goes to stderr: %v", dir, err)
 		return
@@ -110,11 +110,4 @@ func userStateDir() string {
 		return filepath.Join(home, ".local", "state", "mcp")
 	}
 	return filepath.Join(os.Getenv("USERPROFILE"), ".local", "state", "mcp")
-}
-
-func userLocalDir() string {
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".local", "share")
-	}
-	return filepath.Join(os.Getenv("USERPROFILE"), ".local", "share")
 }

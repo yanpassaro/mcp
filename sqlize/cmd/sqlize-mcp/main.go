@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -31,12 +32,12 @@ func main() {
 }
 
 func setupLog(server string) {
-	dir := filepath.Join(userLocalDir(), "mcp", server, "logs")
+	dir := filepath.Join(userStateDir(), "logs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		log.Printf("aviso: falha ao criar %s; log segue para stderr: %v", dir, err)
 		return
 	}
-	path := filepath.Join(dir, server+"-"+time.Now().Format("2006-01-02_15-04-05")+".log")
+	path := filepath.Join(dir, fmt.Sprintf("%s-%s.log", server, time.Now().Format("2006-01-02_15-04-05")))
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Printf("aviso: falha ao abrir %s; log segue para stderr: %v", path, err)
@@ -45,9 +46,9 @@ func setupLog(server string) {
 	log.SetOutput(f)
 }
 
-func userLocalDir() string {
+func userStateDir() string {
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".local", "share")
+		return filepath.Join(home, ".local", "state", "mcp")
 	}
-	return filepath.Join(os.Getenv("USERPROFILE"), ".local", "share")
+	return filepath.Join(os.Getenv("USERPROFILE"), ".local", "state", "mcp")
 }

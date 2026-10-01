@@ -69,4 +69,4 @@ Build: `task build:sandbox-cli` (gera `dist/sandbox.exe`).
 }
 ```
 
-Build: `task build` gera os executáveis em `dist/`. Logs: `~/.local/share/mcp/<server>/logs/`.
+Build: `task build` gera os executáveis em `dist/`. Logs: `~/.local/state/mcp/logs/`.
