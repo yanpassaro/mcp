@@ -5,6 +5,8 @@ vars:
   GOOS: windows
   GOARCH: amd64
   CGO_ENABLED: '0'
+  ANYDOC_TARGET: x86_64-pc-windows-gnu
+  RUSTFLAGS: '-C target-feature=+crt-static'
 
 env:
   GOOS: '{{.GOOS}}'
@@ -47,11 +49,30 @@ tasks:
       - go build -o ../{{.DIST}}/sqlize-mcp.exe ./cmd/sqlize-mcp
 
   build:anydoc:
-    desc: Build anydoc.exe into dist/ (Deno)
+    desc: Build anydoc-mcp.exe into dist/ (Rust, cross-compiled for Windows)
     dir: anydoc
     deps: [prep]
+    env:
+      RUSTFLAGS: '{{.RUSTFLAGS}}'
     cmds:
-      - deno task compile
+      - cargo build --release --target {{.ANYDOC_TARGET}}
+      - cmd: cp target\{{.ANYDOC_TARGET}}\release\anydoc-mcp.exe ../{{.DIST}}/anydoc-mcp.exe
+        platforms: [linux, mac]
+      - cmd: cp target/{{.ANYDOC_TARGET}}/release/anydoc-mcp.exe ../{{.DIST}}/anydoc-mcp.exe
+        platforms: [windows]
+
+  test:anydoc:
+      desc: Run the anydoc test suite
+      dir: anydoc
+      cmds:
+        - cargo test
+
+  format:anydoc:
+    desc: Format the anydoc module
+    dir: anydoc
+    cmds:
+      - cargo fmt
+      - cargo clippy --fix --allow-dirty
 
   build:sandbox:
     desc: Build sandbox-mcp.exe
@@ -66,12 +87,13 @@ tasks:
       - go build -o ../{{.DIST}}/sandbox.exe ./cmd/sandbox
 
   format:
-    desc: Format all Go modules (gofmt -w, go mod tidy, go vet)
+    desc: Format all modules
     cmds:
       - task: format:git
       - task: format:github
       - task: format:sqlize
       - task: format:sandbox
+      - task: format:anydoc
 
   format:git:
     desc: Format the git module

@@ -1,6 +1,6 @@
 # MCP servers
 
-Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um é um módulo independente; os Go têm `go.mod` próprio, o `anydoc` roda em Deno.
+Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um é um módulo independente; os Go têm `go.mod` próprio, o `anydoc` é Rust com `Cargo.toml`.
 
 | Servidor | O que faz |
 | --- | --- |
@@ -64,7 +64,7 @@ Build: `task build:sandbox-cli` (gera `dist/sandbox.exe`).
     "github":  { "command": "~/.local/bin/github-mcp.exe", "env": { "GITHUB_TOKEN": "<token>" } },
     "sqlize":  { "command": "~/.local/bin/sqlize-mcp.exe" },
     "sandbox": { "command": "~/.local/bin/sandbox-mcp.exe" },
-    "anydoc":  { "command": "~/.local/bin/anydoc.exe" }
+    "anydoc":  { "command": "~/.local/bin/anydoc-mcp.exe" }
   }
 }
 ```
