@@ -15,7 +15,7 @@ Variáveis de ambiente **não são expostas**: `docker_inspect` remove recursiva
 | `docker_get` | Lista `containers`, `images`, `volumes`, `networks`, `info`, `stats` ou `disk` (read-only) |
 | `docker_inspect` | JSON do inspect de um **container**, sem `Env` |
 | `docker_logs` | Logs do container com `tail`, `since`/`until` e timestamps opcionais |
-| `docker_run` | Cria e inicia um container detached; aceita nome, command, portas, volumes, network e `autoRemove` |
+| `docker_run` | Cria e inicia um container detached; aceita nome, command, portas, volumes, network, `autoRemove`, política `pull`, `platform` e `timeoutSeconds` |
 | `docker_remove` | Remove um container; opcional `force` e remoção de volumes anônimos |
 
 ## Variáveis de ambiente
@@ -27,6 +27,7 @@ Variáveis de ambiente **não são expostas**: `docker_inspect` remove recursiva
 | `DOCKER_API_VERSION` | negociação automática | Fixa a versão da API |
 | `DOCKER_TLS_VERIFY` | — | Ativa verificação TLS |
 | `DOCKER_CERT_PATH` | — | Pasta dos certificados TLS |
+| `DOCKER_REGISTRY_AUTH` | — | Auth base64 para pull de imagem privada |
 
 `DOCKER_CONTEXT` não é lido pelo SDK; para usar um contexto, exporte o `DOCKER_HOST` correspondente.
 
@@ -50,6 +51,28 @@ O módulo usa o SDK do Moby. Depois de clonar/alterar o `go.mod`:
 cd docker
 go mod tidy
 ```
+
+## Pull de imagens
+
+`docker_run` tem a opção `pull`:
+
+- `missing` (padrão): baixa se a imagem não existir localmente.
+- `always`: baixa sempre.
+- `never`: não baixa; falha se não existir.
+
+Exemplo:
+
+```json
+{
+  "image": "nginx:latest",
+  "name": "web",
+  "ports": ["8080:80"],
+  "pull": "missing",
+  "timeoutSeconds": 300
+}
+```
+
+`platform` permite escolher `linux/amd64`, `linux/arm64`, etc. Para registry privado, defina `DOCKER_REGISTRY_AUTH` com o auth base64 no ambiente do servidor; ele não é exposto ao modelo.
 
 ## Limites e segurança
 

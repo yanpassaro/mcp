@@ -11,12 +11,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/containerd/errdefs"
 	"github.com/docker/go-connections/nat"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	mobyclient "github.com/moby/moby/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"ntdsk.com/mcp/docker/internal/docker"
 )
 
@@ -52,7 +54,7 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "docker_run",
-		Description: "Create and start a detached container. No environment variables are accepted. Optional name, command, ports, volumes, network and autoRemove.",
+		Description: "Create and start a detached container. Image pull policy (missing/always/never), optional platform and timeout. No environment variables are accepted.",
 	}, s.run)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -251,12 +253,25 @@ func (s *Server) logs(ctx context.Context, _ *mcp.CallToolRequest, in logsInput)
 }
 
 func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (*mcp.CallToolResult, any, error) {
-	imageName := strings.TrimSpace(in.Image)
-	if imageName == "" {
+	rawImage := strings.TrimSpace(in.Image)
+	if rawImage == "" {
 		return nil, nil, errors.New("image é obrigatório")
 	}
-	ctx, cancel := s.client.WithTimeout(ctx)
+	imageName := normalizeImage(rawImage)
+	policy, err := pullPolicy(in.Pull)
+	if err != nil {
+		return nil, nil, err
+	}
+	platform, err := parsePlatform(in.Platform)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx, cancel := s.client.WithTimeoutSeconds(ctx, in.TimeoutSeconds)
 	defer cancel()
+	pulled, err := s.ensureImage(ctx, imageName, policy, platform)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	natExposed, natBindings, err := nat.ParsePortSpecs(in.Ports)
 	if err != nil {
@@ -305,6 +320,7 @@ func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (
 		Config:     config,
 		HostConfig: host,
 		Name:       name,
+		Platform:   platform,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("create container: %w", err)
@@ -313,7 +329,7 @@ func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (
 	if err != nil {
 		return nil, nil, fmt.Errorf("container %s criado mas não iniciado: %w", created.ID, err)
 	}
-	return textResult(formatRun(name, imageName, created))
+	return textResult(formatRun(name, imageName, created, pulled))
 }
 
 func (s *Server) remove(ctx context.Context, _ *mcp.CallToolRequest, in removeInput) (*mcp.CallToolResult, any, error) {
@@ -344,6 +360,117 @@ func inspectTTY(raw json.RawMessage) (bool, error) {
 		return false, fmt.Errorf("decode container inspect: %w", err)
 	}
 	return meta.Config.Tty, nil
+}
+
+func pullPolicy(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "missing":
+		return "missing", nil
+	case "always":
+		return "always", nil
+	case "never":
+		return "never", nil
+	default:
+		return "", fmt.Errorf("pull inválido: use missing, always ou never")
+	}
+}
+
+func parsePlatform(value string) (*ocispec.Platform, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parts := strings.Split(value, "/")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("platform inválida %q: use os/arch[/variant]", value)
+	}
+	if len(parts) > 3 {
+		return nil, fmt.Errorf("platform inválida %q: use os/arch[/variant]", value)
+	}
+	platform := &ocispec.Platform{OS: parts[0], Architecture: parts[1]}
+	if len(parts) == 3 {
+		platform.Variant = parts[2]
+	}
+	if platform.OS == "" {
+		return nil, fmt.Errorf("platform inválida %q: OS vazio", value)
+	}
+	if platform.Architecture == "" {
+		return nil, fmt.Errorf("platform inválida %q: arquitetura vazia", value)
+	}
+	return platform, nil
+}
+
+func normalizeImage(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return value
+	}
+	if strings.Contains(value, "@") {
+		return value
+	}
+	slash := strings.LastIndex(value, "/")
+	colon := strings.LastIndex(value, ":")
+	if colon > slash {
+		return value
+	}
+	return fmt.Sprintf("%s:latest", value)
+}
+
+func imageExists(ctx context.Context, api *mobyclient.Client, image string) (bool, error) {
+	_, err := api.ImageInspect(ctx, image)
+	if err == nil {
+		return true, nil
+	}
+	if errdefs.IsNotFound(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("inspect image %s: %w", image, err)
+}
+
+func (s *Server) ensureImage(ctx context.Context, image, policy string, platform *ocispec.Platform) (bool, error) {
+	exists, err := imageExists(ctx, s.client.API(), image)
+	if err != nil {
+		return false, err
+	}
+	if policy == "never" {
+		if !exists {
+			return false, fmt.Errorf("imagem %q não encontrada e pull=never", image)
+		}
+		return false, nil
+	}
+	if policy == "always" {
+		if err := s.pullImage(ctx, image, platform); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if exists {
+		return false, nil
+	}
+	if err := s.pullImage(ctx, image, platform); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Server) pullImage(ctx context.Context, image string, platform *ocispec.Platform) error {
+	options := mobyclient.ImagePullOptions{RegistryAuth: s.client.RegistryAuth()}
+	if platform != nil {
+		options.Platforms = []ocispec.Platform{*platform}
+	}
+	response, err := s.client.API().ImagePull(ctx, image, options)
+	if err != nil {
+		return fmt.Errorf("pull %s: %w", image, err)
+	}
+	waitErr := response.Wait(ctx)
+	closeErr := response.Close()
+	if waitErr != nil {
+		return fmt.Errorf("pull %s: %w", image, waitErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close pull %s: %w", image, closeErr)
+	}
+	return nil
 }
 
 func clampTail(n int) int {
@@ -388,13 +515,16 @@ type logsInput struct {
 }
 
 type runInput struct {
-	Image      string   `json:"image" jsonschema:"Image to run (required)."`
-	Name       string   `json:"name,omitempty" jsonschema:"Container name (optional)."`
-	Command    []string `json:"command,omitempty" jsonschema:"Command and arguments after the image (optional)."`
-	Ports      []string `json:"ports,omitempty" jsonschema:"Port mappings, e.g. [\"8080:80\"]."`
-	Volumes    []string `json:"volumes,omitempty" jsonschema:"Volume mappings, e.g. [\"C:/data:/data\"]."`
-	Network    string   `json:"network,omitempty" jsonschema:"Network name (optional)."`
-	AutoRemove bool     `json:"autoRemove,omitempty" jsonschema:"If true, removes the container when it stops."`
+	Image          string   `json:"image" jsonschema:"Image to run (required)."`
+	Name           string   `json:"name,omitempty" jsonschema:"Container name (optional)."`
+	Command        []string `json:"command,omitempty" jsonschema:"Command and arguments after the image (optional)."`
+	Ports          []string `json:"ports,omitempty" jsonschema:"Port mappings, e.g. [\"8080:80\"]."`
+	Volumes        []string `json:"volumes,omitempty" jsonschema:"Volume mappings, e.g. [\"C:/data:/data\"]."`
+	Network        string   `json:"network,omitempty" jsonschema:"Network name (optional)."`
+	AutoRemove     bool     `json:"autoRemove,omitempty" jsonschema:"If true, removes the container when it stops."`
+	Pull           string   `json:"pull,omitempty" jsonschema:"Image pull policy: missing (default), always or never."`
+	Platform       string   `json:"platform,omitempty" jsonschema:"Optional platform, e.g. linux/amd64."`
+	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"Optional timeout override for pull/create/start, in seconds."`
 }
 
 type removeInput struct {

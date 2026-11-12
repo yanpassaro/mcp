@@ -31,7 +31,8 @@ func main() {
 	}
 
 	client, err := docker.NewClient(docker.Config{
-		Timeout: time.Duration(timeout) * time.Second,
+		Timeout:      time.Duration(timeout) * time.Second,
+		RegistryAuth: strings.TrimSpace(os.Getenv("DOCKER_REGISTRY_AUTH")),
 	})
 	if err != nil {
 		log.Fatal(err)

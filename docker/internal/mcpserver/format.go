@@ -441,13 +441,13 @@ func formatDiskUsage(usage mobyclient.DiskUsageResult) string {
 	))
 }
 
-func formatRun(name, imageName string, result mobyclient.ContainerCreateResult) string {
+func formatRun(name, imageName string, result mobyclient.ContainerCreateResult, pulled bool) string {
 	header := "🚀 Container criado"
 	if name != "" {
 		header = fmt.Sprintf("%s: `%s`", header, name)
 	}
 	b := strings.Builder{}
-	fmt.Fprintf(&b, "%s\n\n- Imagem: `%s`\n- ID: `%s`", header, imageName, result.ID)
+	fmt.Fprintf(&b, "%s\n\n- Imagem: `%s`\n- ID: `%s`\n- Pull: %s", header, imageName, result.ID, boolText(pulled))
 	if len(result.Warnings) > 0 {
 		b.WriteString("\n\n**Warnings:**\n")
 		for _, warning := range result.Warnings {

@@ -11,12 +11,14 @@ import (
 const DEFAULT_TIMEOUT_SECONDS = 60
 
 type Config struct {
-	Timeout time.Duration
+	Timeout      time.Duration
+	RegistryAuth string
 }
 
 type Client struct {
-	api     *client.Client
-	timeout time.Duration
+	api          *client.Client
+	timeout      time.Duration
+	registryAuth string
 }
 
 func NewClient(cfg Config) (*Client, error) {
@@ -28,7 +30,7 @@ func NewClient(cfg Config) (*Client, error) {
 	if timeout <= 0 {
 		timeout = DEFAULT_TIMEOUT_SECONDS * time.Second
 	}
-	return &Client{api: api, timeout: timeout}, nil
+	return &Client{api: api, timeout: timeout, registryAuth: cfg.RegistryAuth}, nil
 }
 
 func (c *Client) API() *client.Client {
@@ -36,7 +38,19 @@ func (c *Client) API() *client.Client {
 }
 
 func (c *Client) WithTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, c.timeout)
+	return c.WithTimeoutSeconds(ctx, 0)
+}
+
+func (c *Client) WithTimeoutSeconds(ctx context.Context, seconds int) (context.Context, context.CancelFunc) {
+	timeout := c.timeout
+	if seconds > 0 {
+		timeout = time.Duration(seconds) * time.Second
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+func (c *Client) RegistryAuth() string {
+	return c.registryAuth
 }
 
 func (c *Client) Close() error {
