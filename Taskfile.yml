@@ -25,6 +25,7 @@ tasks:
     cmds:
       - task: build:git
       - task: build:github
+      - task: build:docker
       - task: build:sqlize
       - task: build:anydoc
       - task: build:sandbox
@@ -41,6 +42,13 @@ tasks:
     dir: github
     cmds:
       - go build -o ../{{.DIST}}/github-mcp.exe ./cmd/github-mcp
+
+  build:docker:
+    desc: Build docker-mcp.exe
+    dir: docker
+    cmds:
+      - go mod tidy
+      - go build -o ../{{.DIST}}/docker-mcp.exe ./cmd/docker-mcp
 
   build:sqlize:
     desc: Build sqlize-mcp.exe
@@ -82,6 +90,7 @@ tasks:
     cmds:
       - task: format:git
       - task: format:github
+      - task: format:docker
       - task: format:sqlize
       - task: format:sandbox
       - task: format:anydoc
@@ -97,6 +106,14 @@ tasks:
   format:github:
     desc: Format the github module
     dir: github
+    cmds:
+      - gofmt -w .
+      - go mod tidy
+      - go vet ./...
+
+  format:docker:
+    desc: Format the docker module
+    dir: docker
     cmds:
       - gofmt -w .
       - go mod tidy
