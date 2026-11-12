@@ -12,11 +12,56 @@ Variáveis de ambiente **não são expostas**: `docker_inspect` remove recursiva
 
 | Tool | O que faz |
 | --- | --- |
-| `docker_get` | Lista `containers`, `images`, `volumes`, `networks`, `info`, `stats` ou `disk` (read-only) |
-| `docker_inspect` | JSON do inspect de um **container**, sem `Env` |
+| `docker_get` | Lista `containers`, `images`, `volumes`, `networks`, `info`, `stats` ou `disk`; aceita `filter` e `limit` |
+| `docker_inspect` | JSON de container, imagem, volume ou network; `Env` do container é removido |
 | `docker_logs` | Logs do container com `tail`, `since`/`until` e timestamps opcionais |
 | `docker_run` | Cria e inicia um container detached; aceita nome, command, portas, volumes, network, `autoRemove`, política `pull`, `platform` e `timeoutSeconds` |
-| `docker_remove` | Remove um container; opcional `force` e remoção de volumes anônimos |
+| `docker_remove` | Remove container, imagem, volume ou network; `resource` seleciona o tipo |
+
+## Inspect
+
+`docker_inspect` aceita `resource`:
+
+- `container` (padrão): remove `Env` recursivamente.
+- `image`, `volume`, `network`: JSON completo.
+
+Exemplos:
+
+```json
+{ "resource": "image", "target": "nginx:latest" }
+```
+
+```json
+{ "resource": "volume", "target": "nginx-html" }
+```
+
+```json
+{ "resource": "network", "target": "app-net" }
+```
+
+```json
+{ "container": "web" }
+```
+
+`target` é o nome/ID; `container` continua aceito como alias antigo.
+
+## Filtros e limite
+
+`docker_get` aceita `filter` no formato `chave=valor`, separado por vírgula, e `limit`:
+
+```json
+{ "resource": "containers", "filter": "status=running,name=api", "limit": 50 }
+```
+
+```json
+{ "resource": "images", "filter": "dangling=true", "limit": 100 }
+```
+
+```json
+{ "resource": "volumes", "filter": "label=com.docker.compose.project=app" }
+```
+
+`limit: 0` (padrão) mostra tudo. Filtros com vírgula dentro do valor não são suportados nesse formato.
 
 ## Variáveis de ambiente
 
@@ -73,6 +118,35 @@ Exemplo:
 ```
 
 `platform` permite escolher `linux/amd64`, `linux/arm64`, etc. Para registry privado, defina `DOCKER_REGISTRY_AUTH` com o auth base64 no ambiente do servidor; ele não é exposto ao modelo.
+
+## Remover recursos
+
+`docker_remove` usa `resource` + `target`:
+
+- `container` (padrão): `force` e `volumes` (volumes anônimos).
+- `image`: `force`; o prune de filhos é sempre ligado.
+- `volume`: `force`.
+- `network`: sem `force`.
+
+Exemplos:
+
+```json
+{ "resource": "container", "target": "web", "force": true, "volumes": true }
+```
+
+```json
+{ "resource": "image", "target": "nginx:latest", "force": true }
+```
+
+```json
+{ "resource": "volume", "target": "nginx-html", "force": true }
+```
+
+```json
+{ "resource": "network", "target": "app-net" }
+```
+
+O campo antigo `container` continua aceito como alias de `target`.
 
 ## Limites e segurança
 

@@ -26,6 +26,7 @@ const (
 	DEFAULT_TAIL = 200
 	MAX_TAIL     = 10000
 	MAX_LAST     = 1000
+	MAX_LIMIT    = 5000
 )
 
 type Server struct {
@@ -44,7 +45,7 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "docker_inspect",
-		Description: "Container inspect JSON. Environment variables (Env) are removed.",
+		Description: "Inspect JSON for a container, image, volume or network. 'resource' selects the type (container default); container Environment variables (Env) are removed.",
 	}, s.inspect)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -59,7 +60,7 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "docker_remove",
-		Description: "Remove a container. Optional force and anonymous volume removal.",
+		Description: "Remove a container, image, volume or network. 'resource' selects the type (container default); 'target' is the name/ID. force/volumes apply to containers; force applies to images and volumes.",
 	}, s.remove)
 }
 
@@ -74,9 +75,9 @@ func (s *Server) get(ctx context.Context, _ *mcp.CallToolRequest, in getInput) (
 	case "images", "image":
 		return s.getImages(ctx, in)
 	case "volumes", "volume":
-		return s.getVolumes(ctx)
+		return s.getVolumes(ctx, in)
 	case "networks", "network":
-		return s.getNetworks(ctx)
+		return s.getNetworks(ctx, in)
 	case "info":
 		return s.getInfo(ctx)
 	case "stats":
@@ -89,38 +90,59 @@ func (s *Server) get(ctx context.Context, _ *mcp.CallToolRequest, in getInput) (
 }
 
 func (s *Server) getContainers(ctx context.Context, in getInput) (*mcp.CallToolResult, any, error) {
+	filters, err := parseFilters(in.Filter)
+	if err != nil {
+		return nil, nil, err
+	}
 	result, err := s.client.API().ContainerList(ctx, mobyclient.ContainerListOptions{
-		All:   !in.RunningOnly,
-		Limit: clampLast(in.Last),
+		All:     !in.RunningOnly,
+		Limit:   clampLast(in.Last),
+		Filters: filters,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("list containers: %w", err)
 	}
-	return textResult(formatContainers(result.Items))
+	items := limitRows(result.Items, clampLimit(in.Limit))
+	return textResult(limitText(formatContainers(items), len(result.Items), len(items)))
 }
 
 func (s *Server) getImages(ctx context.Context, in getInput) (*mcp.CallToolResult, any, error) {
-	result, err := s.client.API().ImageList(ctx, mobyclient.ImageListOptions{All: in.All})
+	filters, err := parseFilters(in.Filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	result, err := s.client.API().ImageList(ctx, mobyclient.ImageListOptions{All: in.All, Filters: filters})
 	if err != nil {
 		return nil, nil, fmt.Errorf("list images: %w", err)
 	}
-	return textResult(formatImages(result.Items))
+	items := limitRows(result.Items, clampLimit(in.Limit))
+	return textResult(limitText(formatImages(items), len(result.Items), len(items)))
 }
 
-func (s *Server) getVolumes(ctx context.Context) (*mcp.CallToolResult, any, error) {
-	result, err := s.client.API().VolumeList(ctx, mobyclient.VolumeListOptions{})
+func (s *Server) getVolumes(ctx context.Context, in getInput) (*mcp.CallToolResult, any, error) {
+	filters, err := parseFilters(in.Filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	result, err := s.client.API().VolumeList(ctx, mobyclient.VolumeListOptions{Filters: filters})
 	if err != nil {
 		return nil, nil, fmt.Errorf("list volumes: %w", err)
 	}
-	return textResult(formatVolumes(result.Items))
+	items := limitRows(result.Items, clampLimit(in.Limit))
+	return textResult(limitText(formatVolumes(items), len(result.Items), len(items)))
 }
 
-func (s *Server) getNetworks(ctx context.Context) (*mcp.CallToolResult, any, error) {
-	result, err := s.client.API().NetworkList(ctx, mobyclient.NetworkListOptions{})
+func (s *Server) getNetworks(ctx context.Context, in getInput) (*mcp.CallToolResult, any, error) {
+	filters, err := parseFilters(in.Filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	result, err := s.client.API().NetworkList(ctx, mobyclient.NetworkListOptions{Filters: filters})
 	if err != nil {
 		return nil, nil, fmt.Errorf("list networks: %w", err)
 	}
-	return textResult(formatNetworks(result.Items))
+	items := limitRows(result.Items, clampLimit(in.Limit))
+	return textResult(limitText(formatNetworks(items), len(result.Items), len(items)))
 }
 
 func (s *Server) getInfo(ctx context.Context) (*mcp.CallToolResult, any, error) {
@@ -147,6 +169,7 @@ func (s *Server) getStats(ctx context.Context, in getInput) (*mcp.CallToolResult
 			targets = append(targets, item.ID)
 		}
 	}
+	targets = limitRows(targets, clampLimit(in.Limit))
 	stats := make([]container.StatsResponse, 0, len(targets))
 	for _, target := range targets {
 		result, err := api.ContainerStats(ctx, target, mobyclient.ContainerStatsOptions{IncludePreviousSample: true})
@@ -182,22 +205,74 @@ func (s *Server) getDisk(ctx context.Context, in getInput) (*mcp.CallToolResult,
 }
 
 func (s *Server) inspect(ctx context.Context, _ *mcp.CallToolRequest, in inspectInput) (*mcp.CallToolResult, any, error) {
-	containerID := strings.TrimSpace(in.Container)
-	if containerID == "" {
-		return nil, nil, errors.New("container é obrigatório")
+	target := strings.TrimSpace(in.Target)
+	if target == "" {
+		target = strings.TrimSpace(in.Container)
+	}
+	if target == "" {
+		return nil, nil, errors.New("target é obrigatório")
 	}
 	ctx, cancel := s.client.WithTimeout(ctx)
 	defer cancel()
 
-	result, err := s.client.API().ContainerInspect(ctx, containerID, mobyclient.ContainerInspectOptions{})
-	if err != nil {
-		return nil, nil, fmt.Errorf("inspect %s: %w", containerID, err)
+	api := s.client.API()
+	resource := strings.ToLower(strings.TrimSpace(in.Resource))
+	switch resource {
+	case "", "container", "containers":
+		result, err := api.ContainerInspect(ctx, target, mobyclient.ContainerInspectOptions{})
+		if err != nil {
+			return nil, nil, fmt.Errorf("inspect container %s: %w", target, err)
+		}
+		value, err := decodeInspect([]byte(result.Raw))
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(formatInspect("container", target, redactEnv(value)))
+	case "image", "images":
+		var raw bytes.Buffer
+		result, err := api.ImageInspect(ctx, target, mobyclient.ImageInspectWithRawResponse(&raw))
+		if err != nil {
+			return nil, nil, fmt.Errorf("inspect image %s: %w", target, err)
+		}
+		if raw.Len() == 0 {
+			return textResult(formatInspect("image", target, result))
+		}
+		value, err := decodeInspect(raw.Bytes())
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(formatInspect("image", target, value))
+	case "volume", "volumes":
+		result, err := api.VolumeInspect(ctx, target, mobyclient.VolumeInspectOptions{})
+		if err != nil {
+			return nil, nil, fmt.Errorf("inspect volume %s: %w", target, err)
+		}
+		value, err := decodeInspect([]byte(result.Raw))
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(formatInspect("volume", target, value))
+	case "network", "networks":
+		result, err := api.NetworkInspect(ctx, target, mobyclient.NetworkInspectOptions{})
+		if err != nil {
+			return nil, nil, fmt.Errorf("inspect network %s: %w", target, err)
+		}
+		value, err := decodeInspect([]byte(result.Raw))
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(formatInspect("network", target, value))
+	default:
+		return nil, nil, errors.New("'resource' inválido: use container, image, volume ou network")
 	}
+}
+
+func decodeInspect(raw []byte) (any, error) {
 	var value any
-	if err := json.Unmarshal(result.Raw, &value); err != nil {
-		return nil, nil, fmt.Errorf("decode inspect %s: %w", containerID, err)
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, fmt.Errorf("decode docker inspect: %w", err)
 	}
-	return textResult(formatInspect(containerID, redactEnv(value)))
+	return value, nil
 }
 
 func (s *Server) logs(ctx context.Context, _ *mcp.CallToolRequest, in logsInput) (*mcp.CallToolResult, any, error) {
@@ -333,21 +408,52 @@ func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (
 }
 
 func (s *Server) remove(ctx context.Context, _ *mcp.CallToolRequest, in removeInput) (*mcp.CallToolResult, any, error) {
-	containerID := strings.TrimSpace(in.Container)
-	if containerID == "" {
-		return nil, nil, errors.New("container é obrigatório")
+	target := strings.TrimSpace(in.Target)
+	if target == "" {
+		target = strings.TrimSpace(in.Container)
+	}
+	if target == "" {
+		return nil, nil, errors.New("target é obrigatório")
 	}
 	ctx, cancel := s.client.WithTimeout(ctx)
 	defer cancel()
 
-	_, err := s.client.API().ContainerRemove(ctx, containerID, mobyclient.ContainerRemoveOptions{
-		Force:         in.Force,
-		RemoveVolumes: in.Volumes,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("remove %s: %w", containerID, err)
+	api := s.client.API()
+	resource := strings.ToLower(strings.TrimSpace(in.Resource))
+	switch resource {
+	case "", "container", "containers":
+		_, err := api.ContainerRemove(ctx, target, mobyclient.ContainerRemoveOptions{
+			Force:         in.Force,
+			RemoveVolumes: in.Volumes,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("remove container %s: %w", target, err)
+		}
+		return textResult(formatRemove("container", target))
+	case "image", "images":
+		_, err := api.ImageRemove(ctx, target, mobyclient.ImageRemoveOptions{
+			Force:         in.Force,
+			PruneChildren: true,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("remove image %s: %w", target, err)
+		}
+		return textResult(formatRemove("image", target))
+	case "volume", "volumes":
+		_, err := api.VolumeRemove(ctx, target, mobyclient.VolumeRemoveOptions{Force: in.Force})
+		if err != nil {
+			return nil, nil, fmt.Errorf("remove volume %s: %w", target, err)
+		}
+		return textResult(formatRemove("volume", target))
+	case "network", "networks":
+		_, err := api.NetworkRemove(ctx, target, mobyclient.NetworkRemoveOptions{})
+		if err != nil {
+			return nil, nil, fmt.Errorf("remove network %s: %w", target, err)
+		}
+		return textResult(formatRemove("network", target))
+	default:
+		return nil, nil, errors.New("'resource' inválido: use container, image, volume ou network")
 	}
-	return textResult(formatRemove(containerID))
 }
 
 func inspectTTY(raw json.RawMessage) (bool, error) {
@@ -493,17 +599,73 @@ func clampLast(n int) int {
 	return n
 }
 
+func parseFilters(value string) (mobyclient.Filters, error) {
+	filters := mobyclient.Filters{}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return filters, nil
+	}
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		key, val, ok := strings.Cut(part, "=")
+		if !ok {
+			return nil, fmt.Errorf("filtro inválido %q: use chave=valor", part)
+		}
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		if key == "" {
+			return nil, fmt.Errorf("filtro inválido %q: chave vazia", part)
+		}
+		filters.Add(key, val)
+	}
+	return filters, nil
+}
+
+func clampLimit(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	if n > MAX_LIMIT {
+		return MAX_LIMIT
+	}
+	return n
+}
+
+func limitRows[T any](rows []T, limit int) []T {
+	if limit <= 0 {
+		return rows
+	}
+	if len(rows) <= limit {
+		return rows
+	}
+	return rows[:limit]
+}
+
+func limitText(text string, total, shown int) string {
+	if shown >= total {
+		return text
+	}
+	return fmt.Sprintf("%s\n\nMostrando %d de %d registros. Use limit para ajustar.", text, shown, total)
+}
+
 type getInput struct {
 	Resource    string `json:"resource" jsonschema:"What to get: containers, images, volumes, networks, info, stats or disk (required)."`
 	RunningOnly bool   `json:"runningOnly,omitempty" jsonschema:"For containers: if true, shows only running containers; default includes stopped."`
 	All         bool   `json:"all,omitempty" jsonschema:"For images: include intermediate images."`
 	Last        int    `json:"last,omitempty" jsonschema:"For containers: last N created containers."`
+	Filter      string `json:"filter,omitempty" jsonschema:"Docker filter expressions, comma-separated key=value (e.g. status=running,name=api)."`
+	Limit       int    `json:"limit,omitempty" jsonschema:"Maximum rows returned; 0 = all."`
 	Verbose     bool   `json:"verbose,omitempty" jsonschema:"For disk: detailed per-object usage."`
 	Container   string `json:"container,omitempty" jsonschema:"For stats: container name or ID; default all running containers."`
 }
 
 type inspectInput struct {
-	Container string `json:"container" jsonschema:"Container name or ID (required)."`
+	Resource  string `json:"resource,omitempty" jsonschema:"What to inspect: container (default), image, volume or network."`
+	Target    string `json:"target,omitempty" jsonschema:"Container, image, volume or network name/ID (required)."`
+	Container string `json:"container,omitempty" jsonschema:"Legacy alias for target (container name/ID)."`
 }
 
 type logsInput struct {
@@ -528,9 +690,11 @@ type runInput struct {
 }
 
 type removeInput struct {
-	Container string `json:"container" jsonschema:"Container name or ID (required)."`
-	Force     bool   `json:"force,omitempty" jsonschema:"Force removal of a running container."`
-	Volumes   bool   `json:"volumes,omitempty" jsonschema:"Remove anonymous volumes."`
+	Resource  string `json:"resource,omitempty" jsonschema:"What to remove: container (default), image, volume or network."`
+	Target    string `json:"target,omitempty" jsonschema:"Container, image, volume or network name/ID (required)."`
+	Container string `json:"container,omitempty" jsonschema:"Legacy alias for target (container name/ID)."`
+	Force     bool   `json:"force,omitempty" jsonschema:"Force removal (container, image or volume)."`
+	Volumes   bool   `json:"volumes,omitempty" jsonschema:"For containers: remove anonymous volumes."`
 }
 
 func textResult(text string) (*mcp.CallToolResult, any, error) {

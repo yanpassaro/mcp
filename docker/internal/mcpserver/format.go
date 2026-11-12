@@ -383,20 +383,20 @@ func redactEnv(value any) any {
 	}
 }
 
-func formatInspect(target string, value any) string {
+func formatInspect(resource, target string, value any) string {
+	header := fmt.Sprintf("🔍 %s `%s`", resource, target)
 	if value == nil {
-		return fmt.Sprintf("🔍 `%s` — sem dados.", target)
+		return fmt.Sprintf("%s — sem dados.", header)
 	}
 	pretty, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
-		return fmt.Sprintf("🔍 `%s` — falha ao formatar JSON: %v", target, err)
+		return fmt.Sprintf("%s — falha ao formatar JSON: %v", header, err)
 	}
 	text := string(pretty)
 	truncated := len(text) > maxInspectBytes
 	if truncated {
 		text = truncateText(text, maxInspectBytes)
 	}
-	header := fmt.Sprintf("🔍 `%s`", target)
 	if truncated {
 		header = fmt.Sprintf("%s (truncado)", header)
 	}
@@ -457,6 +457,15 @@ func formatRun(name, imageName string, result mobyclient.ContainerCreateResult, 
 	return b.String()
 }
 
-func formatRemove(name string) string {
-	return fmt.Sprintf("🗑️ Container removido: `%s`.", name)
+func formatRemove(resource, name string) string {
+	switch resource {
+	case "image":
+		return fmt.Sprintf("🗑️ Imagem removida: `%s`.", name)
+	case "volume":
+		return fmt.Sprintf("🗑️ Volume removido: `%s`.", name)
+	case "network":
+		return fmt.Sprintf("🗑️ Network removida: `%s`.", name)
+	default:
+		return fmt.Sprintf("🗑️ Container removido: `%s`.", name)
+	}
 }

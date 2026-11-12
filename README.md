@@ -30,6 +30,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | `docker` | `DOCKER_TIMEOUT_SECONDS` | `60` | timeout por comando |
 | | `DOCKER_HOST` | — | endpoint do daemon (unix socket, npipe ou tcp), lido pelo SDK |
 | | `DOCKER_API_VERSION` / `DOCKER_TLS_VERIFY` / `DOCKER_CERT_PATH` | — | configuração do Engine API, lida pelo SDK |
+| | `DOCKER_REGISTRY_AUTH` | — | auth base64 para pull de imagem privada (opcional) |
 | `sqlize` | `SQLIZE_STATE_DIR` | `~/.local/state/sqlize` | pasta do banco de estado |
 | | `{PREFIXO}_POSTGRES_URL` / `_DSN` | — | conexão Postgres read-only |
 | | `{PREFIXO}_MYSQL_URL` / `_DSN` | — | conexão MySQL read-only |
