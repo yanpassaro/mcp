@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/containerd/errdefs"
 	"github.com/docker/go-connections/nat"
@@ -23,10 +24,12 @@ import (
 )
 
 const (
-	DEFAULT_TAIL = 200
-	MAX_TAIL     = 10000
-	MAX_LAST     = 1000
-	MAX_LIMIT    = 5000
+	DEFAULT_TAIL        = 200
+	MAX_TAIL            = 10000
+	MAX_LAST            = 1000
+	MAX_LIMIT           = 5000
+	EXEC_POLL_INTERVAL  = 100 * time.Millisecond
+	EXEC_POLL_ATTEMPTS  = 10
 )
 
 type Server struct {
@@ -49,19 +52,14 @@ func (s *Server) Register(server *mcp.Server) {
 	}, s.inspect)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "docker_logs",
-		Description: "Container logs (stdout+stderr) with tail, since/until and optional timestamps. Read-only.",
-	}, s.logs)
-
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "docker_run",
 		Description: "Create and start a detached container. Image pull policy (missing/always/never), optional platform and timeout. No environment variables are accepted.",
 	}, s.run)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "docker_remove",
-		Description: "Remove a container, image, volume or network. 'resource' selects the type (container default); 'target' is the name/ID. force/volumes apply to containers; force applies to images and volumes.",
-	}, s.remove)
+		Name:        "docker_control",
+		Description: "Act on a container: start, stop, restart, pause, unpause, kill, logs or exec. Use action=remove with resource=container|image|volume|network to remove resources.",
+	}, s.control)
 }
 
 func (s *Server) get(ctx context.Context, _ *mcp.CallToolRequest, in getInput) (*mcp.CallToolResult, any, error) {
@@ -275,14 +273,7 @@ func decodeInspect(raw []byte) (any, error) {
 	return value, nil
 }
 
-func (s *Server) logs(ctx context.Context, _ *mcp.CallToolRequest, in logsInput) (*mcp.CallToolResult, any, error) {
-	containerID := strings.TrimSpace(in.Container)
-	if containerID == "" {
-		return nil, nil, errors.New("container é obrigatório")
-	}
-	ctx, cancel := s.client.WithTimeout(ctx)
-	defer cancel()
-
+func (s *Server) logs(ctx context.Context, containerID string, in controlInput) (*mcp.CallToolResult, any, error) {
 	info, err := s.client.API().ContainerInspect(ctx, containerID, mobyclient.ContainerInspectOptions{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("inspect %s: %w", containerID, err)
@@ -407,7 +398,8 @@ func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (
 	return textResult(formatRun(name, imageName, created, pulled))
 }
 
-func (s *Server) remove(ctx context.Context, _ *mcp.CallToolRequest, in removeInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) control(ctx context.Context, _ *mcp.CallToolRequest, in controlInput) (*mcp.CallToolResult, any, error) {
+	action := strings.ToLower(strings.TrimSpace(in.Action))
 	target := strings.TrimSpace(in.Target)
 	if target == "" {
 		target = strings.TrimSpace(in.Container)
@@ -415,16 +407,80 @@ func (s *Server) remove(ctx context.Context, _ *mcp.CallToolRequest, in removeIn
 	if target == "" {
 		return nil, nil, errors.New("target é obrigatório")
 	}
-	ctx, cancel := s.client.WithTimeout(ctx)
+	ctx, cancel := s.client.WithTimeoutSeconds(ctx, in.TimeoutSeconds)
 	defer cancel()
 
 	api := s.client.API()
-	resource := strings.ToLower(strings.TrimSpace(in.Resource))
+	switch action {
+	case "start":
+		_, err := api.ContainerStart(ctx, target, mobyclient.ContainerStartOptions{})
+		if err != nil {
+			return nil, nil, fmt.Errorf("start %s: %w", target, err)
+		}
+		return textResult(formatControl("start", target, ""))
+	case "stop":
+		options := mobyclient.ContainerStopOptions{Signal: strings.TrimSpace(in.Signal)}
+		if in.TimeoutSeconds > 0 {
+			timeout := in.TimeoutSeconds
+			options.Timeout = &timeout
+		}
+		_, err := api.ContainerStop(ctx, target, options)
+		if err != nil {
+			return nil, nil, fmt.Errorf("stop %s: %w", target, err)
+		}
+		return textResult(formatControl("stop", target, ""))
+	case "restart":
+		options := mobyclient.ContainerRestartOptions{Signal: strings.TrimSpace(in.Signal)}
+		if in.TimeoutSeconds > 0 {
+			timeout := in.TimeoutSeconds
+			options.Timeout = &timeout
+		}
+		_, err := api.ContainerRestart(ctx, target, options)
+		if err != nil {
+			return nil, nil, fmt.Errorf("restart %s: %w", target, err)
+		}
+		return textResult(formatControl("restart", target, ""))
+	case "pause":
+		_, err := api.ContainerPause(ctx, target, mobyclient.ContainerPauseOptions{})
+		if err != nil {
+			return nil, nil, fmt.Errorf("pause %s: %w", target, err)
+		}
+		return textResult(formatControl("pause", target, ""))
+	case "unpause":
+		_, err := api.ContainerUnpause(ctx, target, mobyclient.ContainerUnpauseOptions{})
+		if err != nil {
+			return nil, nil, fmt.Errorf("unpause %s: %w", target, err)
+		}
+		return textResult(formatControl("unpause", target, ""))
+	case "kill":
+		signal := strings.TrimSpace(in.Signal)
+		if signal == "" {
+			signal = "SIGKILL"
+		}
+		_, err := api.ContainerKill(ctx, target, mobyclient.ContainerKillOptions{Signal: signal})
+		if err != nil {
+			return nil, nil, fmt.Errorf("kill %s: %w", target, err)
+		}
+		return textResult(formatControl("kill", target, signal))
+	case "remove":
+		return s.removeResource(ctx, target, in.Resource, in.Force, in.Volumes)
+	case "logs":
+		return s.logs(ctx, target, in)
+	case "exec":
+		return s.execCommand(ctx, target, in)
+	default:
+		return nil, nil, errors.New("'action' inválido: use start, stop, restart, pause, unpause, kill, logs, exec ou remove")
+	}
+}
+
+func (s *Server) removeResource(ctx context.Context, target, resource string, force, volumes bool) (*mcp.CallToolResult, any, error) {
+	api := s.client.API()
+	resource = strings.ToLower(strings.TrimSpace(resource))
 	switch resource {
 	case "", "container", "containers":
 		_, err := api.ContainerRemove(ctx, target, mobyclient.ContainerRemoveOptions{
-			Force:         in.Force,
-			RemoveVolumes: in.Volumes,
+			Force:         force,
+			RemoveVolumes: volumes,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("remove container %s: %w", target, err)
@@ -432,7 +488,7 @@ func (s *Server) remove(ctx context.Context, _ *mcp.CallToolRequest, in removeIn
 		return textResult(formatRemove("container", target))
 	case "image", "images":
 		_, err := api.ImageRemove(ctx, target, mobyclient.ImageRemoveOptions{
-			Force:         in.Force,
+			Force:         force,
 			PruneChildren: true,
 		})
 		if err != nil {
@@ -440,7 +496,7 @@ func (s *Server) remove(ctx context.Context, _ *mcp.CallToolRequest, in removeIn
 		}
 		return textResult(formatRemove("image", target))
 	case "volume", "volumes":
-		_, err := api.VolumeRemove(ctx, target, mobyclient.VolumeRemoveOptions{Force: in.Force})
+		_, err := api.VolumeRemove(ctx, target, mobyclient.VolumeRemoveOptions{Force: force})
 		if err != nil {
 			return nil, nil, fmt.Errorf("remove volume %s: %w", target, err)
 		}
@@ -454,6 +510,69 @@ func (s *Server) remove(ctx context.Context, _ *mcp.CallToolRequest, in removeIn
 	default:
 		return nil, nil, errors.New("'resource' inválido: use container, image, volume ou network")
 	}
+}
+
+func (s *Server) execCommand(ctx context.Context, target string, in controlInput) (*mcp.CallToolResult, any, error) {
+	if len(in.Command) == 0 {
+		return nil, nil, errors.New("command é obrigatório para exec")
+	}
+	command := in.Command
+	api := s.client.API()
+	created, err := api.ExecCreate(ctx, target, mobyclient.ExecCreateOptions{
+		User:         strings.TrimSpace(in.User),
+		WorkingDir:   strings.TrimSpace(in.Workdir),
+		AttachStdout: true,
+		AttachStderr: true,
+		Cmd:          command,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("exec create %s: %w", target, err)
+	}
+	attach, err := api.ExecAttach(ctx, created.ID, mobyclient.ExecAttachOptions{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("exec attach %s: %w", target, err)
+	}
+
+	stream := make(chan execStream, 1)
+	go func() {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		_, copyErr := stdcopy.StdCopy(&stdout, &stderr, attach.Reader)
+		attach.Close()
+		stream <- execStream{stdout: stdout.String(), stderr: stderr.String(), err: copyErr}
+	}()
+
+	var out execStream
+	select {
+	case out = <-stream:
+	case <-ctx.Done():
+		attach.Close()
+		return nil, nil, fmt.Errorf("exec %s: %w", target, ctx.Err())
+	}
+	if out.err != nil {
+		return nil, nil, fmt.Errorf("exec read %s: %w", target, out.err)
+	}
+
+	info, err := s.waitExec(ctx, created.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return textResult(formatExec(target, command, info.ExitCode, out.stdout, out.stderr))
+}
+
+func (s *Server) waitExec(ctx context.Context, execID string) (mobyclient.ExecInspectResult, error) {
+	api := s.client.API()
+	for i := 0; i < EXEC_POLL_ATTEMPTS; i++ {
+		info, err := api.ExecInspect(ctx, execID, mobyclient.ExecInspectOptions{})
+		if err != nil {
+			return mobyclient.ExecInspectResult{}, fmt.Errorf("exec inspect %s: %w", execID, err)
+		}
+		if !info.Running {
+			return info, nil
+		}
+		time.Sleep(EXEC_POLL_INTERVAL)
+	}
+	return mobyclient.ExecInspectResult{}, fmt.Errorf("exec %s: processo ainda em execução", execID)
 }
 
 func inspectTTY(raw json.RawMessage) (bool, error) {
@@ -668,14 +787,6 @@ type inspectInput struct {
 	Container string `json:"container,omitempty" jsonschema:"Legacy alias for target (container name/ID)."`
 }
 
-type logsInput struct {
-	Container  string `json:"container" jsonschema:"Container name or ID (required)."`
-	Tail       int    `json:"tail,omitempty" jsonschema:"Number of lines from the end (default 200, max 10000)."`
-	Since      string `json:"since,omitempty" jsonschema:"Show logs since a timestamp or relative duration (e.g. 10m)."`
-	Until      string `json:"until,omitempty" jsonschema:"Show logs before a timestamp or relative duration."`
-	Timestamps bool   `json:"timestamps,omitempty" jsonschema:"If true, prefixes each line with its timestamp."`
-}
-
 type runInput struct {
 	Image          string   `json:"image" jsonschema:"Image to run (required)."`
 	Name           string   `json:"name,omitempty" jsonschema:"Container name (optional)."`
@@ -689,12 +800,28 @@ type runInput struct {
 	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"Optional timeout override for pull/create/start, in seconds."`
 }
 
-type removeInput struct {
-	Resource  string `json:"resource,omitempty" jsonschema:"What to remove: container (default), image, volume or network."`
-	Target    string `json:"target,omitempty" jsonschema:"Container, image, volume or network name/ID (required)."`
-	Container string `json:"container,omitempty" jsonschema:"Legacy alias for target (container name/ID)."`
-	Force     bool   `json:"force,omitempty" jsonschema:"Force removal (container, image or volume)."`
-	Volumes   bool   `json:"volumes,omitempty" jsonschema:"For containers: remove anonymous volumes."`
+type controlInput struct {
+	Action         string   `json:"action" jsonschema:"Action: start, stop, restart, pause, unpause, kill, logs, exec or remove (required)."`
+	Target         string   `json:"target,omitempty" jsonschema:"Container name/ID; for remove, container/image/volume/network name/ID (required)."`
+	Container      string   `json:"container,omitempty" jsonschema:"Legacy alias for target (container name/ID)."`
+	Resource       string   `json:"resource,omitempty" jsonschema:"For remove: container (default), image, volume or network."`
+	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"Operation timeout in seconds; for stop/restart, also the graceful timeout."`
+	Signal         string   `json:"signal,omitempty" jsonschema:"For stop/restart/kill: signal name."`
+	Force          bool     `json:"force,omitempty" jsonschema:"For remove: force removal."`
+	Volumes        bool     `json:"volumes,omitempty" jsonschema:"For remove container: remove anonymous volumes."`
+	Command        []string `json:"command,omitempty" jsonschema:"For exec: command and arguments, e.g. [\"sh\",\"-lc\",\"ls -la\"]."`
+	User           string   `json:"user,omitempty" jsonschema:"For exec: user (name or UID[:GID]) to run the command."`
+	Workdir        string   `json:"workdir,omitempty" jsonschema:"For exec: working directory inside the container."`
+	Tail           int      `json:"tail,omitempty" jsonschema:"For logs: number of lines from the end (default 200, max 10000)."`
+	Since          string   `json:"since,omitempty" jsonschema:"For logs: show logs since a timestamp or relative duration (e.g. 10m)."`
+	Until          string   `json:"until,omitempty" jsonschema:"For logs: show logs before a timestamp or relative duration."`
+	Timestamps     bool     `json:"timestamps,omitempty" jsonschema:"For logs: prefix each line with its timestamp."`
+}
+
+type execStream struct {
+	stdout string
+	stderr string
+	err    error
 }
 
 func textResult(text string) (*mcp.CallToolResult, any, error) {

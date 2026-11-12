@@ -4,7 +4,7 @@ Inspeciona o Docker local ou remoto e gerencia o ciclo de vida básico de contai
 
 A conexão usa `client.FromEnv`, então respeita `DOCKER_HOST`, `DOCKER_API_VERSION`, `DOCKER_CERT_PATH` e `DOCKER_TLS_VERIFY` (Docker Desktop, Engine local/remoto e sockets `unix://`/`npipe://`).
 
-São 5 tools: `docker_get`, `docker_inspect`, `docker_logs`, `docker_run` e `docker_remove`.
+São 4 tools: `docker_get`, `docker_inspect`, `docker_run` e `docker_control`.
 
 Variáveis de ambiente **não são expostas**: `docker_inspect` remove recursivamente qualquer chave `Env`, e `docker_run` não aceita `env`.
 
@@ -14,9 +14,8 @@ Variáveis de ambiente **não são expostas**: `docker_inspect` remove recursiva
 | --- | --- |
 | `docker_get` | Lista `containers`, `images`, `volumes`, `networks`, `info`, `stats` ou `disk`; aceita `filter` e `limit` |
 | `docker_inspect` | JSON de container, imagem, volume ou network; `Env` do container é removido |
-| `docker_logs` | Logs do container com `tail`, `since`/`until` e timestamps opcionais |
 | `docker_run` | Cria e inicia um container detached; aceita nome, command, portas, volumes, network, `autoRemove`, política `pull`, `platform` e `timeoutSeconds` |
-| `docker_remove` | Remove container, imagem, volume ou network; `resource` seleciona o tipo |
+| `docker_control` | Start/stop/restart/pause/unpause/kill, `logs`, `exec` e remove de container, imagem, volume ou network |
 
 ## Inspect
 
@@ -101,7 +100,7 @@ go mod tidy
 
 `docker_run` tem a opção `pull`:
 
-- `missing` (padrão): baixa se a imagem não existir localmente.
+- `missing` (padrão): baixa só se a imagem não existir localmente.
 - `always`: baixa sempre.
 - `never`: não baixa; falha se não existir.
 
@@ -119,40 +118,81 @@ Exemplo:
 
 `platform` permite escolher `linux/amd64`, `linux/arm64`, etc. Para registry privado, defina `DOCKER_REGISTRY_AUTH` com o auth base64 no ambiente do servidor; ele não é exposto ao modelo.
 
-## Remover recursos
+## Controlar containers
 
-`docker_remove` usa `resource` + `target`:
+`docker_control` aceita `action`:
 
-- `container` (padrão): `force` e `volumes` (volumes anônimos).
-- `image`: `force`; o prune de filhos é sempre ligado.
-- `volume`: `force`.
-- `network`: sem `force`.
+- `start`, `stop`, `restart`, `pause`, `unpause`, `kill`
+- `logs` para ver stdout/stderr do container
+- `exec` para rodar um comando dentro do container
+- `remove` para container, imagem, volume ou network
 
 Exemplos:
 
 ```json
-{ "resource": "container", "target": "web", "force": true, "volumes": true }
+{ "action": "restart", "target": "web", "timeoutSeconds": 30 }
 ```
 
 ```json
-{ "resource": "image", "target": "nginx:latest", "force": true }
+{ "action": "stop", "target": "web", "signal": "SIGTERM" }
 ```
 
 ```json
-{ "resource": "volume", "target": "nginx-html", "force": true }
+{ "action": "kill", "target": "web", "signal": "SIGKILL" }
 ```
 
 ```json
-{ "resource": "network", "target": "app-net" }
+{ "action": "remove", "resource": "container", "target": "web", "force": true, "volumes": true }
 ```
 
-O campo antigo `container` continua aceito como alias de `target`.
+```json
+{ "action": "remove", "resource": "image", "target": "nginx:latest", "force": true }
+```
+
+```json
+{ "action": "remove", "resource": "volume", "target": "nginx-html", "force": true }
+```
+
+```json
+{ "action": "remove", "resource": "network", "target": "app-net" }
+```
+
+`timeoutSeconds` vale como timeout da operação e como timeout de parada em `stop`/`restart`. `signal` vale para `stop`, `restart` e `kill`. O campo antigo `container` continua aceito como alias de `target`.
+
+## Logs
+
+`docker_control` com `action: "logs"` devolve stdout e stderr do container, com `tail` (padrão 200, máximo 10000), `since`/`until` e `timestamps` opcionais.
+
+```json
+{ "action": "logs", "target": "web", "tail": 200 }
+```
+
+```json
+{ "action": "logs", "target": "web", "since": "10m", "timestamps": true }
+```
+
+## Exec
+
+`docker_control` com `action: "exec"` roda um comando dentro do container em execução e devolve `exit code`, stdout e stderr.
+
+```json
+{ "action": "exec", "target": "web", "command": ["sh", "-lc", "nginx -v"] }
+```
+
+```json
+{ "action": "exec", "target": "web", "command": ["ls", "-la"], "workdir": "/app", "user": "1000:1000", "timeoutSeconds": 30 }
+```
+
+O `command` é enviado como argv (`["sh", "-lc", "..."]`), sem shell implícito. `user` e `workdir` são opcionais. Exit code diferente de zero não é erro da tool: vem no resultado para o modelo decidir.
+
+Saída de stdout e stderr é truncada em 128 KB. `exec` roda como o usuário do container (root por padrão); use com cuidado em daemons compartilhados.
 
 ## Limites e segurança
 
-- `docker_get`, `docker_inspect` e `docker_logs` são read-only.
-- `docker_run` e `docker_remove` escrevem no daemon; não há `exec`, `build`, `pull`, `push` nem `prune`.
+- `docker_get` e `docker_inspect` são read-only.
+- `docker_run` e `docker_control` escrevem no daemon; não há `build`, `push` nem `prune`.
+- `exec` equivale a acesso root dentro do container.
 - `docker_inspect` remove `Env` em qualquer nível do JSON.
 - `docker_run` não tem parâmetro `env`; variáveis só via imagem ou CLI externa.
-- `docker_run` não faz pull automático; a imagem precisa existir no daemon.
-- Saídas de `docker_logs`, `docker_inspect` e `docker_get` (disk) são truncadas em 128 KB.
+- `docker_run` faz pull conforme `pull` (`missing` padrão); com `pull: "never"` a imagem precisa existir no daemon.
+- Saídas de `docker_get` (disk), `docker_inspect` e `docker_control` (logs e exec) são truncadas em 128 KB.

@@ -20,6 +20,7 @@ const (
 	maxLogBytes     = 128 * 1024
 	maxInspectBytes = 128 * 1024
 	maxDiskBytes    = 128 * 1024
+	maxExecBytes    = 128 * 1024
 )
 
 func table(headers []string, rows [][]string, empty string) string {
@@ -457,6 +458,28 @@ func formatRun(name, imageName string, result mobyclient.ContainerCreateResult, 
 	return b.String()
 }
 
+func formatControl(action, name, signal string) string {
+	switch action {
+	case "start":
+		return fmt.Sprintf("▶️ Container iniciado: `%s`.", name)
+	case "stop":
+		return fmt.Sprintf("⏹️ Container parado: `%s`.", name)
+	case "restart":
+		return fmt.Sprintf("🔄 Container reiniciado: `%s`.", name)
+	case "pause":
+		return fmt.Sprintf("⏸️ Container pausado: `%s`.", name)
+	case "unpause":
+		return fmt.Sprintf("⏵️ Container retomado: `%s`.", name)
+	case "kill":
+		if signal == "" {
+			signal = "SIGKILL"
+		}
+		return fmt.Sprintf("☠️ Container morto com `%s`: `%s`.", signal, name)
+	default:
+		return fmt.Sprintf("✅ Container: `%s`.", name)
+	}
+}
+
 func formatRemove(resource, name string) string {
 	switch resource {
 	case "image":
@@ -468,4 +491,24 @@ func formatRemove(resource, name string) string {
 	default:
 		return fmt.Sprintf("🗑️ Container removido: `%s`.", name)
 	}
+}
+
+func formatExec(target string, command []string, exitCode int, stdout, stderr string) string {
+	b := strings.Builder{}
+	fmt.Fprintf(&b, "🐚 Exec em `%s`: `%s`\n\n- Exit code: `%d`", target, strings.Join(command, " "), exitCode)
+	if strings.TrimSpace(stdout) != "" {
+		fmt.Fprintf(&b, "\n\n**stdout**\n\n```text\n%s```", execBlock(stdout))
+	}
+	if strings.TrimSpace(stderr) != "" {
+		fmt.Fprintf(&b, "\n\n**stderr**\n\n```text\n%s```", execBlock(stderr))
+	}
+	return b.String()
+}
+
+func execBlock(text string) string {
+	block := truncateText(text, maxExecBytes)
+	if strings.HasSuffix(block, "\n") {
+		return block
+	}
+	return fmt.Sprintf("%s\n", block)
 }
