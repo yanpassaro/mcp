@@ -21,6 +21,7 @@ const (
 	maxInspectBytes = 128 * 1024
 	maxDiskBytes    = 128 * 1024
 	maxExecBytes    = 128 * 1024
+	maxComposeBytes = 128 * 1024
 )
 
 func table(headers []string, rows [][]string, empty string) string {
@@ -511,4 +512,16 @@ func execBlock(text string) string {
 		return block
 	}
 	return fmt.Sprintf("%s\n", block)
+}
+
+func formatComposeOutput(action, file, text string) string {
+	output := strings.TrimSpace(text)
+	header := fmt.Sprintf("🧩 Compose `%s` — `%s`", action, file)
+	if output == "" {
+		return fmt.Sprintf("%s — sem saída.", header)
+	}
+	if len(output) > maxComposeBytes {
+		return fmt.Sprintf("%s (truncado)\n\n```text\n%s\n```", header, truncateText(output, maxComposeBytes))
+	}
+	return fmt.Sprintf("%s\n\n```text\n%s\n```", header, output)
 }

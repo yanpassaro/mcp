@@ -1,6 +1,6 @@
 # Docker MCP
 
-Inspeciona o Docker local ou remoto e gerencia o ciclo de vida básico de containers usando o SDK oficial do Moby (`github.com/moby/moby/client`). Não depende do `docker` CLI.
+Inspeciona o Docker local ou remoto e gerencia containers usando o SDK oficial do Moby (`github.com/moby/moby/client`). O `docker` CLI só é usado no `docker_run` quando você pede build (`buildContext`) ou compose (`compose`).
 
 A conexão usa `client.FromEnv`, então respeita `DOCKER_HOST`, `DOCKER_API_VERSION`, `DOCKER_CERT_PATH` e `DOCKER_TLS_VERIFY` (Docker Desktop, Engine local/remoto e sockets `unix://`/`npipe://`).
 
@@ -14,7 +14,7 @@ Variáveis de ambiente **não são expostas**: `docker_inspect` remove recursiva
 | --- | --- |
 | `docker_get` | Lista `containers`, `images`, `volumes`, `networks`, `info`, `stats` ou `disk`; aceita `filter` e `limit` |
 | `docker_inspect` | JSON de container, imagem, volume ou network; `Env` do container é removido |
-| `docker_run` | Cria e inicia um container detached; aceita nome, command, portas, volumes, network, `autoRemove`, política `pull`, `platform` e `timeoutSeconds` |
+| `docker_run` | Sobe algo: container detached de uma imagem, imagem construída de um Dockerfile (`buildContext`) ou projeto compose (`compose`); aceita nome, command, portas, volumes, network, `autoRemove`, política `pull`, `platform` e `timeoutSeconds` |
 | `docker_control` | Start/stop/restart/pause/unpause/kill, `logs`, `exec` e remove de container, imagem, volume ou network |
 
 ## Inspect
@@ -187,12 +187,51 @@ O `command` é enviado como argv (`["sh", "-lc", "..."]`), sem shell implícito.
 
 Saída de stdout e stderr é truncada em 128 KB. `exec` roda como o usuário do container (root por padrão); use com cuidado em daemons compartilhados.
 
+## Compose e build
+
+Os dois entram pelo `docker_run`, que usa o binário `docker` (precisa estar no `PATH`) nesses dois casos.
+
+**Compose** — informe `compose` com o caminho do arquivo; `image` é ignorada:
+
+```json
+{ "compose": "C:/dev/app/compose.yaml" }
+```
+
+```json
+{ "compose": "C:/dev/app/compose.yaml", "project": "app", "build": true }
+```
+
+```json
+{ "compose": "C:/dev/app/compose.yaml", "services": ["api", "db"], "timeoutSeconds": 600 }
+```
+
+Roda `docker compose --ansi never -f <arquivo> [-p <projeto>] up -d [--build] [serviços...]` com `cmd.Dir` na pasta do arquivo, então caminhos relativos e bind mounts do compose continuam funcionando.
+
+**Dockerfile** — informe `buildContext` com a pasta de contexto; a imagem é construída com a tag do `image` e usada na hora:
+
+```json
+{ "image": "api:local", "buildContext": "C:/dev/app", "ports": ["8080:3000"] }
+```
+
+```json
+{ "image": "api:local", "buildContext": ".", "dockerfile": "docker/Dockerfile", "buildArgs": ["NODE_ENV=production"], "noCache": true }
+```
+
+`buildContext` também aceita `target` (estágio de build), `buildPull` (baixar bases novas) e `noCache`. Depois do build, o pull da imagem é pulado — o `pull` só vale para o caminho sem build.
+
+Caminhos relativos de `compose` e `buildContext` são resolvidos a partir do diretório de trabalho do servidor MCP.
+
+Quando `compose` ou `buildContext` estão preenchidos, o timeout padrão do `docker_run` passa de 60 s para **300 s** (`timeoutSeconds` sobrescreve).
+
+Saída de compose e de build é truncada em 128 KB; em caso de erro, o stderr do CLI volta no próprio erro da tool.
+
 ## Limites e segurança
 
 - `docker_get` e `docker_inspect` são read-only.
-- `docker_run` e `docker_control` escrevem no daemon; não há `build`, `push` nem `prune`.
+- `docker_run` e `docker_control` escrevem no daemon; não há `push` nem `prune`.
+- Build e compose executam o `docker` CLI sem interpolar shell; o servidor não devolve `docker compose config` (que expõe env).
 - `exec` equivale a acesso root dentro do container.
 - `docker_inspect` remove `Env` em qualquer nível do JSON.
-- `docker_run` não tem parâmetro `env`; variáveis só via imagem ou CLI externa.
+- `docker_run` não tem parâmetro `env`; variáveis só via imagem, compose, Dockerfile ou CLI externa.
 - `docker_run` faz pull conforme `pull` (`missing` padrão); com `pull: "never"` a imagem precisa existir no daemon.
-- Saídas de `docker_get` (disk), `docker_inspect` e `docker_control` (logs e exec) são truncadas em 128 KB.
+- Saídas de `docker_get` (disk), `docker_inspect`, `docker_control` (logs e exec) e `docker_run` (compose/build) são truncadas em 128 KB.

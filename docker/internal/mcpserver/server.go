@@ -2,12 +2,15 @@ package mcpserver
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/netip"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,12 +27,13 @@ import (
 )
 
 const (
-	DEFAULT_TAIL        = 200
-	MAX_TAIL            = 10000
-	MAX_LAST            = 1000
-	MAX_LIMIT           = 5000
-	EXEC_POLL_INTERVAL  = 100 * time.Millisecond
-	EXEC_POLL_ATTEMPTS  = 10
+	DEFAULT_TAIL            = 200
+	MAX_TAIL                = 10000
+	MAX_LAST                = 1000
+	MAX_LIMIT               = 5000
+	EXEC_POLL_INTERVAL      = 100 * time.Millisecond
+	EXEC_POLL_ATTEMPTS      = 10
+	COMPOSE_TIMEOUT_SECONDS = 300
 )
 
 type Server struct {
@@ -53,7 +57,7 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "docker_run",
-		Description: "Create and start a detached container. Image pull policy (missing/always/never), optional platform and timeout. No environment variables are accepted.",
+		Description: "Bring something up: run a detached container from an image, build an image from a Dockerfile first (buildContext), or start a compose project (compose + services). Pull policy (missing/always/never), optional platform and timeout. No environment variables are accepted.",
 	}, s.run)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -319,6 +323,13 @@ func (s *Server) logs(ctx context.Context, containerID string, in controlInput) 
 }
 
 func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (*mcp.CallToolResult, any, error) {
+	ctx, cancel := s.client.WithTimeoutSeconds(ctx, runTimeout(in))
+	defer cancel()
+
+	composeFile := strings.TrimSpace(in.Compose)
+	if composeFile != "" {
+		return s.composeUp(ctx, composeFile, in)
+	}
 	rawImage := strings.TrimSpace(in.Image)
 	if rawImage == "" {
 		return nil, nil, errors.New("image é obrigatório")
@@ -332,11 +343,21 @@ func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (
 	if err != nil {
 		return nil, nil, err
 	}
-	ctx, cancel := s.client.WithTimeoutSeconds(ctx, in.TimeoutSeconds)
-	defer cancel()
-	pulled, err := s.ensureImage(ctx, imageName, policy, platform)
-	if err != nil {
-		return nil, nil, err
+	built := false
+	buildContext := strings.TrimSpace(in.BuildContext)
+	if buildContext != "" {
+		buildErr := s.buildImage(ctx, buildContext, imageName, in)
+		if buildErr != nil {
+			return nil, nil, buildErr
+		}
+		built = true
+	}
+	pulled := false
+	if !built {
+		pulled, err = s.ensureImage(ctx, imageName, policy, platform)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	natExposed, natBindings, err := nat.ParsePortSpecs(in.Ports)
@@ -575,6 +596,104 @@ func (s *Server) waitExec(ctx context.Context, execID string) (mobyclient.ExecIn
 	return mobyclient.ExecInspectResult{}, fmt.Errorf("exec %s: processo ainda em execução", execID)
 }
 
+func (s *Server) composeUp(ctx context.Context, file string, in runInput) (*mcp.CallToolResult, any, error) {
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return nil, nil, fmt.Errorf("caminho do compose: %w", err)
+	}
+	args := []string{"compose", "--ansi", "never", "-f", abs}
+	if project := strings.TrimSpace(in.Project); project != "" {
+		args = append(args, "-p", project)
+	}
+	args = append(args, "up", "-d")
+	if in.Build {
+		args = append(args, "--build")
+	}
+	args = append(args, in.Services...)
+
+	out, errOut, err := runDocker(ctx, filepath.Dir(abs), args)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil, fmt.Errorf("compose up: %w", ctx.Err())
+		}
+		return nil, nil, commandFailure(err, out, errOut)
+	}
+	return textResult(formatComposeOutput("up", abs, cmp.Or(strings.TrimSpace(out), strings.TrimSpace(errOut))))
+}
+
+func (s *Server) buildImage(ctx context.Context, buildContext, image string, in runInput) error {
+	dockerfile := cmp.Or(strings.TrimSpace(in.Dockerfile), "Dockerfile")
+	abs, err := filepath.Abs(buildContext)
+	if err != nil {
+		return fmt.Errorf("caminho do contexto: %w", err)
+	}
+	args := []string{"build", "-q", "-t", image, "-f", dockerfile}
+	if in.NoCache {
+		args = append(args, "--no-cache")
+	}
+	if in.BuildPull {
+		args = append(args, "--pull")
+	}
+	if target := strings.TrimSpace(in.Target); target != "" {
+		args = append(args, "--target", target)
+	}
+	if platform := strings.TrimSpace(in.Platform); platform != "" {
+		args = append(args, "--platform", platform)
+	}
+	for _, buildArg := range in.BuildArgs {
+		args = append(args, "--build-arg", buildArg)
+	}
+	args = append(args, abs)
+
+	out, errOut, err := runDocker(ctx, abs, args)
+	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("build %s: %w", image, ctx.Err())
+		}
+		return commandFailure(err, out, errOut)
+	}
+	return nil
+}
+
+func runTimeout(in runInput) int {
+	if in.TimeoutSeconds > 0 {
+		return in.TimeoutSeconds
+	}
+	if strings.TrimSpace(in.Compose) != "" {
+		return COMPOSE_TIMEOUT_SECONDS
+	}
+	if strings.TrimSpace(in.BuildContext) != "" {
+		return COMPOSE_TIMEOUT_SECONDS
+	}
+	return 0
+}
+
+func runDocker(ctx context.Context, dir string, args []string) (string, string, error) {
+	bin, err := exec.LookPath("docker")
+	if err != nil {
+		return "", "", errors.New("docker CLI não encontrado no PATH: necessário para compose e build")
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = dir
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	runErr := cmd.Run()
+	if runErr != nil {
+		return out.String(), errOut.String(), fmt.Errorf("docker %s: %w", strings.Join(args, " "), runErr)
+	}
+	return out.String(), errOut.String(), nil
+}
+
+func commandFailure(err error, out, errOut string) error {
+	details := cmp.Or(strings.TrimSpace(errOut), strings.TrimSpace(out))
+	if details == "" {
+		return err
+	}
+	return fmt.Errorf("%w\n\n```text\n%s\n```", err, truncateText(details, maxComposeBytes))
+}
+
 func inspectTTY(raw json.RawMessage) (bool, error) {
 	var meta struct {
 		Config struct {
@@ -788,7 +907,7 @@ type inspectInput struct {
 }
 
 type runInput struct {
-	Image          string   `json:"image" jsonschema:"Image to run (required)."`
+	Image          string   `json:"image,omitempty" jsonschema:"Image to run (required unless compose is set)."`
 	Name           string   `json:"name,omitempty" jsonschema:"Container name (optional)."`
 	Command        []string `json:"command,omitempty" jsonschema:"Command and arguments after the image (optional)."`
 	Ports          []string `json:"ports,omitempty" jsonschema:"Port mappings, e.g. [\"8080:80\"]."`
@@ -797,7 +916,17 @@ type runInput struct {
 	AutoRemove     bool     `json:"autoRemove,omitempty" jsonschema:"If true, removes the container when it stops."`
 	Pull           string   `json:"pull,omitempty" jsonschema:"Image pull policy: missing (default), always or never."`
 	Platform       string   `json:"platform,omitempty" jsonschema:"Optional platform, e.g. linux/amd64."`
-	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"Optional timeout override for pull/create/start, in seconds."`
+	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"Optional timeout override for pull/build/create/start, in seconds."`
+	Compose        string   `json:"compose,omitempty" jsonschema:"Path to a compose file; when set, runs docker compose up -d instead of a single container."`
+	Project        string   `json:"project,omitempty" jsonschema:"For compose: project name (optional)."`
+	Services       []string `json:"services,omitempty" jsonschema:"For compose: services to start; empty = all."`
+	Build          bool     `json:"build,omitempty" jsonschema:"For compose: build images before starting."`
+	BuildContext   string   `json:"buildContext,omitempty" jsonschema:"Build the image from this context directory before running it."`
+	Dockerfile     string   `json:"dockerfile,omitempty" jsonschema:"For buildContext: Dockerfile name or path (default Dockerfile)."`
+	BuildArgs      []string `json:"buildArgs,omitempty" jsonschema:"For buildContext: build arguments as KEY=VALUE."`
+	BuildPull      bool     `json:"buildPull,omitempty" jsonschema:"For buildContext: always try to pull newer base images."`
+	NoCache        bool     `json:"noCache,omitempty" jsonschema:"For buildContext: do not use the build cache."`
+	Target         string   `json:"target,omitempty" jsonschema:"For buildContext: build stage to target."`
 }
 
 type controlInput struct {
