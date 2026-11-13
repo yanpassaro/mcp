@@ -26,6 +26,7 @@ tasks:
       - task: build:git
       - task: build:github
       - task: build:docker
+      - task: build:ssh
       - task: build:sqlize
       - task: build:anydoc
       - task: build:sandbox
@@ -49,6 +50,31 @@ tasks:
     cmds:
       - go mod tidy
       - go build -o ../{{.DIST}}/docker-mcp.exe ./cmd/docker-mcp
+
+  build:docker:linux:
+    desc: Build docker-mcp for Linux (GOARCH defaults to amd64)
+    dir: docker
+    env:
+      GOOS: linux
+    cmds:
+      - go mod tidy
+      - go build -o ../{{.DIST}}/docker-mcp-linux-{{.GOARCH}} ./cmd/docker-mcp
+
+  build:ssh:
+    desc: Build ssh-mcp.exe
+    dir: ssh
+    cmds:
+      - go mod tidy
+      - go build -o ../{{.DIST}}/ssh-mcp.exe ./cmd/ssh-mcp
+
+  build:ssh:linux:
+    desc: Build ssh-mcp for Linux (GOARCH defaults to amd64)
+    dir: ssh
+    env:
+      GOOS: linux
+    cmds:
+      - go mod tidy
+      - go build -o ../{{.DIST}}/ssh-mcp-linux-{{.GOARCH}} ./cmd/ssh-mcp
 
   build:sqlize:
     desc: Build sqlize-mcp.exe
@@ -91,6 +117,7 @@ tasks:
       - task: format:git
       - task: format:github
       - task: format:docker
+      - task: format:ssh
       - task: format:sqlize
       - task: format:sandbox
       - task: format:anydoc
@@ -114,6 +141,14 @@ tasks:
   format:docker:
     desc: Format the docker module
     dir: docker
+    cmds:
+      - gofmt -w .
+      - go mod tidy
+      - go vet ./...
+
+  format:ssh:
+    desc: Format the ssh module
+    dir: ssh
     cmds:
       - gofmt -w .
       - go mod tidy

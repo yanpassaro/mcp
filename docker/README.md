@@ -67,15 +67,39 @@ Exemplos:
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
 | `DOCKER_TIMEOUT_SECONDS` | `60` | Timeout de cada operação |
-| `DOCKER_HOST` | — | Endpoint do daemon (`unix://`, `npipe://`, `tcp://`) |
+| `DOCKER_HOST` | — | Endpoint do daemon (`unix://`, `npipe://`, `tcp://` ou `ssh://`) |
 | `DOCKER_API_VERSION` | negociação automática | Fixa a versão da API |
 | `DOCKER_TLS_VERIFY` | — | Ativa verificação TLS |
 | `DOCKER_CERT_PATH` | — | Pasta dos certificados TLS |
 | `DOCKER_REGISTRY_AUTH` | — | Auth base64 para pull de imagem privada |
+| `DOCKER_SSH_KEY_PATH` | `~/.ssh/id_ed25519` (ou `id_rsa`, `id_ecdsa`) | Chave para `DOCKER_HOST=ssh://` |
+| `DOCKER_SSH_KEY_PASSPHRASE` | — | Passphrase da chave |
+| `DOCKER_SSH_PASSWORD` | — | Senha SSH (alternativa à chave) |
+| `DOCKER_SSH_KNOWN_HOSTS` | `~/.ssh/known_hosts` | Host keys pinadas |
 
 `DOCKER_CONTEXT` não é lido pelo SDK; para usar um contexto, exporte o `DOCKER_HOST` correspondente.
 
 Logs ficam em `~/.local/state/mcp/logs/docker-<data>.log`.
+
+## Daemon remoto por SSH
+
+`DOCKER_HOST=ssh://usuario@host[:porta][/caminho/do/docker.sock]` é suportado nativamente (o SDK não implementa esse esquema, então o servidor abre o túnel com `golang.org/x/crypto/ssh` e fala com o socket remoto, como o CLI faz).
+
+```env
+DOCKER_HOST=ssh://ubuntu@203.0.113.10
+DOCKER_SSH_KEY_PATH=C:/Users/yannp/.ssh/ubuntu
+DOCKER_SSH_KEY_PASSPHRASE=<passphrase>
+# opcional
+DOCKER_SSH_KNOWN_HOSTS=C:/Users/yannp/.ssh/known_hosts
+```
+
+- Chave: `DOCKER_SSH_KEY_PATH`; sem ela, tenta `~/.ssh/id_ed25519`, `id_rsa` e `id_ecdsa`.
+- `DOCKER_SSH_PASSWORD` funciona como alternativa à chave.
+- Host key é sempre verificada com `knownhosts`; erro sugere `ssh-keyscan -H <host> >> <arquivo>`.
+- Socket padrão `/var/run/docker.sock`; um caminho na URL sobrescreve.
+- A conexão é reaproveitada entre chamadas; cada requisição HTTP abre um canal SSH próprio.
+
+Atenção: `compose` e `buildContext` do `docker_run` continuam usando o **CLI local**, que resolve `ssh://` do seu próprio jeito (agente/`~/.ssh/config`). Se a chave tiver passphrase e não houver agent, esse caminho pode falhar — as demais tools funcionam pelo túnel do servidor.
 
 ## Exemplo (Zed)
 

@@ -3,6 +3,8 @@ package docker
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/moby/moby/client"
@@ -22,7 +24,7 @@ type Client struct {
 }
 
 func NewClient(cfg Config) (*Client, error) {
-	api, err := client.New(client.FromEnv)
+	api, err := newAPI()
 	if err != nil {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}
@@ -31,6 +33,14 @@ func NewClient(cfg Config) (*Client, error) {
 		timeout = DEFAULT_TIMEOUT_SECONDS * time.Second
 	}
 	return &Client{api: api, timeout: timeout, registryAuth: cfg.RegistryAuth}, nil
+}
+
+func newAPI() (*client.Client, error) {
+	host := strings.TrimSpace(os.Getenv("DOCKER_HOST"))
+	if isSSHHost(host) {
+		return newSSHClient(host)
+	}
+	return client.New(client.FromEnv)
 }
 
 func (c *Client) API() *client.Client {

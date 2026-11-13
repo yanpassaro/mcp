@@ -6,7 +6,8 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | --- | --- |
 | `git-mcp` | Inspeção **read-only** de repositórios Git locais (go-git, sem CLI) |
 | `github-mcp` | Consulta **read-only** à API do GitHub (busca, arquivos, issues/PRs, releases) |
-| `docker-mcp` | Inspeção e ciclo de vida de containers Docker via SDK oficial (sem expor env) |
+| `docker-mcp` | Inspeção e ciclo de vida de containers Docker via SDK oficial (sem expor env); build e compose no `docker_run` |
+| `ssh-mcp` | Comandos, leitura/escrita e transferência em hosts remotos via SSH, com múltiplas conexões nomeadas |
 | `sqlize-mcp` | Importa, consulta e exporta dados (SQLite + Postgres/MySQL read-only) |
 | `anydoc` | Lê documentos (Word, PDF, Excel, ODT, RTF, EPUB, CSV) e grava o Markdown ao lado |
 | `sandbox-mcp` | Sandbox **não-destrutivo** de scripts Lua (API `std`, filesystem único, rede via allowlist) |
@@ -16,6 +17,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 - **git**: `git_repo_info`, `git_status`, `git_log`, `git_show`, `git_diff`, `git_refs`, `git_blame`, `git_tree`, `git_read_file`, `git_find_commits`
 - **github**: `github_search`, `github_get_tree`, `github_read_file`, `github_repo_info`, `github_get_item`
 - **docker**: `docker_get`, `docker_inspect`, `docker_run`, `docker_control`
+- **ssh**: `ssh_run`, `ssh_read`, `ssh_write`, `ssh_transfer`, `ssh_probe`
 - **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`, `sqlize_export` (+ `postgres_*`/`mysql_*`)
 - **anydoc**: `anydoc_read`
 - **sandbox**: `sandbox_run` (run por `path`/`code` + `args`), `sandbox_doc` (API `std`), `sandbox_os` (copy/mount/del/stat/list)
@@ -28,9 +30,17 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | | `GITHUB_BASE_URL` | `https://api.github.com` | URL da API (GitHub Enterprise) |
 | | `GITHUB_TIMEOUT_SECONDS` | `60` | timeout por requisição |
 | `docker` | `DOCKER_TIMEOUT_SECONDS` | `60` | timeout por comando |
-| | `DOCKER_HOST` | — | endpoint do daemon (unix socket, npipe ou tcp), lido pelo SDK |
+| | `DOCKER_HOST` | — | endpoint do daemon (unix socket, npipe, tcp ou ssh), lido pelo SDK |
+| | `DOCKER_SSH_KEY_PATH` / `_KEY_PASSPHRASE` / `_PASSWORD` / `_KNOWN_HOSTS` | — | credenciais para `DOCKER_HOST=ssh://` |
 | | `DOCKER_API_VERSION` / `DOCKER_TLS_VERIFY` / `DOCKER_CERT_PATH` | — | configuração do Engine API, lida pelo SDK |
 | | `DOCKER_REGISTRY_AUTH` | — | auth base64 para pull de imagem privada (opcional) |
+| `ssh` | `SSH_HOST` / `SSH_{ALIAS}_HOST` | obrigatório | conexão padrão / conexões nomeadas |
+| | `SSH_USER` / `SSH_{ALIAS}_USER` | `USER`/`USERNAME` | usuário SSH |
+| | `SSH_KEY_PATH` / `SSH_{ALIAS}_KEY_PATH` | — | chave privada (ou `PASSWORD`) |
+| | `SSH_PORT` / `SSH_{ALIAS}_PORT` | `22` | porta SSH |
+| | `SSH_KEY_PASSPHRASE` / `SSH_{ALIAS}_KEY_PASSPHRASE` | — | passphrase da chave |
+| | `SSH_KNOWN_HOSTS` / `SSH_{ALIAS}_KNOWN_HOSTS` | `~/.ssh/known_hosts` | host keys pinadas |
+| | `SSH_TIMEOUT_SECONDS` / `SSH_{ALIAS}_TIMEOUT_SECONDS` | `30` | timeout de conexão e de cada operação |
 | `sqlize` | `SQLIZE_STATE_DIR` | `~/.local/state/sqlize` | pasta do banco de estado |
 | | `{PREFIXO}_POSTGRES_URL` / `_DSN` | — | conexão Postgres read-only |
 | | `{PREFIXO}_MYSQL_URL` / `_DSN` | — | conexão MySQL read-only |
@@ -69,6 +79,7 @@ Build: `task build:sandbox-cli` (gera `dist/sandbox.exe`).
     "git":     { "command": "~/.local/bin/git-mcp.exe" },
     "github":  { "command": "~/.local/bin/github-mcp.exe", "env": { "GITHUB_TOKEN": "<token>" } },
     "docker":  { "command": "~/.local/bin/docker-mcp.exe" },
+    "ssh":     { "command": "~/.local/bin/ssh-mcp.exe", "env": { "SSH_HOST": "<host>", "SSH_USER": "<user>", "SSH_KEY_PATH": "<chave>" } },
     "sqlize":  { "command": "~/.local/bin/sqlize-mcp.exe" },
     "sandbox": { "command": "~/.local/bin/sandbox-mcp.exe" },
     "anydoc":  { "command": "~/.local/bin/anydoc-mcp.exe" }
