@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/containerd/errdefs v1.0.0
 	github.com/docker/go-connections v0.8.2
+	github.com/docker/go-units v0.5.0
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.2
 	github.com/modelcontextprotocol/go-sdk v1.7.0
@@ -16,7 +17,6 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/netip"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/containerd/errdefs"
 	"github.com/docker/go-connections/nat"
+	"github.com/docker/go-units"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
@@ -57,12 +60,12 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "docker_run",
-		Description: "Bring something up: run a detached container from an image, build an image from a Dockerfile first (buildContext), or start a compose project (compose + services). Pull policy (missing/always/never), optional platform and timeout. No environment variables are accepted.",
+		Description: "Bring something up: run a detached container from an image (env/envFile, restart, memory, cpus, user, workdir), build an image from a Dockerfile first (buildContext), or start a compose project (compose + services). Pull policy (missing/always/never), optional platform and timeout. Env values are never echoed back.",
 	}, s.run)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "docker_control",
-		Description: "Act on a container: start, stop, restart, pause, unpause, kill, logs or exec. Use action=remove with resource=container|image|volume|network to remove resources.",
+		Description: "Act on a container: start, stop, restart, pause, unpause, kill, logs or exec. Use action=remove with resource=container|image|volume|network to remove resources, and action=down with file+project to bring a compose project down.",
 	}, s.control)
 }
 
@@ -393,12 +396,43 @@ func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (
 		exposed[port] = struct{}{}
 	}
 	name := strings.TrimSpace(in.Name)
-	config := &container.Config{Image: imageName, Cmd: in.Command, ExposedPorts: exposed}
-	host := &container.HostConfig{
-		PortBindings: ports,
-		Binds:        in.Volumes,
-		AutoRemove:   in.AutoRemove,
+	env, err := mergeEnv(in.EnvFile, in.Env)
+	if err != nil {
+		return nil, nil, err
 	}
+	restartPolicy, err := parseRestartPolicy(in.Restart)
+	if err != nil {
+		return nil, nil, err
+	}
+	if in.AutoRemove {
+		if restartPolicy.Name != "" {
+			return nil, nil, errors.New("autoRemove não combina com restart")
+		}
+	}
+	memory, err := parseMemory(in.Memory)
+	if err != nil {
+		return nil, nil, err
+	}
+	nanoCPUs, err := parseCPUs(in.CPUs)
+	if err != nil {
+		return nil, nil, err
+	}
+	config := &container.Config{
+		Image:        imageName,
+		Cmd:          in.Command,
+		ExposedPorts: exposed,
+		Env:          env,
+		WorkingDir:   strings.TrimSpace(in.Workdir),
+		User:         strings.TrimSpace(in.User),
+	}
+	host := &container.HostConfig{
+		PortBindings:  ports,
+		Binds:         in.Volumes,
+		AutoRemove:    in.AutoRemove,
+		RestartPolicy: restartPolicy,
+	}
+	host.Memory = memory
+	host.NanoCPUs = nanoCPUs
 	networkName := strings.TrimSpace(in.Network)
 	if networkName != "" {
 		host.NetworkMode = container.NetworkMode(networkName)
@@ -425,11 +459,21 @@ func (s *Server) control(ctx context.Context, _ *mcp.CallToolRequest, in control
 	if target == "" {
 		target = strings.TrimSpace(in.Container)
 	}
+	timeout := in.TimeoutSeconds
+	if action == "down" {
+		if timeout <= 0 {
+			timeout = COMPOSE_TIMEOUT_SECONDS
+		}
+	}
+	ctx, cancel := s.client.WithTimeoutSeconds(ctx, timeout)
+	defer cancel()
+
+	if action == "down" {
+		return s.composeDown(ctx, in)
+	}
 	if target == "" {
 		return nil, nil, errors.New("target é obrigatório")
 	}
-	ctx, cancel := s.client.WithTimeoutSeconds(ctx, in.TimeoutSeconds)
-	defer cancel()
 
 	api := s.client.API()
 	switch action {
@@ -490,8 +534,36 @@ func (s *Server) control(ctx context.Context, _ *mcp.CallToolRequest, in control
 	case "exec":
 		return s.execCommand(ctx, target, in)
 	default:
-		return nil, nil, errors.New("'action' inválido: use start, stop, restart, pause, unpause, kill, logs, exec ou remove")
+		return nil, nil, errors.New("'action' inválido: use start, stop, restart, pause, unpause, kill, logs, exec, down ou remove")
 	}
+}
+
+func (s *Server) composeDown(ctx context.Context, in controlInput) (*mcp.CallToolResult, any, error) {
+	file := strings.TrimSpace(in.File)
+	if file == "" {
+		return nil, nil, errors.New("file é obrigatório para action=down")
+	}
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return nil, nil, fmt.Errorf("caminho do compose: %w", err)
+	}
+	args := []string{"compose", "--ansi", "never", "-f", abs}
+	if project := strings.TrimSpace(in.Project); project != "" {
+		args = append(args, "-p", project)
+	}
+	args = append(args, "down")
+	if in.Volumes {
+		args = append(args, "--volumes")
+	}
+
+	out, errOut, err := runDocker(ctx, filepath.Dir(abs), args)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil, fmt.Errorf("compose down: %w", ctx.Err())
+		}
+		return nil, nil, commandFailure(err, out, errOut)
+	}
+	return textResult(formatComposeOutput("down", abs, cmp.Or(strings.TrimSpace(out), strings.TrimSpace(errOut))))
 }
 
 func (s *Server) removeResource(ctx context.Context, target, resource string, force, volumes bool) (*mcp.CallToolResult, any, error) {
@@ -744,6 +816,110 @@ func parsePlatform(value string) (*ocispec.Platform, error) {
 	return platform, nil
 }
 
+func mergeEnv(envFile string, extra []string) ([]string, error) {
+	values := []string{}
+	path := strings.TrimSpace(envFile)
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("ler envFile %s: %w", path, err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+			if trimmed == "" {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			trimmed = strings.TrimPrefix(trimmed, "export ")
+			if !strings.Contains(trimmed, "=") {
+				continue
+			}
+			values = append(values, trimmed)
+		}
+	}
+	for _, item := range extra {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.Contains(trimmed, "=") {
+			return nil, fmt.Errorf("env inválido %q: use CHAVE=valor", item)
+		}
+		values = append(values, trimmed)
+	}
+	return dedupeEnv(values), nil
+}
+
+func dedupeEnv(values []string) []string {
+	order := make([]string, 0, len(values))
+	byKey := make(map[string]string, len(values))
+	for _, item := range values {
+		key, _, _ := strings.Cut(item, "=")
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, exists := byKey[key]; !exists {
+			order = append(order, key)
+		}
+		byKey[key] = item
+	}
+	out := make([]string, 0, len(order))
+	for _, key := range order {
+		out = append(out, byKey[key])
+	}
+	return out
+}
+
+func parseRestartPolicy(value string) (container.RestartPolicy, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return container.RestartPolicy{}, nil
+	}
+	base, rest, hasRetries := strings.Cut(trimmed, ":")
+	retries := 0
+	if hasRetries {
+		parsed, err := strconv.Atoi(strings.TrimSpace(rest))
+		if err != nil {
+			return container.RestartPolicy{}, fmt.Errorf("restart inválido %q: contagem inválida: %w", value, err)
+		}
+		retries = parsed
+	}
+	switch base {
+	case "no", "always", "unless-stopped", "on-failure":
+		return container.RestartPolicy{Name: container.RestartPolicyMode(base), MaximumRetryCount: retries}, nil
+	default:
+		return container.RestartPolicy{}, fmt.Errorf("restart inválido %q: use no, always, unless-stopped ou on-failure[:tentativas]", value)
+	}
+}
+
+func parseMemory(value string) (int64, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	bytes, err := units.RAMInBytes(trimmed)
+	if err != nil {
+		return 0, fmt.Errorf("memory inválida %q: use 512m, 1g, ...: %w", value, err)
+	}
+	if bytes < 0 {
+		return 0, fmt.Errorf("memory inválida %q", value)
+	}
+	return bytes, nil
+}
+
+func parseCPUs(value float64) (int64, error) {
+	if value <= 0 {
+		return 0, nil
+	}
+	if value > 128 {
+		return 0, fmt.Errorf("cpus inválido: %v", value)
+	}
+	return int64(math.Round(value * 1e9)), nil
+}
+
 func normalizeImage(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -913,7 +1089,14 @@ type runInput struct {
 	Ports          []string `json:"ports,omitempty" jsonschema:"Port mappings, e.g. [\"8080:80\"]."`
 	Volumes        []string `json:"volumes,omitempty" jsonschema:"Volume mappings, e.g. [\"C:/data:/data\"]."`
 	Network        string   `json:"network,omitempty" jsonschema:"Network name (optional)."`
-	AutoRemove     bool     `json:"autoRemove,omitempty" jsonschema:"If true, removes the container when it stops."`
+	AutoRemove     bool     `json:"autoRemove,omitempty" jsonschema:"If true, removes the container when it stops (cannot be combined with restart)."`
+	Env            []string `json:"env,omitempty" jsonschema:"Environment variables as KEY=VALUE; values are never echoed back."`
+	EnvFile        string   `json:"envFile,omitempty" jsonschema:"Path to an env file on this machine; read and sent to the container, never echoed back."`
+	Restart        string   `json:"restart,omitempty" jsonschema:"Restart policy: no, always, unless-stopped or on-failure[:tentativas]."`
+	Memory         string   `json:"memory,omitempty" jsonschema:"Memory limit, e.g. 512m or 1g."`
+	CPUs           float64  `json:"cpus,omitempty" jsonschema:"CPU limit in cores, e.g. 1.5."`
+	Workdir        string   `json:"workdir,omitempty" jsonschema:"Working directory inside the container."`
+	User           string   `json:"user,omitempty" jsonschema:"User (name or UID[:GID]) to run the container as."`
 	Pull           string   `json:"pull,omitempty" jsonschema:"Image pull policy: missing (default), always or never."`
 	Platform       string   `json:"platform,omitempty" jsonschema:"Optional platform, e.g. linux/amd64."`
 	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"Optional timeout override for pull/build/create/start, in seconds."`
@@ -930,10 +1113,12 @@ type runInput struct {
 }
 
 type controlInput struct {
-	Action         string   `json:"action" jsonschema:"Action: start, stop, restart, pause, unpause, kill, logs, exec or remove (required)."`
+	Action         string   `json:"action" jsonschema:"Action: start, stop, restart, pause, unpause, kill, logs, exec, down or remove (required)."`
 	Target         string   `json:"target,omitempty" jsonschema:"Container name/ID; for remove, container/image/volume/network name/ID (required)."`
 	Container      string   `json:"container,omitempty" jsonschema:"Legacy alias for target (container name/ID)."`
 	Resource       string   `json:"resource,omitempty" jsonschema:"For remove: container (default), image, volume or network."`
+	File           string   `json:"file,omitempty" jsonschema:"For down: path to the compose file."`
+	Project        string   `json:"project,omitempty" jsonschema:"For down: compose project name (optional)."`
 	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"Operation timeout in seconds; for stop/restart, also the graceful timeout."`
 	Signal         string   `json:"signal,omitempty" jsonschema:"For stop/restart/kill: signal name."`
 	Force          bool     `json:"force,omitempty" jsonschema:"For remove: force removal."`

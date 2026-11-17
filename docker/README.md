@@ -6,7 +6,7 @@ A conexão usa `client.FromEnv`, então respeita `DOCKER_HOST`, `DOCKER_API_VERS
 
 São 4 tools: `docker_get`, `docker_inspect`, `docker_run` e `docker_control`.
 
-Variáveis de ambiente **não são expostas**: `docker_inspect` remove recursivamente qualquer chave `Env`, e `docker_run` não aceita `env`.
+Valores de ambiente **não são expostos**: `docker_inspect` remove recursivamente qualquer chave `Env`, e `docker_run` aceita `env`/`envFile` mas nunca devolve os valores.
 
 ## Tools
 
@@ -14,8 +14,8 @@ Variáveis de ambiente **não são expostas**: `docker_inspect` remove recursiva
 | --- | --- |
 | `docker_get` | Lista `containers`, `images`, `volumes`, `networks`, `info`, `stats` ou `disk`; aceita `filter` e `limit` |
 | `docker_inspect` | JSON de container, imagem, volume ou network; `Env` do container é removido |
-| `docker_run` | Sobe algo: container detached de uma imagem, imagem construída de um Dockerfile (`buildContext`) ou projeto compose (`compose`); aceita nome, command, portas, volumes, network, `autoRemove`, política `pull`, `platform` e `timeoutSeconds` |
-| `docker_control` | Start/stop/restart/pause/unpause/kill, `logs`, `exec` e remove de container, imagem, volume ou network |
+| `docker_run` | Sobe algo: container detached de uma imagem (com `env`/`envFile`, `restart`, `memory`, `cpus`, `user`, `workdir`), imagem construída de um Dockerfile (`buildContext`) ou projeto compose (`compose`); aceita nome, command, portas, volumes, network, `autoRemove`, política `pull`, `platform` e `timeoutSeconds` |
+| `docker_control` | Start/stop/restart/pause/unpause/kill, `logs`, `exec`, `down` (compose) e remove de container, imagem, volume ou network |
 
 ## Inspect
 
@@ -149,6 +149,7 @@ Exemplo:
 - `start`, `stop`, `restart`, `pause`, `unpause`, `kill`
 - `logs` para ver stdout/stderr do container
 - `exec` para rodar um comando dentro do container
+- `down` para derrubar um projeto compose (com `file`, `project` e `volumes`)
 - `remove` para container, imagem, volume ou network
 
 Exemplos:
@@ -181,7 +182,45 @@ Exemplos:
 { "action": "remove", "resource": "network", "target": "app-net" }
 ```
 
+```json
+{ "action": "down", "file": "C:/dev/app/compose.yaml", "project": "app", "volumes": true }
+```
+
+`down` roda `docker compose --ansi never -f <arquivo> [-p <projeto>] down [--volumes]`, com o timeout padrão de 300 s. `target` não é usado nessa ação.
+
 `timeoutSeconds` vale como timeout da operação e como timeout de parada em `stop`/`restart`. `signal` vale para `stop`, `restart` e `kill`. O campo antigo `container` continua aceito como alias de `target`.
+
+## Variáveis de ambiente no container
+
+`docker_run` aceita as duas formas, e o valor **nunca volta** nas respostas (nem no `docker_inspect`, que remove `Env`):
+
+```json
+{ "image": "api:local", "env": ["NODE_ENV=production", "PORT=3000"] }
+```
+
+```json
+{ "image": "api:local", "envFile": "C:/dev/app/.env" }
+```
+
+- `envFile` é lido na máquina que roda o servidor e enviado ao daemon; o arquivo não precisa existir dentro do container.
+- Formato do arquivo: `CHAVE=valor` por linha; linhas em branco, começando com `#` e o prefixo `export ` são ignorados.
+- `env` explícito tem precedência sobre o `envFile` na mesma chave.
+
+## Limites e runtime
+
+```json
+{ "image": "api:local", "restart": "unless-stopped", "memory": "512m", "cpus": 1.5 }
+```
+
+| Campo | Efeito |
+| --- | --- |
+| `restart` | `no`, `always`, `unless-stopped` ou `on-failure[:tentativas]` |
+| `memory` | `512m`, `1g`, ... (aceita sufixos `k`, `m`, `g`) |
+| `cpus` | limite em cores, ex. `1.5` |
+| `user` | `1000:1000` ou nome de usuário |
+| `workdir` | diretório de trabalho dentro do container |
+
+`autoRemove` e `restart` são mutuamente exclusivos (o daemon recusa a combinação).
 
 ## Logs
 
@@ -256,6 +295,6 @@ Saída de compose e de build é truncada em 128 KB; em caso de erro, o stderr do
 - Build e compose executam o `docker` CLI sem interpolar shell; o servidor não devolve `docker compose config` (que expõe env).
 - `exec` equivale a acesso root dentro do container.
 - `docker_inspect` remove `Env` em qualquer nível do JSON.
-- `docker_run` não tem parâmetro `env`; variáveis só via imagem, compose, Dockerfile ou CLI externa.
+- `docker_run` aceita `env`/`envFile`, mas os valores nunca aparecem na saída; `docker_inspect` remove `Env` em qualquer nível do JSON.
 - `docker_run` faz pull conforme `pull` (`missing` padrão); com `pull: "never"` a imagem precisa existir no daemon.
 - Saídas de `docker_get` (disk), `docker_inspect`, `docker_control` (logs e exec) e `docker_run` (compose/build) são truncadas em 128 KB.

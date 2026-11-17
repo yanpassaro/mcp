@@ -6,7 +6,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | --- | --- |
 | `git-mcp` | Inspeção **read-only** de repositórios Git locais (go-git, sem CLI) |
 | `github-mcp` | Consulta **read-only** à API do GitHub (busca, arquivos, issues/PRs, releases) |
-| `docker-mcp` | Inspeção e ciclo de vida de containers Docker via SDK oficial (sem expor env); build e compose no `docker_run` |
+| `docker-mcp` | Inspeção e ciclo de vida de containers Docker via SDK oficial (env nunca é devolvido); build, compose e env no `docker_run` |
 | `ssh-mcp` | Comandos, leitura/escrita e transferência em hosts remotos via SSH, com múltiplas conexões nomeadas |
 | `sqlize-mcp` | Importa, consulta e exporta dados (SQLite + Postgres/MySQL read-only) |
 | `anydoc` | Lê documentos (Word, PDF, Excel, ODT, RTF, EPUB, CSV) e grava o Markdown ao lado |
