@@ -1,4 +1,4 @@
-name: Build Windows
+name: Build
 
 on:
   push:
@@ -17,8 +17,8 @@ permissions:
   contents: write
 
 jobs:
-  build-windows:
-    name: "Build Windows (amd64)"
+  build:
+    name: "Build (amd64)"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,27 +29,13 @@ jobs:
         with:
           go-version: "1.26"
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-gnu
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            anydoc/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('anydoc/Cargo.toml') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
       - name: Setup Task
         uses: go-task/setup-task@v2
 
-      - name: Build all MCP servers
-        run: task build
+      - name: Build MCP servers
+        run: |
+          mkdir -p dist
+          task build:git build:github build:docker build:ssh build:sqlize build:sandbox build:sandbox-cli
 
       - name: List artifacts
         run: ls -lh dist/
@@ -62,7 +48,7 @@ jobs:
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mcp-windows
+          name: mcp
           path: dist/
 
       - name: Create or update release
