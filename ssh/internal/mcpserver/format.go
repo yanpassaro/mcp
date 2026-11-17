@@ -80,3 +80,23 @@ func humanBytes(value int64) string {
 	}
 	return fmt.Sprintf("%.1f %s", scaled, units[unit])
 }
+
+func formatListing(cfg ssh.Config, path, text string) string {
+	header := fmt.Sprintf("📁 `%s:%s`", ssh.Label(cfg.Alias), path)
+	if strings.TrimSpace(text) == "" {
+		return fmt.Sprintf("%s — vazio.", header)
+	}
+	return fmt.Sprintf("%s\n\n```text\n%s```", header, codeBlock(text))
+}
+
+func formatStat(cfg ssh.Config, path, text string) string {
+	header := fmt.Sprintf("🔖 `%s:%s`", ssh.Label(cfg.Alias), path)
+	if strings.TrimSpace(text) == "" {
+		return fmt.Sprintf("%s — sem dados.", header)
+	}
+	return fmt.Sprintf("%s\n\n```text\n%s```", header, codeBlock(text))
+}
+
+func formatRemoved(cfg ssh.Config, path string) string {
+	return fmt.Sprintf("🗑️ `%s:%s` — removido.", ssh.Label(cfg.Alias), path)
+}

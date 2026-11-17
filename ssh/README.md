@@ -2,7 +2,7 @@
 
 Executa comandos e move arquivos em hosts remotos via SSH usando `golang.org/x/crypto/ssh`. Não depende do `ssh.exe` nem do `scp`.
 
-São 5 tools: `ssh_run`, `ssh_read`, `ssh_write`, `ssh_transfer` e `ssh_probe`.
+São 4 tools: `ssh_run`, `ssh_os`, `ssh_transfer` e `ssh_probe`.
 
 Credenciais vêm **apenas** do ambiente do servidor: nenhuma tool aceita senha, chave ou passphrase, e nada disso aparece na saída.
 
@@ -46,8 +46,7 @@ Aqui as conexões são `default`, `staging` e `db`. O alias é o trecho do meio 
 | Tool | O que faz |
 | --- | --- |
 | `ssh_run` | Roda um comando de shell e devolve exit code, stdout e stderr |
-| `ssh_read` | Lê um arquivo remoto como texto (256 KiB padrão, 32 MiB máx.) |
-| `ssh_write` | Grava ou acrescenta texto em um arquivo remoto |
+| `ssh_os` | Arquivos remotos: `read`, `write`, `list`, `stat` e `remove` |
 | `ssh_transfer` | `upload` do `mnt` compartilhado para o host, ou `download` do host para o `mnt` |
 | `ssh_probe` | Kernel, uptime, disco e portas em escuta |
 
@@ -64,11 +63,23 @@ Aqui as conexões são `default`, `staging` e `db`. O alias é o trecho do meio 
 ```
 
 ```json
-{ "target": "default", "path": "/var/log/api/error.log", "maxBytes": 65536 }
+{ "target": "default", "action": "read", "path": "/var/log/api/error.log", "maxBytes": 65536 }
 ```
 
 ```json
-{ "target": "default", "path": "/etc/myapp/feature.flag", "content": "on\n" }
+{ "target": "default", "action": "write", "path": "/etc/myapp/feature.flag", "content": "on\n" }
+```
+
+```json
+{ "target": "default", "action": "list", "path": "/etc/ssh" }
+```
+
+```json
+{ "target": "default", "action": "stat", "path": "/var/lib/app.db" }
+```
+
+```json
+{ "target": "default", "action": "remove", "path": "/tmp/build", "recursive": true }
 ```
 
 ```json
@@ -85,11 +96,17 @@ Aqui as conexões são `default`, `staging` e `db`. O alias é o trecho do meio 
 
 `command` é uma string enviada inteira ao shell remoto (sem array de argv). `workdir` é aplicado como `cd '<dir>' && <comando>`. Exit code diferente de zero não é erro da tool: vem no resultado.
 
-## Arquivos e transferência
+## Arquivos remotos
 
-`ssh_read` usa `head -c` no remoto; saída é truncada em 128 KB e `maxBytes` limita a leitura.
+`ssh_os` cobre o filesystem do host, com ações:
 
-`ssh_write` usa `cat > path` (ou `cat >> path`) com o conteúdo via stdin.
+| `action` | Comando no host | Observação |
+| --- | --- | --- |
+| `read` | `head -c <maxBytes+1> -- '<path>'` | 256 KiB padrão, 32 MiB máx.; `.env`, `*.env` e `environ` bloqueados |
+| `write` | `cat > '<path>'` ou `cat >> '<path>'` | conteúdo via stdin |
+| `list` | `ls -lan -- '<path>'` | saída crua em bloco de código |
+| `stat` | `stat -c '%n\|%s\|%F\|%a\|%U\|%G\|%y' -- '<path>'` | formato GNU (Linux) |
+| `remove` | `rm -f -- '<path>'` ou `rm -rf` | recusa `/`, caminho vazio e curingas |
 
 `ssh_transfer` usa o mesmo caminho de `cat`, com teto de 32 MiB:
 
@@ -101,7 +118,7 @@ Aqui as conexões são `default`, `staging` e `db`. O alias é o trecho do meio 
 
 - Chave e senha ficam só no ambiente; não há parâmetro de credencial em nenhuma tool.
 - Host key é sempre verificada com `knownhosts`; não existe modo "ignorar". Se o host não estiver no arquivo, o erro sugere `ssh-keyscan -H <host> >> <arquivo>`.
-- `ssh_read` e `download` recusam `.env`, `*.env` e arquivos `environ`.
+- `ssh_os` com `read` e `download` recusam `.env`, `*.env` e arquivos `environ`; `remove` recusa `/`, caminho vazio e curingas.
 - `ssh_run` é um shell remoto de verdade: quem tem a tool tem o acesso do usuário SSH. O bloqueio acima vale só para leitura/transferência.
 - Saída das tools é truncada em 128 KB.
 - `ssh_run` executa como o usuário SSH configurado; o servidor não interpola shell além de `cd` e do comando enviado.

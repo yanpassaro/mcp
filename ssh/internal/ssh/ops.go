@@ -134,6 +134,68 @@ func Write(ctx context.Context, cfg Config, path string, src io.Reader, appendMo
 	return counter.count, nil
 }
 
+func List(ctx context.Context, cfg Config, path string) (Result, error) {
+	target, err := requirePath(path)
+	if err != nil {
+		return Result{}, err
+	}
+	return Run(ctx, cfg, fmt.Sprintf("ls -lan -- %s", shellQuote(target)), "")
+}
+
+func Stat(ctx context.Context, cfg Config, path string) (Result, error) {
+	target, err := requirePath(path)
+	if err != nil {
+		return Result{}, err
+	}
+	command := fmt.Sprintf("stat -c '%%n|%%s|%%F|%%a|%%U|%%G|%%y' -- %s", shellQuote(target))
+	return Run(ctx, cfg, command, "")
+}
+
+func Remove(ctx context.Context, cfg Config, path string, recursive bool) (Result, error) {
+	target, err := requireRemovePath(path)
+	if err != nil {
+		return Result{}, err
+	}
+	flag := "-f"
+	if recursive {
+		flag = "-rf"
+	}
+	return Run(ctx, cfg, fmt.Sprintf("rm %s -- %s", flag, shellQuote(target)), "")
+}
+
+func (r Result) Message() string {
+	return cmp.Or(strings.TrimSpace(r.Stderr), strings.TrimSpace(r.Stdout))
+}
+
+func requirePath(path string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", errors.New("path é obrigatório")
+	}
+	return trimmed, nil
+}
+
+func requireRemovePath(path string) (string, error) {
+	trimmed, err := requirePath(path)
+	if err != nil {
+		return "", err
+	}
+	cleaned := filepath.Clean(trimmed)
+	if cleaned == "/" {
+		return "", errors.New("remove recusado: não removo /")
+	}
+	if cleaned == "." {
+		return "", errors.New("remove recusado: caminho vazio")
+	}
+	if cleaned == ".." {
+		return "", errors.New("remove recusado: caminho vazio")
+	}
+	if strings.ContainsAny(cleaned, "*?") {
+		return "", errors.New("remove recusado: curinga não permitido")
+	}
+	return cleaned, nil
+}
+
 func Probe(ctx context.Context, cfg Config) (Result, error) {
 	return Run(ctx, cfg, PROBE_COMMAND, "")
 }

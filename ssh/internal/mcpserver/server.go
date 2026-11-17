@@ -33,14 +33,9 @@ func (s *Server) Register(server *mcp.Server) {
 	}, s.runTool)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "ssh_read",
-		Description: fmt.Sprintf("Read a remote file as text (default 256 KiB, max 32 MiB). .env, *.env and environ files are blocked. 'target' selects the connection (%s).", targets),
-	}, s.readTool)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "ssh_write",
-		Description: fmt.Sprintf("Write or append text to a remote file. 'target' selects the connection (%s).", targets),
-	}, s.writeTool)
+		Name:        "ssh_os",
+		Description: fmt.Sprintf("Remote file operations: action=read (text, .env blocked), write (overwrite or append), list, stat or remove (recursive optional). 'target' selects the connection (%s).", targets),
+	}, s.osTool)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "ssh_transfer",
@@ -102,32 +97,65 @@ func (s *Server) runTool(ctx context.Context, _ *mcp.CallToolRequest, in runInpu
 	return textResult(formatRun(cfg, command, result))
 }
 
-func (s *Server) readTool(ctx context.Context, _ *mcp.CallToolRequest, in readInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) osTool(ctx context.Context, _ *mcp.CallToolRequest, in osInput) (*mcp.CallToolResult, any, error) {
 	cfg, err := s.conn(in.Target)
 	if err != nil {
 		return nil, nil, err
 	}
+	action := strings.ToLower(strings.TrimSpace(in.Action))
+	if action == "" {
+		return nil, nil, errors.New("action é obrigatório: read, write, list, stat ou remove")
+	}
+	path := strings.TrimSpace(in.Path)
+	if path == "" {
+		return nil, nil, errors.New("path é obrigatório")
+	}
 	ctx, cancel := s.ctxWithTimeout(ctx, cfg, in.TimeoutSeconds)
 	defer cancel()
-	data, truncated, err := ssh.Read(ctx, cfg, in.Path, in.MaxBytes)
-	if err != nil {
-		return nil, nil, err
-	}
-	return textResult(formatRead(cfg, in.Path, string(data), truncated))
-}
 
-func (s *Server) writeTool(ctx context.Context, _ *mcp.CallToolRequest, in writeInput) (*mcp.CallToolResult, any, error) {
-	cfg, err := s.conn(in.Target)
-	if err != nil {
-		return nil, nil, err
+	switch action {
+	case "read":
+		data, truncated, err := ssh.Read(ctx, cfg, path, in.MaxBytes)
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(formatRead(cfg, path, string(data), truncated))
+	case "write":
+		written, err := ssh.Write(ctx, cfg, path, strings.NewReader(in.Content), in.Append)
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(formatWrite(cfg, path, written))
+	case "list":
+		result, err := ssh.List(ctx, cfg, path)
+		if err != nil {
+			return nil, nil, err
+		}
+		if result.ExitCode != 0 {
+			return nil, nil, fmt.Errorf("list %s: %s", path, result.Message())
+		}
+		return textResult(formatListing(cfg, path, result.Stdout))
+	case "stat":
+		result, err := ssh.Stat(ctx, cfg, path)
+		if err != nil {
+			return nil, nil, err
+		}
+		if result.ExitCode != 0 {
+			return nil, nil, fmt.Errorf("stat %s: %s", path, result.Message())
+		}
+		return textResult(formatStat(cfg, path, result.Stdout))
+	case "remove":
+		result, err := ssh.Remove(ctx, cfg, path, in.Recursive)
+		if err != nil {
+			return nil, nil, err
+		}
+		if result.ExitCode != 0 {
+			return nil, nil, fmt.Errorf("remove %s: %s", path, result.Message())
+		}
+		return textResult(formatRemoved(cfg, path))
+	default:
+		return nil, nil, errors.New("'action' inválido: use read, write, list, stat ou remove")
 	}
-	ctx, cancel := s.ctxWithTimeout(ctx, cfg, in.TimeoutSeconds)
-	defer cancel()
-	written, err := ssh.Write(ctx, cfg, in.Path, strings.NewReader(in.Content), in.Append)
-	if err != nil {
-		return nil, nil, err
-	}
-	return textResult(formatWrite(cfg, in.Path, written))
 }
 
 func (s *Server) transferTool(ctx context.Context, _ *mcp.CallToolRequest, in transferInput) (*mcp.CallToolResult, any, error) {
@@ -228,18 +256,14 @@ type runInput struct {
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty" jsonschema:"Optional timeout override, in seconds."`
 }
 
-type readInput struct {
+type osInput struct {
 	Target         string `json:"target,omitempty" jsonschema:"SSH connection alias (optional when only one is configured)."`
-	Path           string `json:"path" jsonschema:"Remote file path (required)."`
-	MaxBytes       int    `json:"maxBytes,omitempty" jsonschema:"Maximum bytes to read (default 262144, max 33554432)."`
-	TimeoutSeconds int    `json:"timeoutSeconds,omitempty" jsonschema:"Optional timeout override, in seconds."`
-}
-
-type writeInput struct {
-	Target         string `json:"target,omitempty" jsonschema:"SSH connection alias (optional when only one is configured)."`
-	Path           string `json:"path" jsonschema:"Remote file path (required)."`
-	Content        string `json:"content" jsonschema:"Text to write (required)."`
-	Append         bool   `json:"append,omitempty" jsonschema:"If true, appends instead of overwriting."`
+	Action         string `json:"action" jsonschema:"read, write, list, stat or remove (required)."`
+	Path           string `json:"path" jsonschema:"Remote path (required)."`
+	Content        string `json:"content,omitempty" jsonschema:"For write: text to write."`
+	Append         bool   `json:"append,omitempty" jsonschema:"For write: append instead of overwriting."`
+	MaxBytes       int    `json:"maxBytes,omitempty" jsonschema:"For read: maximum bytes (default 262144, max 33554432)."`
+	Recursive      bool   `json:"recursive,omitempty" jsonschema:"For remove: recurse into directories."`
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty" jsonschema:"Optional timeout override, in seconds."`
 }
 

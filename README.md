@@ -17,7 +17,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 - **git**: `git_repo_info`, `git_status`, `git_log`, `git_show`, `git_diff`, `git_refs`, `git_blame`, `git_tree`, `git_read_file`, `git_find_commits`
 - **github**: `github_search`, `github_get_tree`, `github_read_file`, `github_repo_info`, `github_get_item`
 - **docker**: `docker_get`, `docker_inspect`, `docker_run`, `docker_control`
-- **ssh**: `ssh_run`, `ssh_read`, `ssh_write`, `ssh_transfer`, `ssh_probe`
+- **ssh**: `ssh_run`, `ssh_os`, `ssh_transfer`, `ssh_probe`
 - **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`, `sqlize_export` (+ `postgres_*`/`mysql_*`)
 - **anydoc**: `anydoc_read`
 - **sandbox**: `sandbox_run` (run por `path`/`code` + `args`), `sandbox_doc` (API `std`), `sandbox_os` (copy/mount/del/stat/list)
