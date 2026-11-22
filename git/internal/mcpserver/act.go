@@ -1,0 +1,665 @@
+package mcpserver
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/config"
+	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/client"
+	"github.com/go-git/go-git/v6/plumbing/object"
+	gitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	gitmcp "ntdsk.com/mcp/git/internal/git"
+)
+
+const (
+	DEFAULT_TIMEOUT_SECONDS = 60
+	NETWORK_TIMEOUT_SECONDS = 300
+	MERGE_COMMIT_STRATEGY   = git.MergeStrategy(1)
+)
+
+func (s *Server) actTool(ctx context.Context, _ *mcp.CallToolRequest, in actInput) (*mcp.CallToolResult, any, error) {
+	action := strings.ToLower(strings.TrimSpace(in.Action))
+	if action == "" {
+		return nil, nil, errors.New("'action' é obrigatório")
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeoutFor(in.Data, action))
+	defer cancel()
+	text, err := s.act(ctx, action, in)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil, fmt.Errorf("%s: %w", action, ctx.Err())
+		}
+		return nil, nil, err
+	}
+	return textResult(text)
+}
+
+func (s *Server) act(ctx context.Context, action string, in actInput) (string, error) {
+	if action == "clone" {
+		return cloneAct(ctx, in.Repo, in.Data)
+	}
+	repo, err := s.client.Open(in.Repo)
+	if err != nil {
+		return "", err
+	}
+	switch action {
+	case "add":
+		return addAct(repo, in.Data)
+	case "restore":
+		return restoreAct(repo, in.Data)
+	case "commit":
+		return commitAct(repo, in.Data)
+	case "push":
+		return pushAct(ctx, repo, in.Data)
+	case "pull":
+		return pullAct(ctx, repo, in.Data)
+	case "fetch":
+		return fetchAct(ctx, repo, in.Data)
+	case "merge":
+		return mergeAct(repo, in.Data)
+	case "reset":
+		return resetAct(repo, in.Data)
+	case "checkout":
+		return checkoutAct(repo, in.Data)
+	case "branch":
+		return branchAct(repo, in.Data)
+	case "tag":
+		return tagAct(repo, in.Data)
+	case "clean":
+		return cleanAct(repo, in.Data)
+	default:
+		return "", errors.New("'action' inválido: add, restore, commit, push, pull, fetch, merge, reset, checkout, branch, tag, clone, clean")
+	}
+}
+
+func addAct(repo *git.Repository, d actData) (string, error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", err
+	}
+	if d.All {
+		if err := wt.AddWithOptions(&git.AddOptions{All: true}); err != nil {
+			return "", fmt.Errorf("add --all: %w", err)
+		}
+		return "✅ Todas as alterações foram adicionadas ao index.", nil
+	}
+	paths := pathsFor(d.Paths)
+	if len(paths) == 0 {
+		paths = []string{"."}
+	}
+	for _, p := range paths {
+		if _, err := wt.Add(p); err != nil {
+			return "", fmt.Errorf("add %q: %w", p, err)
+		}
+	}
+	return fmt.Sprintf("✅ %d caminho(s) adicionados ao index: `%s`.", len(paths), strings.Join(paths, "`, `")), nil
+}
+
+func restoreAct(repo *git.Repository, d actData) (string, error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", err
+	}
+	paths := pathsFor(d.Paths)
+	if len(paths) == 0 {
+		return "", errors.New("restore exige 'paths' em 'data'")
+	}
+	opts := &git.RestoreOptions{Files: paths, Worktree: true}
+	target := "working tree"
+	if d.Staged {
+		opts.Staged = true
+		opts.Worktree = false
+		target = "index"
+	}
+	if err := wt.Restore(opts); err != nil {
+		return "", fmt.Errorf("restore: %w", err)
+	}
+	return fmt.Sprintf("✅ %d caminho(s) restaurados no %s.", len(paths), target), nil
+}
+
+func commitAct(repo *git.Repository, d actData) (string, error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", err
+	}
+	message := strings.TrimSpace(d.Message)
+	if d.Amend {
+		if d.All {
+			return "", errors.New("commit com 'amend' não aceita 'all'")
+		}
+		if message == "" {
+			message, err = headMessage(repo)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
+	if message == "" {
+		return "", errors.New("commit exige 'message' em 'data'")
+	}
+	hash, err := wt.Commit(message, &git.CommitOptions{All: d.All, Amend: d.Amend, AllowEmptyCommits: d.AllowEmpty, Author: authorSignature()})
+	if err != nil {
+		return "", fmt.Errorf("commit: %w", err)
+	}
+	return fmt.Sprintf("✅ Commit `%s` criado: %s", shortSHA(hash), firstLine(message)), nil
+}
+
+func headMessage(repo *git.Repository) (string, error) {
+	head, err := repo.Head()
+	if err != nil {
+		return "", fmt.Errorf("amend sem 'message' em repositório sem HEAD: %w", err)
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return "", fmt.Errorf("amend sem 'message': %w", err)
+	}
+	return strings.TrimSpace(commit.Message), nil
+}
+
+func pushAct(ctx context.Context, repo *git.Repository, d actData) (string, error) {
+	if d.Force {
+		if !d.Confirm {
+			return "", errors.New("push com 'force' exige 'confirm'=true")
+		}
+	}
+	remote := cmp.Or(strings.TrimSpace(d.Remote), "origin")
+	auth, err := remoteAuth(repo, remote)
+	if err != nil {
+		return "", err
+	}
+	opts := &git.PushOptions{RemoteName: remote, ClientOptions: auth, Prune: d.Prune, FollowTags: d.FollowTags}
+	if d.Force {
+		opts.ForceWithLease = &git.ForceWithLease{}
+	}
+	branch := strings.TrimSpace(d.Branch)
+	if branch != "" {
+		refspec := fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch)
+		opts.RefSpecs = []config.RefSpec{config.RefSpec(refspec)}
+	}
+	err = repo.PushContext(ctx, opts)
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return "✅ Nada a enviar: o remoto já está atualizado.", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("push: %w", err)
+	}
+	if branch == "" {
+		return fmt.Sprintf("✅ Push concluído para `%s`.", remote), nil
+	}
+	return fmt.Sprintf("✅ Push de `%s` para `%s/%s`.", branch, remote, branch), nil
+}
+
+func pullAct(ctx context.Context, repo *git.Repository, d actData) (string, error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", err
+	}
+	remote := cmp.Or(strings.TrimSpace(d.Remote), "origin")
+	auth, err := remoteAuth(repo, remote)
+	if err != nil {
+		return "", err
+	}
+	opts := &git.PullOptions{RemoteName: remote, ClientOptions: auth, Force: d.Force}
+	if d.Force {
+		if !d.Confirm {
+			return "", errors.New("pull com 'force' exige 'confirm'=true")
+		}
+	}
+	branch := strings.TrimSpace(d.Branch)
+	if branch != "" {
+		opts.ReferenceName = plumbing.NewBranchReferenceName(branch)
+	}
+	err = wt.PullContext(ctx, opts)
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return "✅ Nada a atualizar: já está sincronizado.", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("pull: %w", err)
+	}
+	return fmt.Sprintf("✅ Pull concluído de `%s`.", remote), nil
+}
+
+func fetchAct(ctx context.Context, repo *git.Repository, d actData) (string, error) {
+	if d.All {
+		remotes, err := repo.Remotes()
+		if err != nil {
+			return "", fmt.Errorf("fetch: %w", err)
+		}
+		for _, r := range remotes {
+			cfg := r.Config()
+			if len(cfg.URLs) == 0 {
+				return "", fmt.Errorf("remote %q sem URL", cfg.Name)
+			}
+			auth, err := authForURL(cfg.URLs[0])
+			if err != nil {
+				return "", err
+			}
+			if err := r.FetchContext(ctx, fetchOptions(d, auth)); err != nil {
+				if errors.Is(err, git.NoErrAlreadyUpToDate) {
+					continue
+				}
+				return "", fmt.Errorf("fetch %s: %w", cfg.Name, err)
+			}
+		}
+		return fmt.Sprintf("✅ Fetch concluído em %d remoto(s).", len(remotes)), nil
+	}
+	remote := cmp.Or(strings.TrimSpace(d.Remote), "origin")
+	auth, err := remoteAuth(repo, remote)
+	if err != nil {
+		return "", err
+	}
+	opts := fetchOptions(d, auth)
+	if err := repo.FetchContext(ctx, opts); err != nil {
+		if errors.Is(err, git.NoErrAlreadyUpToDate) {
+			return "✅ Nada a buscar: já está atualizado.", nil
+		}
+		return "", fmt.Errorf("fetch: %w", err)
+	}
+	return fmt.Sprintf("✅ Fetch concluído de `%s`.", remote), nil
+}
+
+func fetchOptions(d actData, auth []client.Option) *git.FetchOptions {
+	opts := &git.FetchOptions{ClientOptions: auth, Prune: d.Prune, Depth: d.Depth}
+	if d.Tags {
+		opts.Tags = plumbing.AllTags
+	}
+	return opts
+}
+
+func mergeAct(repo *git.Repository, d actData) (string, error) {
+	ref, err := lookupRef(repo, d.Ref)
+	if err != nil {
+		return "", err
+	}
+	strategy := git.FastForwardMerge
+	if d.NoFF {
+		strategy = MERGE_COMMIT_STRATEGY
+	}
+	if err := repo.Merge(ref, git.MergeOptions{Strategy: strategy}); err != nil {
+		return "", fmt.Errorf("merge %s: %w", ref.Name().Short(), err)
+	}
+	return fmt.Sprintf("✅ Merge de `%s`.", ref.Name().Short()), nil
+}
+
+func resetAct(repo *git.Repository, d actData) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(d.Mode))
+	if mode == "" {
+		mode = "mixed"
+	}
+	if mode == "hard" {
+		if !d.Confirm {
+			return "", errors.New("reset --hard exige 'confirm'=true")
+		}
+	}
+	hash, err := resolveHash(repo, cmp.Or(strings.TrimSpace(d.Ref), "HEAD"))
+	if err != nil {
+		return "", err
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", err
+	}
+	if err := wt.Reset(&git.ResetOptions{Commit: hash, Mode: resetMode(mode)}); err != nil {
+		return "", fmt.Errorf("reset --%s: %w", mode, err)
+	}
+	return fmt.Sprintf("✅ Reset `--%s` para `%s`.", mode, shortSHA(hash)), nil
+}
+
+func resetMode(mode string) git.ResetMode {
+	switch mode {
+	case "soft":
+		return git.SoftReset
+	case "hard":
+		return git.HardReset
+	case "keep":
+		return git.KeepReset
+	default:
+		return git.MixedReset
+	}
+}
+
+func checkoutAct(repo *git.Repository, d actData) (string, error) {
+	branch := strings.TrimSpace(d.Branch)
+	if branch == "" {
+		return "", errors.New("checkout exige 'branch' em 'data'")
+	}
+	if d.Force {
+		if !d.Confirm {
+			return "", errors.New("checkout com 'force' exige 'confirm'=true (descarta alterações locais)")
+		}
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", err
+	}
+	opts := &git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName(branch), Create: d.Create, Force: d.Force}
+	if d.Create {
+		if strings.TrimSpace(d.Ref) != "" {
+			hash, err := resolveHash(repo, d.Ref)
+			if err != nil {
+				return "", err
+			}
+			opts.Hash = hash
+		}
+	}
+	if err := wt.Checkout(opts); err != nil {
+		return "", fmt.Errorf("checkout %s: %w", branch, err)
+	}
+	return fmt.Sprintf("✅ Agora em `%s`.", branch), nil
+}
+
+func branchAct(repo *git.Repository, d actData) (string, error) {
+	branch := strings.TrimSpace(d.Branch)
+	if branch == "" {
+		return "", errors.New("branch exige 'branch' em 'data'")
+	}
+	if d.Delete {
+		if !d.Confirm {
+			return "", errors.New("branch com 'delete' exige 'confirm'=true")
+		}
+		if err := repo.DeleteBranch(branch); err != nil {
+			return "", fmt.Errorf("delete branch %s: %w", branch, err)
+		}
+		return fmt.Sprintf("✅ Branch `%s` removida.", branch), nil
+	}
+	hash, err := resolveHash(repo, cmp.Or(strings.TrimSpace(d.Ref), "HEAD"))
+	if err != nil {
+		return "", err
+	}
+	ref := plumbing.NewHashReference(plumbing.NewBranchReferenceName(branch), hash)
+	if err := repo.Storer.SetReference(ref); err != nil {
+		return "", fmt.Errorf("criar branch %s: %w", branch, err)
+	}
+	return fmt.Sprintf("✅ Branch `%s` criada em `%s`.", branch, shortSHA(hash)), nil
+}
+
+func tagAct(repo *git.Repository, d actData) (string, error) {
+	name := strings.TrimSpace(d.Name)
+	if name == "" {
+		return "", errors.New("tag exige 'name' em 'data'")
+	}
+	if d.Delete {
+		if !d.Confirm {
+			return "", errors.New("tag com 'delete' exige 'confirm'=true")
+		}
+		if err := repo.DeleteTag(name); err != nil {
+			return "", fmt.Errorf("delete tag %s: %w", name, err)
+		}
+		return fmt.Sprintf("✅ Tag `%s` removida.", name), nil
+	}
+	hash, err := resolveHash(repo, cmp.Or(strings.TrimSpace(d.Ref), "HEAD"))
+	if err != nil {
+		return "", err
+	}
+	message := strings.TrimSpace(d.Message)
+	if message == "" {
+		if _, err := repo.CreateTag(name, hash, nil); err != nil {
+			return "", fmt.Errorf("tag %s: %w", name, err)
+		}
+		return fmt.Sprintf("✅ Tag leve `%s` criada em `%s`.", name, shortSHA(hash)), nil
+	}
+	if _, err := repo.CreateTag(name, hash, &git.CreateTagOptions{Message: message}); err != nil {
+		return "", fmt.Errorf("tag %s: %w", name, err)
+	}
+	return fmt.Sprintf("✅ Tag anotada `%s` criada em `%s`.", name, shortSHA(hash)), nil
+}
+
+func cleanAct(repo *git.Repository, d actData) (string, error) {
+	if !d.Confirm {
+		return "", errors.New("clean exige 'confirm'=true (remove arquivos não rastreados)")
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", err
+	}
+	if err := wt.Clean(&git.CleanOptions{Dir: true}); err != nil {
+		return "", fmt.Errorf("clean: %w", err)
+	}
+	return "✅ Arquivos não rastreados removidos.", nil
+}
+
+func cloneAct(ctx context.Context, dest string, d actData) (string, error) {
+	url := strings.TrimSpace(d.URL)
+	if url == "" {
+		return "", errors.New("clone exige 'url' em 'data'")
+	}
+	path, err := clonePath(dest)
+	if err != nil {
+		return "", err
+	}
+	auth, err := authForURL(url)
+	if err != nil {
+		return "", err
+	}
+	opts := &git.CloneOptions{URL: url, Depth: d.Depth, ClientOptions: auth}
+	if branch := strings.TrimSpace(d.Branch); branch != "" {
+		opts.ReferenceName = plumbing.NewBranchReferenceName(branch)
+		opts.SingleBranch = true
+	}
+	if _, err := git.PlainCloneContext(ctx, path, opts); err != nil {
+		return "", fmt.Errorf("clone %s: %w", url, err)
+	}
+	return fmt.Sprintf("✅ Clonado `%s` em `%s`.", url, path), nil
+}
+
+func clonePath(dest string) (string, error) {
+	p := strings.TrimSpace(dest)
+	if p == "" {
+		return "", errors.New("'repo' é obrigatório como diretório de destino do clone")
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", fmt.Errorf("caminho do repositório: %w", err)
+	}
+	info, err := os.Stat(abs)
+	if errors.Is(err, os.ErrNotExist) {
+		return abs, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("destino %q: %w", abs, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("destino %q existe e não é um diretório", abs)
+	}
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return "", fmt.Errorf("destino %q: %w", abs, err)
+	}
+	if len(entries) != 0 {
+		return "", fmt.Errorf("destino %q não está vazio", abs)
+	}
+	return abs, nil
+}
+
+func remoteAuth(repo *git.Repository, name string) ([]client.Option, error) {
+	remote, err := repo.Remote(name)
+	if err != nil {
+		return nil, fmt.Errorf("remote %q: %w", name, err)
+	}
+	urls := remote.Config().URLs
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("remote %q sem URL", name)
+	}
+	return authForURL(urls[0])
+}
+
+func authForURL(url string) ([]client.Option, error) {
+	if isSSHURL(url) {
+		auth, err := gitssh.NewSSHAgentAuth(sshUser(url))
+		if err != nil {
+			return nil, fmt.Errorf("ssh-agent indisponível: %w", err)
+		}
+		return []client.Option{client.WithSSHAuth(auth)}, nil
+	}
+	return nil, nil
+}
+
+func sshUser(url string) string {
+	at := strings.Index(url, "@")
+	if at < 0 {
+		return "git"
+	}
+	prefix := url[:at]
+	if i := strings.LastIndex(prefix, "/"); i >= 0 {
+		prefix = prefix[i+1:]
+	}
+	if prefix == "" {
+		return "git"
+	}
+	return prefix
+}
+
+func isSSHURL(url string) bool {
+	if strings.HasPrefix(url, "ssh://") {
+		return true
+	}
+	at := strings.Index(url, "@")
+	if at < 0 {
+		return false
+	}
+	colon := strings.Index(url, ":")
+	if colon < 0 {
+		return false
+	}
+	return at < colon
+}
+
+func authorSignature() *object.Signature {
+	name := strings.TrimSpace(os.Getenv("GIT_USER"))
+	email := strings.TrimSpace(os.Getenv("GIT_EMAIL"))
+	if name == "" {
+		return nil
+	}
+	if email == "" {
+		return nil
+	}
+	return &object.Signature{Name: name, Email: email, When: time.Now()}
+}
+
+func lookupRef(repo *git.Repository, rev string) (plumbing.Reference, error) {
+	name := strings.TrimSpace(rev)
+	if name == "" {
+		return plumbing.Reference{}, errors.New("merge exige 'ref' em 'data'")
+	}
+	candidates := []plumbing.ReferenceName{
+		plumbing.ReferenceName(name),
+		plumbing.NewBranchReferenceName(name),
+		plumbing.NewTagReferenceName(name),
+		plumbing.ReferenceName("refs/remotes/" + name),
+	}
+	for _, candidate := range candidates {
+		ref, err := repo.Reference(candidate, true)
+		if err == nil {
+			return *ref, nil
+		}
+	}
+	hash, err := resolveHash(repo, name)
+	if err != nil {
+		return plumbing.Reference{}, err
+	}
+	refName := plumbing.NewBranchReferenceName(name)
+	if strings.Contains(name, "/") {
+		refName = plumbing.ReferenceName("refs/remotes/" + name)
+	}
+	return *plumbing.NewHashReference(refName, hash), nil
+}
+
+func resolveHash(repo *git.Repository, rev string) (plumbing.Hash, error) {
+	commit, err := gitmcp.ResolveCommit(repo, rev)
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+	return commit.Hash, nil
+}
+
+func pathsFor(paths []string) []string {
+	cleaned := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		cleaned = append(cleaned, p)
+	}
+	return cleaned
+}
+
+func isNetwork(action string) bool {
+	switch action {
+	case "push", "pull", "fetch", "clone":
+		return true
+	default:
+		return false
+	}
+}
+
+func timeoutFor(d actData, action string) time.Duration {
+	if d.TimeoutSeconds > 0 {
+		return time.Duration(d.TimeoutSeconds) * time.Second
+	}
+	if isNetwork(action) {
+		return NETWORK_TIMEOUT_SECONDS * time.Second
+	}
+	return time.Duration(envTimeout()) * time.Second
+}
+
+func envTimeout() int {
+	n, err := strconv.Atoi(strings.TrimSpace(os.Getenv("GIT_TIMEOUT_SECONDS")))
+	if err != nil {
+		return DEFAULT_TIMEOUT_SECONDS
+	}
+	if n <= 0 {
+		return DEFAULT_TIMEOUT_SECONDS
+	}
+	return n
+}
+
+func actAllowed() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GIT_ALLOW_ACT"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+type actInput struct {
+	Repo   string  `json:"repo" jsonschema:"Path to the Git repository (required); for clone, the destination directory."`
+	Action string  `json:"action" jsonschema:"Action: add, restore, commit, push, pull, fetch, merge, reset, checkout, branch, tag, clone or clean (required)."`
+	Data   actData `json:"data,omitempty" jsonschema:"Options for the chosen action; fields that do not apply are ignored."`
+}
+
+type actData struct {
+	Paths          []string `json:"paths,omitempty" jsonschema:"Files or directories (add, restore)."`
+	Message        string   `json:"message,omitempty" jsonschema:"Commit message; annotated tag message."`
+	Ref            string   `json:"ref,omitempty" jsonschema:"Target ref (merge, reset, branch start point)."`
+	Remote         string   `json:"remote,omitempty" jsonschema:"Remote name (default origin)."`
+	Branch         string   `json:"branch,omitempty" jsonschema:"Branch name."`
+	Name           string   `json:"name,omitempty" jsonschema:"Tag name."`
+	Mode           string   `json:"mode,omitempty" jsonschema:"Reset mode: soft, mixed, hard, keep."`
+	URL            string   `json:"url,omitempty" jsonschema:"URL to clone."`
+	Depth          int      `json:"depth,omitempty" jsonschema:"Shallow depth (clone, fetch)."`
+	All            bool     `json:"all,omitempty" jsonschema:"Stage all, or all remotes."`
+	Amend          bool     `json:"amend,omitempty" jsonschema:"Amend the previous commit."`
+	AllowEmpty     bool     `json:"allowEmpty,omitempty" jsonschema:"Allow an empty commit."`
+	Force          bool     `json:"force,omitempty" jsonschema:"Force push/pull or discard local changes (needs confirm)."`
+	FollowTags     bool     `json:"followTags,omitempty" jsonschema:"Push reachable annotated tags."`
+	Tags           bool     `json:"tags,omitempty" jsonschema:"Fetch all tags."`
+	Prune          bool     `json:"prune,omitempty" jsonschema:"Prune deleted remote refs."`
+	NoFF           bool     `json:"noFF,omitempty" jsonschema:"Always create a merge commit."`
+	Staged         bool     `json:"staged,omitempty" jsonschema:"Restore the index."`
+	Create         bool     `json:"create,omitempty" jsonschema:"Create the branch."`
+	Delete         bool     `json:"delete,omitempty" jsonschema:"Delete branch/tag (needs confirm)."`
+	Confirm        bool     `json:"confirm,omitempty" jsonschema:"Required for destructive actions."`
+	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"Timeout in seconds."`
+}

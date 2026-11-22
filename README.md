@@ -4,7 +4,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 
 | Servidor | O que faz |
 | --- | --- |
-| `git-mcp` | Inspeção **read-only** de repositórios Git locais (go-git, sem CLI) |
+| `git-mcp` | Inspeção **read-only** de repositórios Git locais e escrita opcional via `git_act` (`GIT_ALLOW_ACT`) |
 | `github-mcp` | Consulta **read-only** à API do GitHub (busca, arquivos, issues/PRs, releases) |
 | `docker-mcp` | Inspeção e ciclo de vida de containers Docker via SDK oficial (env nunca é devolvido); build, compose e env no `docker_run` |
 | `ssh-mcp` | Comandos, leitura/escrita e transferência em hosts remotos via SSH, com múltiplas conexões nomeadas |
@@ -14,7 +14,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 
 ## Tools
 
-- **git**: `git_repo_info`, `git_status`, `git_log`, `git_show`, `git_diff`, `git_refs`, `git_blame`, `git_tree`, `git_read_file`, `git_find_commits`
+- **git**: `git_search`, `git_read`, `git_act` (com `GIT_ALLOW_ACT`)
 - **github**: `github_search`, `github_get_tree`, `github_read_file`, `github_repo_info`, `github_get_item`
 - **docker**: `docker_get`, `docker_inspect`, `docker_run`, `docker_control`
 - **ssh**: `ssh_run`, `ssh_os`, `ssh_transfer`, `ssh_probe`
@@ -26,6 +26,10 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 
 | Servidor | Variável | Padrão | Descrição |
 | --- | --- | --- | --- |
+| `git` | `GIT_ALLOW_ACT` | desligado | habilita a tool `git_act` (`1`, `true`, `yes` ou `on`) |
+| | `GIT_TIMEOUT_SECONDS` | `60` | timeout das operações locais do `git_act` (rede usa 300 s) |
+| | `GIT_USER` | `user.name` | nome do autor dos commits |
+| | `GIT_EMAIL` | `user.email` | e-mail do autor dos commits |
 | `github` | `GITHUB_TOKEN` | obrigatório | Personal Access Token |
 | | `GITHUB_BASE_URL` | `https://api.github.com` | URL da API (GitHub Enterprise) |
 | | `GITHUB_TIMEOUT_SECONDS` | `60` | timeout por requisição |
@@ -76,7 +80,7 @@ Build: `task build:sandbox-cli` (gera `dist/sandbox.exe`).
 ```json
 {
   "context_servers": {
-    "git":     { "command": "~/.local/bin/git-mcp.exe" },
+    "git":     { "command": "~/.local/bin/git-mcp.exe", "env": { "GIT_ALLOW_ACT": "true" } },
     "github":  { "command": "~/.local/bin/github-mcp.exe", "env": { "GITHUB_TOKEN": "<token>" } },
     "docker":  { "command": "~/.local/bin/docker-mcp.exe" },
     "ssh":     { "command": "~/.local/bin/ssh-mcp.exe", "env": { "SSH_HOST": "<host>", "SSH_USER": "<user>", "SSH_KEY_PATH": "<chave>" } },

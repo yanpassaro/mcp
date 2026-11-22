@@ -29,54 +29,21 @@ func New() *Server {
 
 func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_repo_info",
-		Description: "Repository info: worktree root, HEAD (branch/SHA), commit count, branches, tags and remotes. Engine: go-git.",
-	}, s.repoInfo)
+		Name:        "git_search",
+		Description: "Find commits (filters: query, author, path, since/until, stat) or list tracked files at a ref. Read-only.",
+	}, s.searchTool)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_status",
-		Description: "Working tree state: modified, added, removed, untracked and conflicting files (index vs working tree). Markdown table.",
-	}, s.status)
+		Name:        "git_read",
+		Description: "Read info, status, refs, file, show, diff or blame. Read-only.",
+	}, s.readTool)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_log",
-		Description: "Commit history (newest first) as a Markdown table. Filters: maxCount, author, path (follows renames), since/until (YYYY-MM-DD). With 'stat'=true shows changed files (+add/-del) per commit (git log --stat style).",
-	}, s.log)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_show",
-		Description: "Details of a commit (author, date, message, changed files and its diff against the parent). 'ref' defaults to HEAD.",
-	}, s.show)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_diff",
-		Description: "Flexible diff: working tree vs HEAD (default), index vs HEAD (staged=true), or two refs (base+head). 'path' filters by prefix; 'context' sets lines of context (0 = only +/- lines, 3 = classic diff). 'stat'=true shows only the per-file summary. Always Markdown.",
-	}, s.diff)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_refs",
-		Description: "List refs of a repository: branches (with all=true includes remotes), remotes (name + URLs) or tags (SHA + date). 'type' selects which: branch, remote or tag.",
-	}, s.refs)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_blame",
-		Description: "Line-by-line blame (SHA + author) of a file, rebuilt from history. 'path' is required; 'maxLines' caps the size.",
-	}, s.blame)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_tree",
-		Description: "List tracked files at a ref (default HEAD). 'path' filters by prefix. Markdown list.",
-	}, s.tree)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_read_file",
-		Description: "Read a file's content: current working tree (no 'ref') or at a revision (branch/tag/SHA).",
-	}, s.readFile)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "git_find_commits",
-		Description: "Find commits by message text ('query', case-insensitive) with optional author and file filters. Markdown table.",
-	}, s.findCommits)
+	if actAllowed() {
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "git_act",
+			Description: "Write: add, restore, commit, push, pull, fetch, merge, reset, checkout, branch, tag, clone, clean. Destructive actions need data.confirm.",
+		}, s.actTool)
+	}
 }
 
 func (s *Server) repoInfo(ctx context.Context, _ *mcp.CallToolRequest, in repoInfoInput) (*mcp.CallToolResult, any, error) {
@@ -153,10 +120,16 @@ func (s *Server) log(ctx context.Context, _ *mcp.CallToolRequest, in logInput) (
 		return nil, nil, err
 	}
 	author := strings.ToLower(strings.TrimSpace(in.Author))
+	query := strings.ToLower(strings.TrimSpace(in.Query))
 	commits := []*object.Commit{}
 	for c, e := iter.Next(); !errors.Is(e, io.EOF); c, e = iter.Next() {
 		if e != nil {
 			return nil, nil, e
+		}
+		if query != "" {
+			if !strings.Contains(strings.ToLower(firstLine(c.Message)), query) {
+				continue
+			}
 		}
 		if author != "" {
 			if !strings.Contains(authorHay(c), author) {
@@ -627,48 +600,6 @@ func (s *Server) readFile(ctx context.Context, _ *mcp.CallToolRequest, in readFi
 }
 
 
-func (s *Server) findCommits(ctx context.Context, _ *mcp.CallToolRequest, in findCommitsInput) (*mcp.CallToolResult, any, error) {
-	repo, err := s.client.Open(in.Repo)
-	if err != nil {
-		return nil, nil, err
-	}
-	q := strings.ToLower(strings.TrimSpace(in.Query))
-	if q == "" {
-		return nil, nil, errors.New("'query' é obrigatório (texto da mensagem)")
-	}
-	max := cmp.Or(in.MaxCount, DEFAULT_MAX_COMMITS)
-	opts := logOptions(repo)
-	if in.Path != "" {
-		p := in.Path
-		opts.FileName = &p
-	}
-	iter, err := repo.Log(opts)
-	if err != nil {
-		return nil, nil, err
-	}
-	author := strings.ToLower(strings.TrimSpace(in.Author))
-	commits := []*object.Commit{}
-	for c, e := iter.Next(); !errors.Is(e, io.EOF); c, e = iter.Next() {
-		if e != nil {
-			return nil, nil, e
-		}
-		if !strings.Contains(strings.ToLower(firstLine(c.Message)), q) {
-			continue
-		}
-		if author != "" {
-			if !strings.Contains(authorHay(c), author) {
-				continue
-			}
-		}
-		commits = append(commits, c)
-		if len(commits) >= max {
-			break
-		}
-	}
-	return textResult(formatLog(commits))
-}
-
-
 func fileContentAt(repo *git.Repository, c *object.Commit, path string) (string, error) {
 	f, err := c.File(path)
 	if err != nil {
@@ -879,6 +810,7 @@ type statusInput struct {
 type logInput struct {
 	Repo     string `json:"repo" jsonschema:"Path to the Git repository (required)."`
 	MaxCount int    `json:"maxCount,omitempty" jsonschema:"Maximum number of commits (default 30)."`
+	Query    string `json:"query,omitempty" jsonschema:"Only commits whose message first line contains this text (case-insensitive)."`
 	Author   string `json:"author,omitempty" jsonschema:"Author filter (name or e-mail, partial, case-insensitive)."`
 	Path     string `json:"path,omitempty" jsonschema:"Filters commits that touched this file (follows renames)."`
 	Since    string `json:"since,omitempty" jsonschema:"Start date (YYYY-MM-DD) when the commit was authored."`
@@ -926,15 +858,6 @@ type readFileInput struct {
 	Repo string `json:"repo" jsonschema:"Path to the Git repository (required)."`
 	Path string `json:"path" jsonschema:"Path of the file (required)."`
 	Ref  string `json:"ref,omitempty" jsonschema:"Optional ref (branch/tag/SHA) to read the file at that revision; if empty, reads the working tree."`
-}
-
-
-type findCommitsInput struct {
-	Repo     string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-	Query    string `json:"query" jsonschema:"Text searched in the commit message (case-insensitive)."`
-	Author   string `json:"author,omitempty" jsonschema:"Optional author filter (partial, case-insensitive)."`
-	Path     string `json:"path,omitempty" jsonschema:"Filters commits that touched this file (optional)."`
-	MaxCount int    `json:"maxCount,omitempty" jsonschema:"Maximum number of commits (default 30)."`
 }
 
 

@@ -1,20 +1,59 @@
 # Git MCP
 
-Inspeciona repositórios Git locais (**somente leitura**) com `go-git` (não precisa do `git` CLI). O repositório é informado por chamada no campo `repo`.
+Inspeciona e altera repositórios Git locais. Toda chamada usa `repo`, `action` e `data`.
 
-## Tools
+## `git_search`
 
-| Tool | O que faz |
+| `action` | `data` |
 | --- | --- |
-| `git_repo_info` | Info do repositório: raiz, HEAD, commits, branches, tags, top contribuidores, linguagens |
-| `git_status` | Estado da working tree (modificados, adicionados, removidos, conflitos) |
-| `git_log` | Histórico de commits em tabela Markdown (autor, path, `since`/`until`, `stat`) |
-| `git_show` | Detalhes de um commit (autor, data, mensagem, diff contra o pai) |
-| `git_diff` | Diff: working tree vs HEAD, index (`staged`), ou duas refs (`base`+`head`) |
-| `git_refs` | Lista refs por `type` (`branch`, `remote`, `tag`) |
-| `git_blame` | Blame linha a linha (SHA + autor) |
-| `git_tree` | Lista arquivos rastreados numa ref; `path`/`pattern` filtram |
-| `git_read_file` | Conteúdo de um arquivo (working tree ou numa ref) |
-| `git_find_commits` | Busca commits por texto na mensagem |
+| `commits` | `query`, `author`, `path`, `since`, `until`, `stat`, `maxCount` |
+| `files` | `ref`, `path`, `pattern` |
 
-Sem variáveis de ambiente.
+## `git_read`
+
+| `action` | `data` |
+| --- | --- |
+| `info` | — |
+| `status` | — |
+| `refs` | `type` (`branch`/`remote`/`tag`), `all` |
+| `file` | `path`, `ref` |
+| `show` | `ref` |
+| `diff` | `base`, `head`, `staged`, `path`, `context`, `stat` |
+| `blame` | `path`, `maxLines` |
+
+## `git_act`
+
+Só é registrada com `GIT_ALLOW_ACT`. Ações destrutivas exigem `data.confirm`.
+
+| `action` | `data` |
+| --- | --- |
+| `add` | `paths`, `all` |
+| `restore` | `paths`, `staged` |
+| `commit` | `message`, `all`, `amend`, `allowEmpty` |
+| `push` | `remote`, `branch`, `force`, `followTags`, `prune` |
+| `pull` | `remote`, `branch`, `force` |
+| `fetch` | `remote`, `all`, `tags`, `prune`, `depth` |
+| `merge` | `ref`, `noFF` |
+| `reset` | `mode` (`soft`/`mixed`/`hard`/`keep`), `ref` |
+| `checkout` | `branch`, `create`, `ref`, `force` |
+| `branch` | `branch`, `ref`, `delete` |
+| `tag` | `name`, `ref`, `message`, `delete` |
+| `clone` | `url`, `branch`, `depth` (`repo` = destino) |
+| `clean` | — |
+
+```json
+{ "repo": "C:/dev/app", "action": "commit", "data": { "message": "feat: cache" } }
+```
+
+## Auth
+
+SSH usa o `ssh-agent` (usuário da URL). HTTPS só funciona com repositório público. `GIT_USER`/`GIT_EMAIL` definem o autor dos commits.
+
+## Env
+
+| Variável | Padrão | Descrição |
+| --- | --- | --- |
+| `GIT_ALLOW_ACT` | desligado | habilita `git_act` (`1`, `true`, `yes`, `on`) |
+| `GIT_TIMEOUT_SECONDS` | `60` | timeout local (rede: `300`) |
+| `GIT_USER` | `user.name` | autor dos commits |
+| `GIT_EMAIL` | `user.email` | e-mail do autor |
