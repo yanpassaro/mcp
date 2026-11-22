@@ -8,7 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (s *Server) searchTool(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, any, error) {
 	action := strings.ToLower(strings.TrimSpace(in.Action))
 	if action == "" {
 		return nil, nil, errors.New("'action' é obrigatório")

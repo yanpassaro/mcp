@@ -27,14 +27,14 @@ const (
 	MERGE_COMMIT_STRATEGY   = git.MergeStrategy(1)
 )
 
-func (s *Server) actTool(ctx context.Context, _ *mcp.CallToolRequest, in actInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) act(ctx context.Context, _ *mcp.CallToolRequest, in actInput) (*mcp.CallToolResult, any, error) {
 	action := strings.ToLower(strings.TrimSpace(in.Action))
 	if action == "" {
 		return nil, nil, errors.New("'action' é obrigatório")
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeoutFor(in.Data, action))
 	defer cancel()
-	text, err := s.act(ctx, action, in)
+	text, err := s.dispatch(ctx, action, in)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, nil, fmt.Errorf("%s: %w", action, ctx.Err())
@@ -44,7 +44,7 @@ func (s *Server) actTool(ctx context.Context, _ *mcp.CallToolRequest, in actInpu
 	return textResult(text)
 }
 
-func (s *Server) act(ctx context.Context, action string, in actInput) (string, error) {
+func (s *Server) dispatch(ctx context.Context, action string, in actInput) (string, error) {
 	if action == "clone" {
 		return cloneAct(ctx, in.Repo, in.Data)
 	}

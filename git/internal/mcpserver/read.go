@@ -8,7 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (s *Server) readTool(ctx context.Context, _ *mcp.CallToolRequest, in readInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) read(ctx context.Context, _ *mcp.CallToolRequest, in input) (*mcp.CallToolResult, any, error) {
 	action := strings.ToLower(strings.TrimSpace(in.Action))
 	if action == "" {
 		return nil, nil, errors.New("'action' é obrigatório")
@@ -41,13 +41,13 @@ func (s *Server) readTool(ctx context.Context, _ *mcp.CallToolRequest, in readIn
 	}
 }
 
-type readInput struct {
-	Repo   string   `json:"repo" jsonschema:"Path to the Git repository (required)."`
-	Action string   `json:"action" jsonschema:"Action: info, status, refs, file, show, diff or blame (required)."`
-	Data   readData `json:"data,omitempty" jsonschema:"Options for the chosen action; fields that do not apply are ignored."`
+type input struct {
+	Repo   string `json:"repo" jsonschema:"Path to the Git repository (required)."`
+	Action string `json:"action" jsonschema:"info, status, refs, file, show, diff or blame (required)."`
+	Data   data   `json:"data,omitempty" jsonschema:"Options for the chosen action; fields that do not apply are ignored."`
 }
 
-type readData struct {
+type data struct {
 	Type     string `json:"type,omitempty" jsonschema:"Refs type: branch, remote or tag."`
 	All      bool   `json:"all,omitempty" jsonschema:"Include remote branches."`
 	Ref      string `json:"ref,omitempty" jsonschema:"Revision (default: working tree for file, HEAD for show)."`

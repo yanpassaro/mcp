@@ -31,18 +31,18 @@ func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "git_search",
 		Description: "Find commits (filters: query, author, path, since/until, stat) or list tracked files at a ref. Read-only.",
-	}, s.searchTool)
+	}, s.search)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "git_read",
 		Description: "Read info, status, refs, file, show, diff or blame. Read-only.",
-	}, s.readTool)
+	}, s.read)
 
 	if actAllowed() {
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "git_act",
 			Description: "Write: add, restore, commit, push, pull, fetch, merge, reset, checkout, branch, tag, clone, clean. Destructive actions need data.confirm.",
-		}, s.actTool)
+		}, s.act)
 	}
 }
 
