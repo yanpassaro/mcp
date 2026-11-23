@@ -4,7 +4,7 @@ Executa comandos e move arquivos em hosts remotos. Credenciais vêm só do ambie
 
 ## Conexões
 
-Cada conexão é um conjunto `SSH_<ATRIBUTO>` (padrão) ou `SSH_<ALIAS>_<ATRIBUTO>` (nomeada). Basta um `HOST` para a conexão existir.
+Cada conexão é um conjunto de variáveis com alias: `STAGING_SSH_HOST` ou `SSH_STAGING_HOST`. Sem alias não há conexão. Basta um `HOST` para ela existir.
 
 | Atributo | Padrão | Descrição |
 | --- | --- | --- |
@@ -17,16 +17,16 @@ Cada conexão é um conjunto `SSH_<ATRIBUTO>` (padrão) ou `SSH_<ALIAS>_<ATRIBUT
 | `TIMEOUT_SECONDS` | `30` | timeout de conexão e de cada operação |
 
 ```env
-SSH_HOST=203.0.113.10
-SSH_USER=deploy
-SSH_KEY_PATH=C:/Users/yannp/.ssh/id_ed25519
+LAB_SSH_HOST=203.0.113.10
+LAB_SSH_USER=deploy
+LAB_SSH_KEY_PATH=C:/Users/yannp/.ssh/id_ed25519
 
-SSH_STAGING_HOST=staging.exemplo.com
-SSH_STAGING_KEY_PATH=C:/Users/yannp/.ssh/staging
-SSH_STAGING_PORT=2222
+STAGING_SSH_HOST=staging.exemplo.com
+STAGING_SSH_KEY_PATH=C:/Users/yannp/.ssh/staging
+STAGING_SSH_PORT=2222
 ```
 
-Aqui as conexões são `default` e `staging`.
+Aqui as conexões são `lab` e `staging`.
 
 ## `ssh_read`
 

@@ -93,7 +93,7 @@ func Discover() ([]Config, error) {
 	}
 	slices.SortFunc(out, func(a, b Config) int { return cmp.Compare(a.Alias, b.Alias) })
 	if len(out) == 0 {
-		return nil, errors.New("nenhuma conexão SSH configurada: defina SSH_HOST ou SSH_{ALIAS}_HOST")
+		return nil, errors.New("nenhuma conexão SSH configurada: defina {ALIAS}_SSH_HOST (ex.: STAGING_SSH_HOST)")
 	}
 	return out, nil
 }
@@ -177,21 +177,29 @@ func parseTimeout(value, alias string) (time.Duration, error) {
 
 func parseEnvKey(key string) (alias, attr string, ok bool) {
 	up := strings.ToUpper(strings.TrimSpace(key))
-	if !strings.HasPrefix(up, "SSH_") {
+	prefix, rest, found := strings.Cut(up, "SSH_")
+	if !found {
 		return "", "", false
 	}
-	rest := strings.TrimPrefix(up, "SSH_")
-	for _, attr := range attrNames {
-		name := strings.ToUpper(attr)
-		if rest == name {
-			return "", attr, true
+	for _, name := range attrNames {
+		attrName := strings.ToUpper(name)
+		if rest == attrName {
+			return namedAlias(prefix, name)
 		}
-		suffix := fmt.Sprintf("_%s", name)
+		suffix := fmt.Sprintf("_%s", attrName)
 		if strings.HasSuffix(rest, suffix) {
-			return normalizeAlias(strings.TrimSuffix(rest, suffix)), attr, true
+			return namedAlias(prefix+strings.TrimSuffix(rest, suffix), name)
 		}
 	}
 	return "", "", false
+}
+
+func namedAlias(prefix, attr string) (string, string, bool) {
+	alias := normalizeAlias(prefix)
+	if alias == "" {
+		return "", "", false
+	}
+	return alias, attr, true
 }
 
 func normalizeAlias(prefix string) string {

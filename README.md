@@ -38,9 +38,9 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | | `DOCKER_HOST` | — | endpoint do daemon (unix socket, npipe ou tcp), lido pelo SDK |
 | | `DOCKER_API_VERSION` / `DOCKER_TLS_VERIFY` / `DOCKER_CERT_PATH` | — | configuração do Engine API, lida pelo SDK |
 | | `DOCKER_REGISTRY_AUTH` | — | auth base64 para pull de imagem privada (opcional) |
-| `ssh` | `SSH_HOST` / `SSH_{ALIAS}_HOST` | obrigatório | conexão padrão / conexões nomeadas |
-| | `SSH_USER` / `SSH_{ALIAS}_USER` | `USER`/`USERNAME` | usuário SSH |
-| | `SSH_KEY_PATH` / `SSH_{ALIAS}_KEY_PATH` | — | chave privada (ou `PASSWORD`) |
+| `ssh` | `{ALIAS}_SSH_HOST` | obrigatório | conexão nomeada (o alias é obrigatório) |
+| | `{ALIAS}_SSH_USER` | `USER`/`USERNAME` | usuário SSH |
+| | `{ALIAS}_SSH_KEY_PATH` | — | chave privada (ou `PASSWORD`) |
 | | `SSH_PORT` / `SSH_{ALIAS}_PORT` | `22` | porta SSH |
 | | `SSH_KEY_PASSPHRASE` / `SSH_{ALIAS}_KEY_PASSPHRASE` | — | passphrase da chave |
 | | `SSH_KNOWN_HOSTS` / `SSH_{ALIAS}_KNOWN_HOSTS` | `~/.ssh/known_hosts` | host keys pinadas |
@@ -65,7 +65,7 @@ O filesystem do sandbox (`mnt`) e a exportação do sqlize ficam **fixos** em `~
     "git":     { "command": "~/.local/bin/git-mcp.exe", "env": { "GIT_ALLOW_ACT": "true" } },
     "github":  { "command": "~/.local/bin/github-mcp.exe", "env": { "GITHUB_TOKEN": "<token>" } },
     "docker":  { "command": "~/.local/bin/docker-mcp.exe" },
-    "ssh":     { "command": "~/.local/bin/ssh-mcp.exe", "env": { "SSH_HOST": "<host>", "SSH_USER": "<user>", "SSH_KEY_PATH": "<chave>" } },
+    "ssh":     { "command": "~/.local/bin/ssh-mcp.exe", "env": { "LAB_SSH_HOST": "<host>", "LAB_SSH_USER": "<user>", "LAB_SSH_KEY_PATH": "<chave>" } },
     "sqlize":  { "command": "~/.local/bin/sqlize-mcp.exe" },
     "sandbox": { "command": "~/.local/bin/sandbox-mcp.exe" },
     "anydoc":  { "command": "~/.local/bin/anydoc-mcp.exe" }
