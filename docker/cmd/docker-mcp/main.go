@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -63,7 +64,7 @@ func setupLog(server string) {
 		log.Printf("aviso: falha ao abrir %s; log segue para stderr: %v", path, err)
 		return
 	}
-	log.SetOutput(f)
+	log.SetOutput(io.MultiWriter(f, os.Stderr))
 }
 
 func userStateDir() string {

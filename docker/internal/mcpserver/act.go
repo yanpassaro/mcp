@@ -68,7 +68,7 @@ type actData struct {
 	Volumes        []string `json:"volumes,omitempty" jsonschema:"Volume mappings, e.g. [\"C:/data:/data\"]."`
 	Network        string   `json:"network,omitempty" jsonschema:"Network name."`
 	AutoRemove     bool     `json:"autoRemove,omitempty" jsonschema:"Remove the container when it stops."`
-	Env            []string `json:"env,omitempty" jsonschema:"KEY=VALUE; values are never echoed back."`
+	Env            []string `json:"env,omitempty" jsonschema:"Env vars as KEY=VALUE; values are never echoed back."`
 	EnvFile        string   `json:"envFile,omitempty" jsonschema:"Env file on this machine; values are never echoed back."`
 	Restart        string   `json:"restart,omitempty" jsonschema:"no, always, unless-stopped, on-failure[:n]."`
 	Memory         string   `json:"memory,omitempty" jsonschema:"Memory limit, e.g. 512m."`
