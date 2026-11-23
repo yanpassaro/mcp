@@ -144,6 +144,10 @@ func commitAct(repo *git.Repository, d actData) (string, error) {
 	if message == "" {
 		return "", errors.New("commit exige 'message' em 'data'")
 	}
+	message, err = withCoAuthors(message, d.CoAuthors)
+	if err != nil {
+		return "", err
+	}
 	hash, err := wt.Commit(message, &git.CommitOptions{All: d.All, Amend: d.Amend, AllowEmptyCommits: d.AllowEmpty, Author: authorSignature()})
 	if err != nil {
 		return "", fmt.Errorf("commit: %w", err)
@@ -161,6 +165,30 @@ func headMessage(repo *git.Repository) (string, error) {
 		return "", fmt.Errorf("amend sem 'message': %w", err)
 	}
 	return strings.TrimSpace(commit.Message), nil
+}
+
+func withCoAuthors(message string, extra []string) (string, error) {
+	entries := append(strings.Split(os.Getenv("GIT_COAUTHOR"), ","), extra...)
+	lines := strings.Builder{}
+	count := 0
+	for _, e := range entries {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		if !strings.Contains(e, "<") {
+			return "", fmt.Errorf("coautor inválido %q: use 'Nome <email>'", e)
+		}
+		if strings.Contains(message, e) {
+			continue
+		}
+		fmt.Fprintf(&lines, "Co-authored-by: %s\n", e)
+		count++
+	}
+	if count == 0 {
+		return message, nil
+	}
+	return fmt.Sprintf("%s\n\n%s", strings.TrimRight(message, "\n"), strings.TrimRight(lines.String(), "\n")), nil
 }
 
 func pullAct(ctx context.Context, repo *git.Repository, d actData) (string, error) {
@@ -640,6 +668,7 @@ type actData struct {
 	All            bool     `json:"all,omitempty" jsonschema:"Stage all, or all remotes."`
 	Amend          bool     `json:"amend,omitempty" jsonschema:"Amend the previous commit."`
 	AllowEmpty     bool     `json:"allowEmpty,omitempty" jsonschema:"Allow an empty commit."`
+	CoAuthors      []string `json:"coAuthors,omitempty" jsonschema:"Co-authors as 'Name <email>'."`
 	Force          bool     `json:"force,omitempty" jsonschema:"Force pull or discard local changes (needs confirm)."`
 	Tags           bool     `json:"tags,omitempty" jsonschema:"Fetch all tags."`
 	Prune          bool     `json:"prune,omitempty" jsonschema:"Prune deleted remote refs."`

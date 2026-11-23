@@ -30,6 +30,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | | `GIT_TIMEOUT_SECONDS` | `60` | timeout das operações locais do `git_act` (rede usa 300 s) |
 | | `GIT_USER` | `user.name` | nome do autor dos commits |
 | | `GIT_EMAIL` | `user.email` | e-mail do autor dos commits |
+| | `GIT_COAUTHOR` | — | co-autores fixos, `Nome <email>` separados por vírgula |
 | `github` | `GITHUB_TOKEN` | obrigatório | Personal Access Token |
 | | `GITHUB_BASE_URL` | `https://api.github.com` | URL da API (GitHub Enterprise) |
 | | `GITHUB_TIMEOUT_SECONDS` | `60` | timeout por requisição |

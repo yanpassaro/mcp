@@ -29,7 +29,7 @@ Só é registrada com `GIT_ALLOW_ACT`. Ações destrutivas exigem `data.confirm`
 | --- | --- |
 | `add` | `paths`, `all` |
 | `restore` | `paths`, `staged` |
-| `commit` | `message`, `all`, `amend`, `allowEmpty` |
+| `commit` | `message`, `all`, `amend`, `allowEmpty`, `coAuthors` |
 | `pull` | `remote`, `branch`, `force` |
 | `fetch` | `remote`, `all`, `tags`, `prune`, `depth` |
 | `merge` | `ref`, `noFF` |
@@ -56,3 +56,4 @@ SSH usa o `ssh-agent` (usuário da URL). HTTPS só funciona com repositório pú
 | `GIT_TIMEOUT_SECONDS` | `60` | timeout local (rede: `300`) |
 | `GIT_USER` | `user.name` | autor dos commits |
 | `GIT_EMAIL` | `user.email` | e-mail do autor |
+| `GIT_COAUTHOR` | — | co-autores fixos, `Nome <email>` separados por vírgula |
