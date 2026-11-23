@@ -30,17 +30,44 @@ tasks:
       - task: build:sqlize
       - task: build:sandbox
 
+  build:linux:
+    desc: Build all Go MCP servers for Linux (GOARCH defaults to amd64)
+    deps: [prep]
+    cmds:
+      - task: build:git:linux
+      - task: build:github:linux
+      - task: build:docker:linux
+      - task: build:ssh:linux
+      - task: build:sqlize:linux
+      - task: build:sandbox:linux
+
   build:git:
     desc: Build git-mcp.exe
     dir: git
     cmds:
       - go build -o ../{{.DIST}}/git-mcp.exe ./cmd/git-mcp
 
+  build:git:linux:
+    desc: Build git-mcp for Linux (GOARCH defaults to amd64)
+    dir: git
+    env:
+      GOOS: linux
+    cmds:
+      - go build -o ../{{.DIST}}/git-mcp ./cmd/git-mcp
+
   build:github:
     desc: Build github-mcp.exe
     dir: github
     cmds:
       - go build -o ../{{.DIST}}/github-mcp.exe ./cmd/github-mcp
+
+  build:github:linux:
+    desc: Build github-mcp for Linux (GOARCH defaults to amd64)
+    dir: github
+    env:
+      GOOS: linux
+    cmds:
+      - go build -o ../{{.DIST}}/github-mcp ./cmd/github-mcp
 
   build:docker:
     desc: Build docker-mcp.exe
@@ -56,7 +83,7 @@ tasks:
       GOOS: linux
     cmds:
       - go mod tidy
-      - go build -o ../{{.DIST}}/docker-mcp-linux-{{.GOARCH}} ./cmd/docker-mcp
+      - go build -o ../{{.DIST}}/docker-mcp ./cmd/docker-mcp
 
   build:ssh:
     desc: Build ssh-mcp.exe
@@ -72,13 +99,21 @@ tasks:
       GOOS: linux
     cmds:
       - go mod tidy
-      - go build -o ../{{.DIST}}/ssh-mcp-linux-{{.GOARCH}} ./cmd/ssh-mcp
+      - go build -o ../{{.DIST}}/ssh-mcp ./cmd/ssh-mcp
 
   build:sqlize:
     desc: Build sqlize-mcp.exe
     dir: sqlize
     cmds:
       - go build -o ../{{.DIST}}/sqlize-mcp.exe ./cmd/sqlize-mcp
+
+  build:sqlize:linux:
+    desc: Build sqlize-mcp for Linux (GOARCH defaults to amd64)
+    dir: sqlize
+    env:
+      GOOS: linux
+    cmds:
+      - go build -o ../{{.DIST}}/sqlize-mcp ./cmd/sqlize-mcp
 
   build:anydoc:
     desc: Build anydoc-mcp.exe into dist/ (Rust, Windows x64 only)
@@ -102,6 +137,14 @@ tasks:
     dir: sandbox
     cmds:
       - go build -o ../{{.DIST}}/sandbox-mcp.exe ./cmd/sandbox-mcp
+
+  build:sandbox:linux:
+    desc: Build sandbox-mcp for Linux (GOARCH defaults to amd64)
+    dir: sandbox
+    env:
+      GOOS: linux
+    cmds:
+      - go build -o ../{{.DIST}}/sandbox-mcp ./cmd/sandbox-mcp
 
   format:
     desc: Format all modules

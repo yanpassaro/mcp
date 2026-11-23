@@ -72,4 +72,4 @@ O filesystem do sandbox (`mnt`) e a exportação do sqlize ficam **fixos** em `~
 }
 ```
 
-Build: `task build` gera os executáveis em `dist/`. Logs: `~/.local/state/mcp/logs/`.
+Build: `task build` gera os executáveis em `dist/`. Para Linux: `task build:linux` (binários sem `.exe`). Logs: `~/.local/state/mcp/logs/`.

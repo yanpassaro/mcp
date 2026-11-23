@@ -22,7 +22,7 @@ type Client struct {
 }
 
 func NewClient(cfg Config) (*Client, error) {
-	api, err := client.New(client.FromEnv)
+	api, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}
