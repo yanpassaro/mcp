@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v6"
-	"github.com/go-git/go-git/v6/config"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/object"
@@ -59,8 +58,6 @@ func (s *Server) dispatch(ctx context.Context, action string, in actInput) (stri
 		return restoreAct(repo, in.Data)
 	case "commit":
 		return commitAct(repo, in.Data)
-	case "push":
-		return pushAct(ctx, repo, in.Data)
 	case "pull":
 		return pullAct(ctx, repo, in.Data)
 	case "fetch":
@@ -78,7 +75,7 @@ func (s *Server) dispatch(ctx context.Context, action string, in actInput) (stri
 	case "clean":
 		return cleanAct(repo, in.Data)
 	default:
-		return "", errors.New("'action' inválido: add, restore, commit, push, pull, fetch, merge, reset, checkout, branch, tag, clone, clean")
+		return "", errors.New("'action' inválido: add, restore, commit, pull, fetch, merge, reset, checkout, branch, tag, clone, clean")
 	}
 }
 
@@ -164,39 +161,6 @@ func headMessage(repo *git.Repository) (string, error) {
 		return "", fmt.Errorf("amend sem 'message': %w", err)
 	}
 	return strings.TrimSpace(commit.Message), nil
-}
-
-func pushAct(ctx context.Context, repo *git.Repository, d actData) (string, error) {
-	if d.Force {
-		if !d.Confirm {
-			return "", errors.New("push com 'force' exige 'confirm'=true")
-		}
-	}
-	remote := cmp.Or(strings.TrimSpace(d.Remote), "origin")
-	auth, err := remoteAuth(repo, remote)
-	if err != nil {
-		return "", err
-	}
-	opts := &git.PushOptions{RemoteName: remote, ClientOptions: auth, Prune: d.Prune, FollowTags: d.FollowTags}
-	if d.Force {
-		opts.ForceWithLease = &git.ForceWithLease{}
-	}
-	branch := strings.TrimSpace(d.Branch)
-	if branch != "" {
-		refspec := fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch)
-		opts.RefSpecs = []config.RefSpec{config.RefSpec(refspec)}
-	}
-	err = repo.PushContext(ctx, opts)
-	if errors.Is(err, git.NoErrAlreadyUpToDate) {
-		return "✅ Nada a enviar: o remoto já está atualizado.", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("push: %w", err)
-	}
-	if branch == "" {
-		return fmt.Sprintf("✅ Push concluído para `%s`.", remote), nil
-	}
-	return fmt.Sprintf("✅ Push de `%s` para `%s/%s`.", branch, remote, branch), nil
 }
 
 func pullAct(ctx context.Context, repo *git.Repository, d actData) (string, error) {
@@ -620,7 +584,7 @@ func pathsFor(paths []string) []string {
 
 func isNetwork(action string) bool {
 	switch action {
-	case "push", "pull", "fetch", "clone":
+	case "pull", "fetch", "clone":
 		return true
 	default:
 		return false
@@ -659,7 +623,7 @@ func actAllowed() bool {
 
 type actInput struct {
 	Repo   string  `json:"repo" jsonschema:"Path to the Git repository (required); for clone, the destination directory."`
-	Action string  `json:"action" jsonschema:"Action: add, restore, commit, push, pull, fetch, merge, reset, checkout, branch, tag, clone or clean (required)."`
+	Action string  `json:"action" jsonschema:"Action: add, restore, commit, pull, fetch, merge, reset, checkout, branch, tag, clone or clean (required)."`
 	Data   actData `json:"data,omitempty" jsonschema:"Options for the chosen action; fields that do not apply are ignored."`
 }
 
@@ -676,8 +640,7 @@ type actData struct {
 	All            bool     `json:"all,omitempty" jsonschema:"Stage all, or all remotes."`
 	Amend          bool     `json:"amend,omitempty" jsonschema:"Amend the previous commit."`
 	AllowEmpty     bool     `json:"allowEmpty,omitempty" jsonschema:"Allow an empty commit."`
-	Force          bool     `json:"force,omitempty" jsonschema:"Force push/pull or discard local changes (needs confirm)."`
-	FollowTags     bool     `json:"followTags,omitempty" jsonschema:"Push reachable annotated tags."`
+	Force          bool     `json:"force,omitempty" jsonschema:"Force pull or discard local changes (needs confirm)."`
 	Tags           bool     `json:"tags,omitempty" jsonschema:"Fetch all tags."`
 	Prune          bool     `json:"prune,omitempty" jsonschema:"Prune deleted remote refs."`
 	NoFF           bool     `json:"noFF,omitempty" jsonschema:"Always create a merge commit."`

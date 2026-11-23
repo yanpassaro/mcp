@@ -30,7 +30,6 @@ Só é registrada com `GIT_ALLOW_ACT`. Ações destrutivas exigem `data.confirm`
 | `add` | `paths`, `all` |
 | `restore` | `paths`, `staged` |
 | `commit` | `message`, `all`, `amend`, `allowEmpty` |
-| `push` | `remote`, `branch`, `force`, `followTags`, `prune` |
 | `pull` | `remote`, `branch`, `force` |
 | `fetch` | `remote`, `all`, `tags`, `prune`, `depth` |
 | `merge` | `ref`, `noFF` |
