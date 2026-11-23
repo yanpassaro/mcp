@@ -378,8 +378,18 @@ func branchAct(repo *git.Repository, d actData) (string, error) {
 		if !d.Confirm {
 			return "", errors.New("branch com 'delete' exige 'confirm'=true")
 		}
-		if err := repo.DeleteBranch(branch); err != nil {
+		if err := repo.Storer.RemoveReference(plumbing.NewBranchReferenceName(branch)); err != nil {
 			return "", fmt.Errorf("delete branch %s: %w", branch, err)
+		}
+		cfg, err := repo.Config()
+		if err != nil {
+			return "", fmt.Errorf("config: %w", err)
+		}
+		if _, ok := cfg.Branches[branch]; ok {
+			delete(cfg.Branches, branch)
+			if err := repo.SetConfig(cfg); err != nil {
+				return "", fmt.Errorf("config: %w", err)
+			}
 		}
 		return fmt.Sprintf("✅ Branch `%s` removida.", branch), nil
 	}

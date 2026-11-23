@@ -28,7 +28,6 @@ tasks:
       - task: build:docker
       - task: build:ssh
       - task: build:sqlize
-      - task: build:anydoc
       - task: build:sandbox
 
   build:git:
