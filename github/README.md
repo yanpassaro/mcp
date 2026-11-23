@@ -1,23 +1,38 @@
 # GitHub MCP
 
-Consulta a API do GitHub (**somente leitura**), focada em busca de documentação e código. Retorna Markdown para facilitar a leitura pelo agente.
+Consulta a API do GitHub (**somente leitura**) e devolve Markdown. Requer `GITHUB_TOKEN` (escopo `read`; `repo` para repositórios privados).
 
-Requer `GITHUB_TOKEN` (escopo `read`; `repo` para repositórios privados).
+## `github_read`
 
-## Tools
+`owner` e `repo` ficam no topo.
 
-| Tool | O que faz |
+| `action` | `data` |
 | --- | --- |
-| `github_search` | Busca unificada; `type`: `code`, `repo`, `issue`, `pr`, `commit`, `user` |
-| `github_repo_info` | Info de um repositório (stars, licença, topics, últimas 5 releases) |
-| `github_get_tree` | Árvore de arquivos de um repositório |
-| `github_read_file` | Conteúdo completo de um arquivo |
-| `github_get_item` | Lê uma issue/PR por número (`type`: `issue`/`pr`) |
+| `info` | — |
+| `tree` | `ref`, `recursive` |
+| `file` | `path`, `ref` |
+| `item` | `number`, `type` (`issue`/`pr`) |
+| `releases` | `size`, `page` |
+| `insights` | `metric` (`contributors`/`commit_activity`/`code_frequency`/`participation`/`punch_card`) |
 
-## Variáveis de ambiente
+## `github_search`
+
+| `action` | `data` |
+| --- | --- |
+| `code`, `repo`, `issue`, `pr`, `commit`, `user` | `query`, `sort`, `order`, `perPage`, `page` |
+
+```json
+{ "owner": "octocat", "repo": "Hello-World", "action": "file", "data": { "path": "README.md" } }
+```
+
+```json
+{ "action": "code", "data": { "query": "func Validate extension:go repo:owner/name" } }
+```
+
+## Env
 
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
 | `GITHUB_TOKEN` | obrigatório | Personal Access Token |
 | `GITHUB_BASE_URL` | `https://api.github.com` | URL da API (GitHub Enterprise) |
-| `GITHUB_TIMEOUT_SECONDS` | `60` | Timeout de cada requisição HTTP |
+| `GITHUB_TIMEOUT_SECONDS` | `60` | timeout por requisição |

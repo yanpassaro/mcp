@@ -27,29 +27,14 @@ func New(client *github.Client) *Server {
 
 func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "github_read",
+		Description: "Read a repository: info, tree, file, item (issue/PR), releases or insights (contributors, commit_activity, code_frequency, participation, punch_card).",
+	}, s.read)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "github_search",
-		Description: "Unified GitHub search. 'type': code, repo, issue, pr, commit, user. 'query' accepts GitHub qualifiers. Optional: sort, order, perPage, page.",
-	}, s.searchTool)
-
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "github_get_tree",
-		Description: "List a repository's file tree (git trees) by owner/repo; 'ref' optional, 'recursive' returns the full tree.",
-	}, s.getTree)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "github_read_file",
-		Description: "Read a file's content by owner/repo/path; 'ref' optional.",
-	}, s.fetchFile)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "github_repo_info",
-		Description: "Repository info by owner/name: stars, forks, license, topics, latest 5 releases.",
-	}, s.getRepo)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "github_get_item",
-		Description: "Read an issue or pull request by number; 'type': issue or pr.",
-	}, s.getItem)
+		Description: "Search GitHub: code, repo, issue, pr, commit or user. 'query' accepts qualifiers.",
+	}, s.search)
 }
 
 func (s *Server) rateLimitFooter() string {
@@ -136,7 +121,7 @@ func (s *Server) getItem(ctx context.Context, _ *mcp.CallToolRequest, in itemInp
 	}
 }
 
-func (s *Server) search(ctx context.Context, kind string, query string, sort, order string, perPage, page int) (*mcp.CallToolResult, any, error) {
+func (s *Server) find(ctx context.Context, kind string, query string, sort, order string, perPage, page int) (*mcp.CallToolResult, any, error) {
 	if strings.TrimSpace(query) == "" {
 		return nil, nil, errors.New("query é obrigatório")
 	}
@@ -157,35 +142,6 @@ func (s *Server) search(ctx context.Context, kind string, query string, sort, or
 		return nil, nil, err
 	}
 	return textResult(fmt.Sprintf("%s%s", formatSearchKind(kind, items, total), s.rateLimitFooter()))
-}
-
-func (s *Server) searchTool(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, any, error) {
-	switch strings.ToLower(strings.TrimSpace(in.Type)) {
-	case "code":
-		return s.search(ctx, "code", in.Query, in.Sort, in.Order, in.PerPage, in.Page)
-	case "repo", "repository", "repositories":
-		return s.search(ctx, "repositories", in.Query, in.Sort, in.Order, in.PerPage, in.Page)
-	case "issue", "issues":
-		return s.search(ctx, "issues", in.Query, in.Sort, in.Order, in.PerPage, in.Page)
-	case "pr", "pull", "pullrequest", "pull_request", "pull-request":
-		return s.search(ctx, "issues", withIsPR(strings.TrimSpace(in.Query)), in.Sort, in.Order, in.PerPage, in.Page)
-	case "commit", "commits":
-		q := strings.TrimSpace(in.Query)
-		if queryHasFreeTerm(q) {
-			return s.search(ctx, "commits", q, in.Sort, in.Order, in.PerPage, in.Page)
-		}
-		return s.listCommitsFallback(ctx, commitSearchInput{
-			Query:   in.Query,
-			Sort:    in.Sort,
-			Order:   in.Order,
-			PerPage: in.PerPage,
-			Page:    in.Page,
-		})
-	case "user", "users":
-		return s.search(ctx, "users", in.Query, in.Sort, in.Order, in.PerPage, in.Page)
-	default:
-		return nil, nil, fmt.Errorf("'type' inválido: use code, repo, issue, pr, commit ou user")
-	}
 }
 
 func withIsPR(q string) string {
@@ -291,15 +247,6 @@ func (s *Server) fetchFile(ctx context.Context, _ *mcp.CallToolRequest, in fetch
 	}
 	b.WriteString("```")
 	return textResult(fmt.Sprintf("%s%s", b.String(), s.rateLimitFooter()))
-}
-
-type searchInput struct {
-	Type    string `json:"type" jsonschema:"Type of search: code, repo, issue, pr, commit or user (required)."`
-	Query   string `json:"query" jsonschema:"Search query with GitHub qualifiers, e.g.: 'func Validate extension:go repo:owner/name', 'topic:llm stars:>100', 'bug is:issue is:open label:bug'."`
-	Sort    string `json:"sort,omitempty" jsonschema:"Sort order (depends on type)."`
-	Order   string `json:"order,omitempty" jsonschema:"asc or desc."`
-	PerPage int    `json:"perPage,omitempty" jsonschema:"Results per page (1-100, default 30)."`
-	Page    int    `json:"page,omitempty" jsonschema:"Page number (default 1)."`
 }
 
 type commitSearchInput struct {
