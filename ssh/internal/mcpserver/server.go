@@ -28,24 +28,19 @@ func (s *Server) Register(server *mcp.Server) {
 	targets := s.targets()
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "ssh_run",
-		Description: fmt.Sprintf("Run a shell command on a remote host over SSH and return exit code, stdout and stderr. 'target' selects the connection (%s).", targets),
-	}, s.runTool)
+		Name:        "ssh_read",
+		Description: fmt.Sprintf("Remote reads: probe (host overview), read, list or stat. 'target' selects the connection (%s).", targets),
+	}, s.read)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "ssh_act",
+		Description: fmt.Sprintf("Run a shell command, write or remove remote files. 'target' selects the connection (%s).", targets),
+	}, s.act)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "ssh_os",
-		Description: fmt.Sprintf("Remote file operations: action=read (text, .env blocked), write (overwrite or append), list, stat or remove (recursive optional). 'target' selects the connection (%s).", targets),
-	}, s.osTool)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "ssh_transfer",
-		Description: fmt.Sprintf("Upload a file from the shared mnt dir to the remote host, or download a remote file into it (max 32 MiB). 'target' selects the connection (%s).", targets),
-	}, s.transferTool)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "ssh_probe",
-		Description: fmt.Sprintf("Remote host overview: kernel, uptime, disk usage and listening ports. 'target' selects the connection (%s).", targets),
-	}, s.probeTool)
+		Description: fmt.Sprintf("Upload (mnt -> remote) or download (remote -> mnt). 'target' selects the connection (%s).", targets),
+	}, s.os)
 }
 
 func (s *Server) targets() string {
@@ -79,7 +74,7 @@ func (s *Server) ctxWithTimeout(ctx context.Context, cfg ssh.Config, seconds int
 	return context.WithTimeout(ctx, cfg.Timeout())
 }
 
-func (s *Server) runTool(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (*mcp.CallToolResult, any, error) {
 	cfg, err := s.conn(in.Target)
 	if err != nil {
 		return nil, nil, err
@@ -88,7 +83,7 @@ func (s *Server) runTool(ctx context.Context, _ *mcp.CallToolRequest, in runInpu
 	if command == "" {
 		return nil, nil, errors.New("command é obrigatório")
 	}
-	ctx, cancel := s.ctxWithTimeout(ctx, cfg, in.TimeoutSeconds)
+	ctx, cancel := s.ctxWithTimeout(ctx, cfg, in.Timeout)
 	defer cancel()
 	result, err := ssh.Run(ctx, cfg, command, strings.TrimSpace(in.Workdir))
 	if err != nil {
@@ -97,7 +92,7 @@ func (s *Server) runTool(ctx context.Context, _ *mcp.CallToolRequest, in runInpu
 	return textResult(formatRun(cfg, command, result))
 }
 
-func (s *Server) osTool(ctx context.Context, _ *mcp.CallToolRequest, in osInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) fs(ctx context.Context, _ *mcp.CallToolRequest, in fsInput) (*mcp.CallToolResult, any, error) {
 	cfg, err := s.conn(in.Target)
 	if err != nil {
 		return nil, nil, err
@@ -158,7 +153,7 @@ func (s *Server) osTool(ctx context.Context, _ *mcp.CallToolRequest, in osInput)
 	}
 }
 
-func (s *Server) transferTool(ctx context.Context, _ *mcp.CallToolRequest, in transferInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) transfer(ctx context.Context, _ *mcp.CallToolRequest, in transferInput) (*mcp.CallToolResult, any, error) {
 	cfg, err := s.conn(in.Target)
 	if err != nil {
 		return nil, nil, err
@@ -215,7 +210,7 @@ func (s *Server) download(ctx context.Context, cfg ssh.Config, local, remote str
 	return textResult(formatTransfer("download", local, remote, int64(len(data)), truncated))
 }
 
-func (s *Server) probeTool(ctx context.Context, _ *mcp.CallToolRequest, in probeInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) probe(ctx context.Context, _ *mcp.CallToolRequest, in probeInput) (*mcp.CallToolResult, any, error) {
 	cfg, err := s.conn(in.Target)
 	if err != nil {
 		return nil, nil, err
@@ -250,13 +245,13 @@ func (s *Server) localPath(name string) (string, error) {
 }
 
 type runInput struct {
-	Target         string `json:"target,omitempty" jsonschema:"SSH connection alias (optional when only one is configured)."`
-	Command        string `json:"command" jsonschema:"Shell command to run on the remote host (required)."`
-	Workdir        string `json:"workdir,omitempty" jsonschema:"Directory to run the command in (optional)."`
-	TimeoutSeconds int    `json:"timeoutSeconds,omitempty" jsonschema:"Optional timeout override, in seconds."`
+	Target  string `json:"target,omitempty" jsonschema:"SSH connection alias (optional when only one is configured)."`
+	Command string `json:"command" jsonschema:"Shell command to run on the remote host (required)."`
+	Workdir string `json:"workdir,omitempty" jsonschema:"Directory to run the command in (optional)."`
+	Timeout int    `json:"timeout,omitempty" jsonschema:"Timeout in seconds."`
 }
 
-type osInput struct {
+type fsInput struct {
 	Target         string `json:"target,omitempty" jsonschema:"SSH connection alias (optional when only one is configured)."`
 	Action         string `json:"action" jsonschema:"read, write, list, stat or remove (required)."`
 	Path           string `json:"path" jsonschema:"Remote path (required)."`

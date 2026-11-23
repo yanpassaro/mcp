@@ -7,29 +7,68 @@ Do not refactor, redesign, optimize, rename, or "improve" existing code unless e
 
 ## 1. Naming
 
-* Use short, clear, direct names.
-* Use lowercase names for unexported identifiers.
-* Use PascalCase for exported types, functions, methods, and identifiers.
-* Use camelCase for multi-word unexported identifiers.
-* Follow Go's standard initialism conventions, such as `ID`, `URL`, `HTTP`, and `API`.
-* Avoid unnecessarily long or descriptive names when a simpler name is clear.
+- Use short, clear, direct names.
+- Prefer a single word.
+- Use `camelCase` for unexported identifiers and `PascalCase` for exported ones.
+- Keep names lowercase except for the first letter and initialisms.
+- Capitalize initialisms in full: `ID`, `URL`, `URI`, `HTTP`, `HTTPS`, `API`, `JSON`, `SQL`, `SSE`, `TLS`, `TTFB`, `CPU`, `IO`, `OS`.
+- Use a compound name only when a single word collides with an existing type, field, import, or local variable (ex.: `stateOf`, `write`, `strip`).
 
 Examples:
 
 ```go
+x := 10
 users := []user{}
 names := []string{}
 urls := []string{}
 ```
 
-Avoid unnecessarily long or descriptive names when a simpler name is clear.
+And:
+
+```go
+type state struct {
+	key     string
+	started time.Time
+}
+
+func write(w http.ResponseWriter, status int, body any) {}
+func strip(header http.Header) {}
+func emit(s *state) {}
+```
+
+Use:
+
+```go
+const SESSION_HEADER = "x-opencode-session"
+const KEY_BYTES = 4
+```
+
+Do not use:
+
+```go
+func write_json(w http.ResponseWriter) {}
+func strip_upgrade(header http.Header) {}
+func log_request(state *state) {}
+```
+
+And:
+
+```go
+func getUserUrl(userId int) string {}
+```
+
+Use:
+
+```go
+func getUserURL(userID int) string {}
+```
 
 ## 2. Variables
 
-* Always use `:=`.
-* Never use `var`.
-* Use `const` for fixed values.
-* Constants must use `UPPERCASE_SNAKE_CASE`.
+- Always use `:=`.
+- Never use `var`.
+- Use `const` for fixed values.
+- Constants must use `UPPERCASE_SNAKE_CASE` (ex.: `HEADER_SIZE`, `MAX_CHUNK`).
 
 Use:
 
@@ -45,12 +84,12 @@ var users []user
 
 ## 3. Conditions
 
-* Always use `{}` for `if` blocks, even for a single statement.
-* Never use `else`.
-* Never use `else if`.
-* Never use `&&` in a condition. Split into nested `if` blocks.
-* Never compare a boolean against `false`; use `!` instead.
-* Prefer guard clauses and early returns.
+- Always use `{}` for `if` blocks, even for a single statement.
+- Never use `else`.
+- Never use `else if`.
+- Never use `&&` in a condition. Split into nested `if` blocks.
+- Never compare a boolean against `false`; use `!` instead.
+- Prefer guard clauses and early returns.
 
 Use:
 
@@ -76,14 +115,6 @@ Do not use:
 
 ```go
 if valid(x) == false {
-  return err
-}
-```
-
-Use nested checks instead:
-
-```go
-if invalid(x) {
   return err
 }
 ```
@@ -167,7 +198,7 @@ if cmp.Equal(order.status, "cancelled") {
 And:
 
 ```go
-if slices.Equal(a.item_ids, b.item_ids) {
+if slices.Equal(a.itemIDs, b.itemIDs) {
   return errors.New("item já vinculado")
 }
 ```
@@ -192,8 +223,8 @@ if name == "" {
 
 ## 5. Formatting
 
-* Never concatenate strings with `+`.
-* Use `fmt.Sprintf` when formatting.
+- Never concatenate strings with `+`.
+- Use `fmt.Sprintf` when formatting.
 
 Use:
 
@@ -209,11 +240,12 @@ msg := "limite de " + strconv.Itoa(max) + " bytes"
 
 ## 6. Default and Fallback Values
 
-* Never use `||`.
-* Use `cmp.Or(a, b, ...)` when a fallback is needed.
-* Use `const` when the default value is fixed and known.
+- Never use `||`.
+- Use `cmp.Or(a, b, ...)` when a fallback is needed.
+- Use `const` when the default value is fixed and known.
 
 Use:
+And:
 
 ```go
 bucket := cmp.Or(req.bucket, s.bucket)
@@ -222,9 +254,9 @@ bucket := cmp.Or(req.bucket, s.bucket)
 For fixed defaults:
 
 ```go
-const MINIMAL = 30
+const minimal = 30
 
-size := cmp.Or(req.size, MINIMAL)
+size := cmp.Or(req.size, minimal)
 ```
 
 Do not use:
@@ -237,16 +269,16 @@ if req.Bucket == "" {
 
 ## 7. Functions
 
-* Use `func` declarations for global and standalone functions.
-* Never define a global or standalone function as a function literal.
-* Use function literals only for callbacks and inline local helpers.
-* Keep a single-purpose body: one statement when the literal is a single expression.
-* Never declare a function literal and call it immediately.
+- Use `func` declarations for global and standalone functions.
+- Never define a global or standalone function as a function literal.
+- Use function literals only for callbacks and inline local helpers.
+- Keep a single-purpose body: one statement when the literal is a single expression.
+- Never declare a function literal and call it immediately.
 
 Use:
 
 ```go
-func users() []user {
+func getUsers() []user {
   return users
 }
 ```
@@ -266,7 +298,7 @@ slices.IndexFunc(users, func(u user) bool { return cmp.Equal(u.id, id) })
 Do not use:
 
 ```go
-var users = func() []user {
+var get_users = func() []user {
   return users
 }
 ```
@@ -281,10 +313,10 @@ slices.SortFunc(users, func(a, b user) int {
 
 ## 8. Loops
 
-* Never use `for {}`.
-* Never use incomplete or malformed `for` clauses.
-* Prefer `for _, x := range xs` for iteration.
-* Always use a complete and explicit loop clause.
+- Never use `for {}`.
+- Never use incomplete or malformed `for` clauses.
+- Prefer `for _, x := range xs` for iteration.
+- Always use a complete and explicit loop clause.
 
 Use:
 
@@ -312,11 +344,11 @@ for {
 
 ## 9. Error Handling
 
-* Never ignore errors, rejected operations, return values, or exceptions.
-* Use the repository's established error-handling pattern.
-* Wrap errors with `fmt.Errorf("...: %w", err)`.
-* Compare wrapped errors with `errors.Is` and `errors.As`.
-* Never use `_ = err`, blank returns, or `panic` in library code.
+- Never ignore errors, rejected operations, return values, or exceptions.
+- Use the repository's established error-handling pattern.
+- Wrap errors with `fmt.Errorf("...: %w", err)`.
+- Compare wrapped errors with `errors.Is` and `errors.As`.
+- Never use `_ = err`, blank returns, or `panic` in library code.
 
 Use:
 
@@ -330,7 +362,7 @@ if err != nil {
 And:
 
 ```go
-if errors.Is(err, err_not_found) {
+if errors.Is(err, errNotFound) {
   return nil
 }
 ```
@@ -347,11 +379,11 @@ Never write comments.
 
 This includes:
 
-* Inline comments
-* Block comments
-* Explanatory comments
-* TODO comments
-* Documentation comments
+- Inline comments
+- Block comments
+- Explanatory comments
+- TODO comments
+- Documentation comments
 
 Do not write:
 
@@ -362,13 +394,13 @@ user, err := Get()
 
 The code itself must be clear enough to follow the repository's conventions.
 
-## 11. SQL Formatting
+## 12. SQL Formatting
 
 SQL inside raw string literals passed to functions such as `raw(...)` or `select_raw(...)` must follow this format:
 
-* The opening backtick must be alone on its line.
-* SQL must be indented inside the raw string literal.
-* The closing backtick must be alone on its line.
+- The opening backtick must be alone on its line.
+- SQL must be indented inside the raw string literal.
+- The closing backtick must be alone on its line.
 
 Use:
 
@@ -390,14 +422,14 @@ Or:
 q := `SELECT id FROM sessions`
 ```
 
-## 12. SQL Readability
+## 13. SQL Readability
 
 Break long SQL statements into multiple lines.
 
-* Put one column or field per line.
-* Break long `WHERE` clauses into separate lines.
-* Keep large `SELECT` statements readable.
-* Do not put a large list of columns on one line.
+- Put one column or field per line.
+- Break long `WHERE` clauses into separate lines.
+- Keep large `SELECT` statements readable.
+- Do not put a large list of columns on one line.
 
 Use:
 
@@ -418,44 +450,45 @@ q := `
 `
 ```
 
-## 13. Quick Reference
+## 14. Quick Reference
 
 Always:
 
-* Use existing repository patterns.
-* Use `:=`.
-* Use lowercase names for unexported identifiers.
-* Use `PascalCase` for exported types, functions, methods, and identifiers.
-* Use `camelCase` for multi-word unexported identifiers.
-* Follow Go's standard initialism conventions, such as `ID`, `URL`, `HTTP`, and `API`.
-* Use `UPPERCASE_SNAKE_CASE` for constants.
-* Use `{}` with every `if`.
-* Use guard clauses and early returns.
-* Use `x == nil`, `x == ""` and `len(xs) == 0` for absence.
-* Use `x != nil` and `len(xs) != 0` for presence.
-* Use `cmp.Equal(...)` and `slices.Equal(...)`.
-* Use `cmp.Or(...)` for fallbacks.
-* Use `fmt.Sprintf(...)` for formatting.
-* Use `switch` when it fits.
-* Use `for _, x := range xs`.
-* Use `func` declarations for global and standalone functions.
-* Use function literals only for callbacks.
-* Use `fmt.Errorf("...: %w", err)`.
-* Use `errors.Is(...)` and `errors.As(...)`.
-* Keep SQL formatted and readable.
+- Use existing repository patterns.
+- Use `:=`.
+- Use `camelCase` for unexported names and `PascalCase` for exported ones.
+- Capitalize initialisms in full (ex.: `userID`, `baseURL`).
+- Prefer a single word; use a compound name only on collision.
+- Use `snake_case` for file names.
+- Use `UPPERCASE_SNAKE_CASE` for constants.
+- Use `{}` with every `if`.
+- Use guard clauses and early returns.
+- Use `x == nil`, `x == ""` and `len(xs) == 0` for absence.
+- Use `x != nil` and `len(xs) != 0` for presence.
+- Use `cmp.Equal(...)` and `slices.Equal(...)`.
+- Use `cmp.Or(...)` for fallbacks.
+- Use `fmt.Sprintf(...)` for formatting.
+- Use `switch` when it fits.
+- Use `for _, x := range xs`.
+- Use `func` declarations for global and standalone functions.
+- Use function literals only for callbacks.
+- Use `fmt.Errorf("...: %w", err)`.
+- Use `errors.Is(...)` and `errors.As(...)`.
+- Keep SQL formatted and readable.
 
 Never:
 
-* Use `var`.
-* Use `for {}`.
-* Use `else`.
-* Use `else if`.
-* Use `&&` in a condition.
-* Compare a boolean against `false`.
-* Use `||`.
-* Use string concatenation with `+`.
-* Use `? :` or any immediately-invoked function literal as a ternary.
-* Use incomplete `for` clauses.
-* Use comments.
-* Leave errors or rejected operations unhandled.
-* Refactor or "improve" unrelated code.
+- Use `var`.
+- Use `for {}`.
+- Use `else`.
+- Use `else if`.
+- Use `&&` in a condition.
+- Compare a boolean against `false`.
+- Use `||`.
+- Use string concatenation with `+`.
+- Use `? :` or any immediately-invoked function literal as a ternary.
+- Use a compound name when a single word is available.
+- Use incomplete `for` clauses.
+- Use comments.
+- Leave errors or rejected operations unhandled.
+- Refactor or "improve" unrelated code.

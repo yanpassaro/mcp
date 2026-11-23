@@ -22,12 +22,12 @@ Toda chamada usa `action` e `data`. Valores de `env` nunca voltam nas respostas.
 
 | `action` | `data` |
 | --- | --- |
-| `run` | `image`, `name`, `command`, `ports`, `volumes`, `network`, `env`, `envFile`, `restart`, `memory`, `cpus`, `workdir`, `user`, `autoRemove`, `pull`, `platform`, `context`, `dockerfile`, `buildArgs`, `buildPull`, `noCache`, `buildTarget`, `timeoutSeconds` |
-| `up` | `file`, `project`, `services`, `build`, `timeoutSeconds` |
+| `run` | `image`, `name`, `command`, `ports`, `volumes`, `network`, `env`, `envFile`, `restart`, `memory`, `cpus`, `workdir`, `user`, `autoRemove`, `pull`, `platform`, `context`, `dockerfile`, `buildArgs`, `buildPull`, `noCache`, `buildTarget`, `timeout` |
+| `up` | `file`, `project`, `services`, `build`, `timeout` |
 | `down` | `file`, `project`, `removeVolumes` |
-| `start` `stop` `restart` `pause` `unpause` `kill` | `name`, `signal`, `timeoutSeconds` |
+| `start` `stop` `restart` `pause` `unpause` `kill` | `name`, `signal`, `timeout` |
 | `remove` | `name`, `resource`, `force`, `removeVolumes` |
-| `exec` | `name`, `command`, `user`, `workdir`, `timeoutSeconds` |
+| `exec` | `name`, `command`, `user`, `workdir`, `timeout` |
 
 ```json
 { "action": "run", "data": { "image": "nginx", "name": "web", "ports": ["8080:80"] } }

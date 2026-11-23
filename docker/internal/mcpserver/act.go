@@ -30,7 +30,7 @@ func (s *Server) act(ctx context.Context, _ *mcp.CallToolRequest, in actInput) (
 			User:           d.User,
 			Pull:           d.Pull,
 			Platform:       d.Platform,
-			TimeoutSeconds: d.TimeoutSeconds,
+			TimeoutSeconds: d.Timeout,
 			BuildContext:   d.Context,
 			Dockerfile:     d.Dockerfile,
 			BuildArgs:      d.BuildArgs,
@@ -39,15 +39,15 @@ func (s *Server) act(ctx context.Context, _ *mcp.CallToolRequest, in actInput) (
 			Target:         d.BuildTarget,
 		})
 	case "up":
-		return s.run(ctx, nil, runInput{Compose: d.File, Project: d.Project, Services: d.Services, Build: d.Build, TimeoutSeconds: d.TimeoutSeconds})
+		return s.run(ctx, nil, runInput{Compose: d.File, Project: d.Project, Services: d.Services, Build: d.Build, TimeoutSeconds: d.Timeout})
 	case "down":
 		return s.control(ctx, nil, controlInput{Action: "down", File: d.File, Project: d.Project, Volumes: d.RemoveVolumes})
 	case "remove":
 		return s.control(ctx, nil, controlInput{Action: "remove", Target: d.Name, Resource: d.Resource, Force: d.Force, Volumes: d.RemoveVolumes})
 	case "exec":
-		return s.control(ctx, nil, controlInput{Action: "exec", Target: d.Name, Command: d.Command, User: d.User, Workdir: d.Workdir, TimeoutSeconds: d.TimeoutSeconds})
+		return s.control(ctx, nil, controlInput{Action: "exec", Target: d.Name, Command: d.Command, User: d.User, Workdir: d.Workdir, TimeoutSeconds: d.Timeout})
 	case "start", "stop", "restart", "pause", "unpause", "kill":
-		return s.control(ctx, nil, controlInput{Action: action, Target: d.Name, Signal: d.Signal, TimeoutSeconds: d.TimeoutSeconds})
+		return s.control(ctx, nil, controlInput{Action: action, Target: d.Name, Signal: d.Signal, TimeoutSeconds: d.Timeout})
 	case "":
 		return nil, nil, errors.New("'action' é obrigatório")
 	default:
@@ -91,5 +91,5 @@ type actData struct {
 	Signal         string   `json:"signal,omitempty" jsonschema:"Signal for stop/restart/kill."`
 	Force          bool     `json:"force,omitempty" jsonschema:"Remove: force."`
 	RemoveVolumes  bool     `json:"removeVolumes,omitempty" jsonschema:"remove/down: also remove volumes."`
-	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"Operation timeout in seconds."`
+	Timeout        int      `json:"timeout,omitempty" jsonschema:"Timeout in seconds."`
 }

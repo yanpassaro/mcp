@@ -604,8 +604,8 @@ func isNetwork(action string) bool {
 }
 
 func timeoutFor(d actData, action string) time.Duration {
-	if d.TimeoutSeconds > 0 {
-		return time.Duration(d.TimeoutSeconds) * time.Second
+	if d.Timeout > 0 {
+		return time.Duration(d.Timeout) * time.Second
 	}
 	if isNetwork(action) {
 		return NETWORK_TIMEOUT_SECONDS * time.Second
@@ -661,5 +661,5 @@ type actData struct {
 	Create         bool     `json:"create,omitempty" jsonschema:"Create the branch."`
 	Delete         bool     `json:"delete,omitempty" jsonschema:"Delete branch/tag (needs confirm)."`
 	Confirm        bool     `json:"confirm,omitempty" jsonschema:"Required for destructive actions."`
-	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"Timeout in seconds."`
+	Timeout        int      `json:"timeout,omitempty" jsonschema:"Timeout in seconds."`
 }
