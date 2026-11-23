@@ -35,7 +35,7 @@ jobs:
       - name: Build MCP servers
         run: |
           mkdir -p dist
-          task build:git build:github build:docker build:ssh build:sqlize build:sandbox build:sandbox-cli
+          task build:git build:github build:docker build:ssh build:sqlize build:sandbox
 
       - name: List artifacts
         run: ls -lh dist/

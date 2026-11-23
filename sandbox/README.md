@@ -7,7 +7,7 @@ Sandbox **não-destrutivo** de Lua para a IA: rode scripts isolados — sem SO/p
 O caminho mais curto — mande só o corpo, sem função:
 
 ```
-sandbox_run
+sandbox_act
   action: run
   code: std.result.ok({ soma = 2 + 3 })
 ```
@@ -23,7 +23,7 @@ Todo script é `function main(std)` que termina com `std.result.ok(...)` ou `std
 Um script típico:
 
 ```
-sandbox_run
+sandbox_act
   action: run
   code: |
     local args = std.args or {}
@@ -38,7 +38,7 @@ Opcional: `-- name=meu_script` e `-- desc=faz algo` no topo do script aparecem n
 
 | Tool | O que faz |
 | --- | --- |
-| `sandbox_run` | Roda um script por `path` (`.lua` no host) ou `code` inline, com `args` opcional (vira `std.args`). Ação: `run` (default). |
+| `sandbox_act` | Roda um script por `path` (`.lua` no host) ou `code` inline, com `args` opcional (vira `std.args`). Ação: `run` (default). |
 | `sandbox_doc` | Documentação da API `std`. `sandbox_doc topic=<módulo>` traz assinaturas + retorno + exemplo (ex.: `io`, `run`, `net`, `limits`). |
 | `sandbox_os` | Gerencia o filesystem: `copy` (host→sandbox), `mount` (sandbox→host), `del`, `stat`, `list`. |
 

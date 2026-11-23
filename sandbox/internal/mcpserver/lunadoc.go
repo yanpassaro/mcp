@@ -61,7 +61,7 @@ func renderLunaIndex() string {
 	}
 	fmt.Fprintf(&b, "**Modules:** %s\n\n", strings.Join(names, ", "))
 	fmt.Fprintf(&b, "**Native (Lua):** %s\n\n", strings.Join(lunaNative, ", "))
-	b.WriteString("## How to run\n\n```\nsandbox_run\n  action: run\n  code: std.result.ok({ soma = 2 + 3 })\n```\n\n")
+	b.WriteString("## How to run\n\n```\nsandbox_act\n  action: run\n  code: std.result.ok({ soma = 2 + 3 })\n```\n\n")
 	b.WriteString("## Module details\n\n| Module | Description |\n| --- | --- |\n")
 	for _, m := range lunaOrder {
 		fn := ""
@@ -162,7 +162,7 @@ var lunaMeta = &lunaMod{
 	Body: `# Script — header and return
 
 ## Submitting code
-Pass **only the body** of ~main~ — do not write ~function main(std)~ or ~end~. When run with ~sandbox_run~ (code=...), the wrapper ~function main(std) ... end~ is added automatically.
+Pass **only the body** of ~main~ — do not write ~function main(std)~ or ~end~. When run with ~sandbox_act~ (code=...), the wrapper ~function main(std) ... end~ is added automatically.
 
 ~~~lua
 -- body only
@@ -191,7 +191,7 @@ var lunaTools = &lunaMod{
 
 | Tool | Action | What it does |
 | --- | --- | --- |
-| ~sandbox_run~ | run (default) | Run a script by ~path~ (host .lua file) or inline ~code~, with optional ~args~ (array/object → ~std.args~). Bare ~code~ is auto-wrapped in ~function main(std)~. |
+| ~sandbox_act~ | run (default) | Run a script by ~path~ (host .lua file) or inline ~code~, with optional ~args~ (array/object → ~std.args~). Bare ~code~ is auto-wrapped in ~function main(std)~. |
 | ~sandbox_doc~ | topic | Return the ~std~ API documentation (optional ~topic~; e.g. ~run~, ~io~). |
 | ~sandbox_os~ | copy, mount, del, stat, list | Manage the sandbox filesystem: copy (host→sandbox), mount (sandbox→host), delete, stat or tree-list a sandbox path. |
 
@@ -201,7 +201,7 @@ Scripts (via ~path~) live in the repo; ~std.tmp~ is for temporary data files.`,
 var lunaRun = &lunaMod{
 	Name: "run",
 	Desc: "how to run scripts (inline code or path)",
-	Body: `# sandbox_run — 2 modos de executar scripts
+	Body: `# sandbox_act — 2 modos de executar scripts
 
 Executa um script Lua isolado (sem SO/processo; arquivos em ~mnt/~; rede via ~std.net~). Entre com **~path~** (arquivo .lua no host) ou **~code~** (inline).
 

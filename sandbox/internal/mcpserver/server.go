@@ -52,9 +52,9 @@ func (s *Server) Register(server *mcp.Server) {
 	}, s.doc)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "sandbox_run",
+		Name:        "sandbox_act",
 		Description: "Run a Lua script by 'path' (host .lua file) or inline 'code'. Action: 'run' (default). Inline 'code' may be just the body — it is auto-wrapped in `function main(std)`. 'args' (array/object) becomes std.args. Sandboxed: no OS/process; filesystem confined to mnt/; network only via std.net (allowlist). Timeout of 180s (3 min) by default, configurable via SANDBOX_EXEC_TIMEOUT_SECONDS.",
-	}, s.run)
+	}, s.act)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sandbox_os",
@@ -62,7 +62,7 @@ func (s *Server) Register(server *mcp.Server) {
 	}, s.filesystem)
 }
 
-type runInput struct {
+type actInput struct {
 	Action string `json:"action,omitempty" jsonschema:"Action: 'run' (default)."`
 	Path   string `json:"path,omitempty" jsonschema:"Host/project path to a .lua file to run (reads the file)."`
 	Code   string `json:"code,omitempty" jsonschema:"Inline Lua code to run. Pass only the body — the function main(std) wrapper is added automatically if missing."`
@@ -75,7 +75,7 @@ type filesystemInput struct {
 	Dest   string `json:"dest,omitempty" jsonschema:"Destination: sandbox-relative path for copy, host path for mount."`
 }
 
-func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) act(ctx context.Context, _ *mcp.CallToolRequest, in actInput) (*mcp.CallToolResult, any, error) {
 	switch action := strings.ToLower(strings.TrimSpace(in.Action)); action {
 	case "", "run":
 		return s.runScript(in)
@@ -84,7 +84,7 @@ func (s *Server) run(ctx context.Context, _ *mcp.CallToolRequest, in runInput) (
 	}
 }
 
-func (s *Server) runScript(in runInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) runScript(in actInput) (*mcp.CallToolResult, any, error) {
 	code := ""
 	switch {
 	case strings.TrimSpace(in.Path) != "":
