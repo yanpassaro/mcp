@@ -49,24 +49,14 @@ func New(client *docker.Client) *Server {
 
 func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "docker_get",
-		Description: "List Docker resources. 'resource': containers, images, volumes, networks, info, stats or disk. Read-only.",
-	}, s.get)
+		Name:        "docker_read",
+		Description: "List containers, images, volumes, networks, info, stats or disk; inspect a resource; or read container logs. Read-only.",
+	}, s.read)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "docker_inspect",
-		Description: "Inspect JSON for a container, image, volume or network. 'resource' selects the type (container default); container Environment variables (Env) are removed.",
-	}, s.inspect)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "docker_run",
-		Description: "Bring something up: run a detached container from an image (env/envFile, restart, memory, cpus, user, workdir), build an image from a Dockerfile first (buildContext), or start a compose project (compose + services). Pull policy (missing/always/never), optional platform and timeout. Env values are never echoed back.",
-	}, s.run)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "docker_control",
-		Description: "Act on a container: start, stop, restart, pause, unpause, kill, logs or exec. Use action=remove with resource=container|image|volume|network to remove resources, and action=down with file+project to bring a compose project down.",
-	}, s.control)
+		Name:        "docker_act",
+		Description: "Run a container, compose up/down, start/stop/restart/pause/unpause/kill, exec or remove. Env values are never echoed back.",
+	}, s.act)
 }
 
 func (s *Server) get(ctx context.Context, _ *mcp.CallToolRequest, in getInput) (*mcp.CallToolResult, any, error) {
@@ -215,7 +205,7 @@ func (s *Server) inspect(ctx context.Context, _ *mcp.CallToolRequest, in inspect
 		target = strings.TrimSpace(in.Container)
 	}
 	if target == "" {
-		return nil, nil, errors.New("target é obrigatório")
+		return nil, nil, errors.New("'name' é obrigatório")
 	}
 	ctx, cancel := s.client.WithTimeout(ctx)
 	defer cancel()
@@ -472,7 +462,7 @@ func (s *Server) control(ctx context.Context, _ *mcp.CallToolRequest, in control
 		return s.composeDown(ctx, in)
 	}
 	if target == "" {
-		return nil, nil, errors.New("target é obrigatório")
+		return nil, nil, errors.New("'name' é obrigatório")
 	}
 
 	api := s.client.API()

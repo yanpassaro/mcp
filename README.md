@@ -6,7 +6,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | --- | --- |
 | `git-mcp` | Inspeção **read-only** de repositórios Git locais e escrita opcional via `git_act` (`GIT_ALLOW_ACT`) |
 | `github-mcp` | Consulta **read-only** à API do GitHub (busca, arquivos, issues/PRs, releases) |
-| `docker-mcp` | Inspeção e ciclo de vida de containers Docker via SDK oficial (env nunca é devolvido); build, compose e env no `docker_run` |
+| `docker-mcp` | Inspeção e ciclo de vida de containers Docker via SDK oficial (env nunca é devolvido) |
 | `ssh-mcp` | Comandos, leitura/escrita e transferência em hosts remotos via SSH, com múltiplas conexões nomeadas |
 | `sqlize-mcp` | Importa, consulta e exporta dados (SQLite + Postgres/MySQL read-only) |
 | `anydoc` | Lê documentos (Word, PDF, Excel, ODT, RTF, EPUB, CSV) e grava o Markdown ao lado |
@@ -16,7 +16,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 
 - **git**: `git_search`, `git_read`, `git_act` (com `GIT_ALLOW_ACT`)
 - **github**: `github_search`, `github_get_tree`, `github_read_file`, `github_repo_info`, `github_get_item`
-- **docker**: `docker_get`, `docker_inspect`, `docker_run`, `docker_control`
+- **docker**: `docker_read`, `docker_act`
 - **ssh**: `ssh_run`, `ssh_os`, `ssh_transfer`, `ssh_probe`
 - **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`, `sqlize_export` (+ `postgres_*`/`mysql_*`)
 - **anydoc**: `anydoc_read`
@@ -34,8 +34,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | | `GITHUB_BASE_URL` | `https://api.github.com` | URL da API (GitHub Enterprise) |
 | | `GITHUB_TIMEOUT_SECONDS` | `60` | timeout por requisição |
 | `docker` | `DOCKER_TIMEOUT_SECONDS` | `60` | timeout por comando |
-| | `DOCKER_HOST` | — | endpoint do daemon (unix socket, npipe, tcp ou ssh), lido pelo SDK |
-| | `DOCKER_SSH_KEY_PATH` / `_KEY_PASSPHRASE` / `_PASSWORD` / `_KNOWN_HOSTS` | — | credenciais para `DOCKER_HOST=ssh://` |
+| | `DOCKER_HOST` | — | endpoint do daemon (unix socket, npipe ou tcp), lido pelo SDK |
 | | `DOCKER_API_VERSION` / `DOCKER_TLS_VERIFY` / `DOCKER_CERT_PATH` | — | configuração do Engine API, lida pelo SDK |
 | | `DOCKER_REGISTRY_AUTH` | — | auth base64 para pull de imagem privada (opcional) |
 | `ssh` | `SSH_HOST` / `SSH_{ALIAS}_HOST` | obrigatório | conexão padrão / conexões nomeadas |
