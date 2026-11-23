@@ -342,7 +342,18 @@ func checkoutAct(repo *git.Repository, d actData) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	opts := &git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName(branch), Create: d.Create, Force: d.Force}
+	status, err := wt.Status()
+	if err != nil {
+		return "", fmt.Errorf("status: %w", err)
+	}
+	if !status.IsClean() {
+		if !d.Force {
+			if !d.Keep {
+				return "", errors.New("worktree tem alterações não commitadas: commite, use 'keep' ou 'force' com 'confirm'=true")
+			}
+		}
+	}
+	opts := &git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName(branch), Create: d.Create, Force: d.Force, Keep: d.Keep}
 	if d.Create {
 		if strings.TrimSpace(d.Ref) != "" {
 			hash, err := resolveHash(repo, d.Ref)
@@ -377,6 +388,9 @@ func branchAct(repo *git.Repository, d actData) (string, error) {
 		return "", err
 	}
 	ref := plumbing.NewHashReference(plumbing.NewBranchReferenceName(branch), hash)
+	if _, err := repo.Reference(ref.Name(), false); err == nil {
+		return "", fmt.Errorf("branch %q já existe", branch)
+	}
 	if err := repo.Storer.SetReference(ref); err != nil {
 		return "", fmt.Errorf("criar branch %s: %w", branch, err)
 	}
@@ -658,7 +672,8 @@ type actData struct {
 	Prune          bool     `json:"prune,omitempty" jsonschema:"Prune deleted remote refs."`
 	NoFF           bool     `json:"noFF,omitempty" jsonschema:"Always create a merge commit."`
 	Staged         bool     `json:"staged,omitempty" jsonschema:"Restore the index."`
-	Create         bool     `json:"create,omitempty" jsonschema:"Create the branch."`
+	Create         bool     `json:"create,omitempty" jsonschema:"checkout: create the branch."`
+	Keep           bool     `json:"keep,omitempty" jsonschema:"checkout: keep local changes when switching."`
 	Delete         bool     `json:"delete,omitempty" jsonschema:"Delete branch/tag (needs confirm)."`
 	Confirm        bool     `json:"confirm,omitempty" jsonschema:"Required for destructive actions."`
 	Timeout        int      `json:"timeout,omitempty" jsonschema:"Timeout in seconds."`

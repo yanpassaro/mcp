@@ -35,7 +35,7 @@ Só é registrada com `GIT_ALLOW_ACT`. Ações destrutivas exigem `data.confirm`
 | `fetch` | `remote`, `all`, `tags`, `prune`, `depth` |
 | `merge` | `ref`, `noFF` |
 | `reset` | `mode` (`soft`/`mixed`/`hard`/`keep`), `ref` |
-| `checkout` | `branch`, `create`, `ref`, `force` |
+| `checkout` | `branch`, `create`, `ref`, `force`, `keep` |
 | `branch` | `branch`, `ref`, `delete` |
 | `tag` | `name`, `ref`, `message`, `delete` |
 | `clone` | `url`, `branch`, `depth` (`repo` = destino) |
