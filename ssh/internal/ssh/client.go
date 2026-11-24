@@ -28,6 +28,7 @@ var attrNames = []string{
 	"known_hosts",
 	"key_path",
 	"password",
+	"allow",
 	"host",
 	"port",
 	"user",
@@ -43,9 +44,11 @@ type Config struct {
 	Password       string
 	KnownHosts     string
 	TimeoutSeconds string
+	Allow          string
 
 	port    int
 	timeout time.Duration
+	allow   []string
 }
 
 func (c Config) PortNumber() int {
@@ -116,6 +119,8 @@ func (c *Config) set(attr, value string) {
 		c.KnownHosts = value
 	case "timeout_seconds":
 		c.TimeoutSeconds = value
+	case "allow":
+		c.Allow = value
 	}
 }
 
@@ -142,7 +147,21 @@ func (c *Config) normalize() (Config, error) {
 	out.timeout = timeout
 	out.KeyPath = expandHome(strings.TrimSpace(c.KeyPath))
 	out.KnownHosts = expandHome(strings.TrimSpace(c.KnownHosts))
+	out.allow = parseAllow(c.Allow)
 	return out, nil
+}
+
+func parseAllow(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
 }
 
 func parsePort(value, alias string) (int, error) {

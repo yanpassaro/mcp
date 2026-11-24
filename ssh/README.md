@@ -6,7 +6,7 @@ Executa comandos e move arquivos em hosts remotos. Credenciais vêm só do ambie
 
 Cada conexão é um conjunto de variáveis com alias: `STAGING_SSH_HOST` ou `SSH_STAGING_HOST`. Sem alias não há conexão. Basta um `HOST` para ela existir.
 
-| Atributo | Padrão | Descrição |
+| Variável | Padrão | Descrição |
 | --- | --- | --- |
 | `HOST` | — | host ou IP (obrigatório) |
 | `USER` | `USER`/`USERNAME` | usuário SSH |
@@ -15,6 +15,7 @@ Cada conexão é um conjunto de variáveis com alias: `STAGING_SSH_HOST` ou `SSH
 | `KEY_PASSPHRASE` | — | passphrase da chave |
 | `KNOWN_HOSTS` | `~/.ssh/known_hosts` | host keys |
 | `TIMEOUT_SECONDS` | `30` | timeout de conexão e de cada operação |
+| `ALLOW` | — | allowlist do `run`, ex. `cat,ls,systemctl` |
 
 ```env
 LAB_SSH_HOST=203.0.113.10
@@ -63,6 +64,13 @@ Aqui as conexões são `lab` e `staging`.
 | --- | --- |
 | `upload` | `local`, `remote` |
 | `download` | `local`, `remote` |
+
+## Limites
+
+- **Denylist sempre ativa** no `run` (~38 regras): formatar ou apagar disco (`mkfs`, `wipefs`, `fdisk`, `parted`, `dd`, `shred`, `cryptsetup`, LVM/ZFS/btrfs), desligar/reiniciar, `rm -rf /` ou `~`, `chmod`/`chown` recursivo na raiz, escrita em `/dev`, `/proc`, `/sys` e arquivos críticos de `/etc`, derrubar rede ou `sshd`, apagar logs/histórico, `crontab -r`, `docker system prune -a`, `kubectl delete ns`, pipe de download para shell e fork bomb.
+- Regras casam pelo binário: `fdisk -l` também é bloqueado.
+- **Allowlist opcional** por conexão: `STAGING_SSH_ALLOW=cat,ls,systemctl`. Quando definida, cada segmento do comando (`;`, `&&`, `|`) precisa começar por um dos nomes.
+- **Paths protegidos** em `write` e `remove`: `/etc`, `/boot`, `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/sys`, `/proc`, `/dev`, `/root` e qualquer `.ssh`.
 
 ## Notas
 

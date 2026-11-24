@@ -26,6 +26,14 @@ type Result struct {
 }
 
 func Run(ctx context.Context, cfg Config, command, workdir string) (Result, error) {
+	err := checkCommand(cfg, command)
+	if err != nil {
+		return Result{}, err
+	}
+	return runRaw(ctx, cfg, command, workdir)
+}
+
+func runRaw(ctx context.Context, cfg Config, command, workdir string) (Result, error) {
 	client, err := Dial(ctx, cfg)
 	if err != nil {
 		return Result{}, err
@@ -91,7 +99,7 @@ func Read(ctx context.Context, cfg Config, path string, maxBytes int) ([]byte, b
 	}
 	limit := clampBytes(maxBytes)
 	command := fmt.Sprintf("head -c %d -- %s", limit+1, shellQuote(strings.TrimSpace(path)))
-	result, err := Run(ctx, cfg, command, "")
+	result, err := runRaw(ctx, cfg, command, "")
 	if err != nil {
 		return nil, false, err
 	}
@@ -109,6 +117,9 @@ func Write(ctx context.Context, cfg Config, path string, src io.Reader, appendMo
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
 		return 0, errors.New("path é obrigatório")
+	}
+	if err := checkProtected(trimmed); err != nil {
+		return 0, err
 	}
 	operator := ">"
 	if appendMode {
@@ -139,7 +150,7 @@ func List(ctx context.Context, cfg Config, path string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return Run(ctx, cfg, fmt.Sprintf("ls -lan -- %s", shellQuote(target)), "")
+	return runRaw(ctx, cfg, fmt.Sprintf("ls -lan -- %s", shellQuote(target)), "")
 }
 
 func Stat(ctx context.Context, cfg Config, path string) (Result, error) {
@@ -148,7 +159,7 @@ func Stat(ctx context.Context, cfg Config, path string) (Result, error) {
 		return Result{}, err
 	}
 	command := fmt.Sprintf("stat -c '%%n|%%s|%%F|%%a|%%U|%%G|%%y' -- %s", shellQuote(target))
-	return Run(ctx, cfg, command, "")
+	return runRaw(ctx, cfg, command, "")
 }
 
 func Remove(ctx context.Context, cfg Config, path string, recursive bool) (Result, error) {
@@ -156,11 +167,14 @@ func Remove(ctx context.Context, cfg Config, path string, recursive bool) (Resul
 	if err != nil {
 		return Result{}, err
 	}
+	if err := checkProtected(target); err != nil {
+		return Result{}, err
+	}
 	flag := "-f"
 	if recursive {
 		flag = "-rf"
 	}
-	return Run(ctx, cfg, fmt.Sprintf("rm %s -- %s", flag, shellQuote(target)), "")
+	return runRaw(ctx, cfg, fmt.Sprintf("rm %s -- %s", flag, shellQuote(target)), "")
 }
 
 func (r Result) Message() string {
@@ -197,7 +211,7 @@ func requireRemovePath(path string) (string, error) {
 }
 
 func Probe(ctx context.Context, cfg Config) (Result, error) {
-	return Run(ctx, cfg, PROBE_COMMAND, "")
+	return runRaw(ctx, cfg, PROBE_COMMAND, "")
 }
 
 func checkRead(path string) error {

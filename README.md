@@ -41,10 +41,11 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | `ssh` | `{ALIAS}_SSH_HOST` | obrigatório | conexão nomeada (o alias é obrigatório) |
 | | `{ALIAS}_SSH_USER` | `USER`/`USERNAME` | usuário SSH |
 | | `{ALIAS}_SSH_KEY_PATH` | — | chave privada (ou `PASSWORD`) |
-| | `SSH_PORT` / `SSH_{ALIAS}_PORT` | `22` | porta SSH |
-| | `SSH_KEY_PASSPHRASE` / `SSH_{ALIAS}_KEY_PASSPHRASE` | — | passphrase da chave |
-| | `SSH_KNOWN_HOSTS` / `SSH_{ALIAS}_KNOWN_HOSTS` | `~/.ssh/known_hosts` | host keys pinadas |
-| | `SSH_TIMEOUT_SECONDS` / `SSH_{ALIAS}_TIMEOUT_SECONDS` | `30` | timeout de conexão e de cada operação |
+| | `{ALIAS}_SSH_PORT` | `22` | porta SSH |
+| | `{ALIAS}_SSH_KEY_PASSPHRASE` | — | passphrase da chave |
+| | `{ALIAS}_SSH_KNOWN_HOSTS` | `~/.ssh/known_hosts` | host keys pinadas |
+| | `{ALIAS}_SSH_TIMEOUT_SECONDS` | `30` | timeout de conexão e de cada operação |
+| | `{ALIAS}_SSH_ALLOW` | — | allowlist de comandos do `run` (`cat,ls,systemctl`) |
 | `sqlize` | `SQLIZE_STATE_DIR` | `~/.local/state/sqlize` | pasta do banco de estado |
 | | `{PREFIXO}_POSTGRES_URL` / `_DSN` | — | conexão Postgres read-only |
 | | `{PREFIXO}_MYSQL_URL` / `_DSN` | — | conexão MySQL read-only |
