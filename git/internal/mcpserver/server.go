@@ -41,7 +41,7 @@ func (s *Server) Register(server *mcp.Server) {
 	if actAllowed() {
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "git_act",
-			Description: "Write: add, restore, commit, pull, push, fetch, merge, reset, checkout, branch, tag, clone, clean.",
+			Description: "Write: add, restore, commit, pull, fetch, merge, reset, checkout, branch, tag, clone, clean.",
 		}, s.act)
 	}
 }

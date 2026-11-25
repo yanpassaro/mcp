@@ -32,7 +32,6 @@ Só é registrada com `GIT_ALLOW_ACT`.
 | `restore` | `paths`, `staged` |
 | `commit` | `message`, `all`, `amend`, `allowEmpty`, `coAuthors` |
 | `pull` | `remote`, `branch`, `force` |
-| `push` | `remote`, `branch`, `tags` (`--follow-tags`) |
 | `fetch` | `remote`, `all`, `tags`, `prune`, `depth` |
 | `merge` | `ref` (só fast-forward; exige working tree limpo) |
 | `reset` | `mode` (`soft`/`mixed`/`hard`/`keep`), `ref` |
@@ -48,7 +47,7 @@ Só é registrada com `GIT_ALLOW_ACT`.
 
 ## Auth
 
-SSH usa o `ssh-agent`. HTTPS usa `GIT_TOKEN` (token/PAT; usuário via `GIT_HTTP_USER`, default `oauth2`) ou credenciais na própria URL; sem token, só repositório público. `GIT_USER`/`GIT_EMAIL` definem o autor dos commits.
+SSH usa o `ssh-agent` (usuário da URL). HTTPS só funciona com repositório público. `GIT_USER`/`GIT_EMAIL` definem o autor dos commits.
 
 ## Env
 
@@ -59,5 +58,3 @@ SSH usa o `ssh-agent`. HTTPS usa `GIT_TOKEN` (token/PAT; usuário via `GIT_HTTP_
 | `GIT_USER` | `user.name` | autor dos commits |
 | `GIT_EMAIL` | `user.email` | e-mail do autor |
 | `GIT_COAUTHOR` | — | co-autores fixos, `Nome <email>` separados por vírgula |
-| `GIT_TOKEN` | — | token/PAT para remotos HTTPS |
-| `GIT_HTTP_USER` | `oauth2` | usuário do HTTPS (com `GIT_TOKEN`) |
