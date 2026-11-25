@@ -36,26 +36,30 @@ func (s *Server) read(ctx context.Context, _ *mcp.CallToolRequest, in input) (*m
 		})
 	case "blame":
 		return s.blame(ctx, nil, blameInput{Repo: in.Repo, Path: in.Data.Path, MaxLines: in.Data.MaxLines})
+	case "grep":
+		return s.grep(ctx, nil, grepInput{Repo: in.Repo, Pattern: in.Data.Pattern, Ref: in.Data.Ref, Path: in.Data.Path, Max: in.Data.Max})
 	default:
-		return nil, nil, errors.New("'action' inválido: info, status, refs, file, show, diff, blame")
+		return nil, nil, errors.New("'action' inválido: info, status, refs, file, show, diff, blame, grep")
 	}
 }
 
 type input struct {
 	Repo   string `json:"repo" jsonschema:"Path to the Git repository (required)."`
-	Action string `json:"action" jsonschema:"info, status, refs, file, show, diff or blame (required)."`
+	Action string `json:"action" jsonschema:"info, status, refs, file, show, diff, blame or grep (required)."`
 	Data   data   `json:"data,omitempty" jsonschema:"Options for the chosen action; fields that do not apply are ignored."`
 }
 
 type data struct {
 	Type     string `json:"type,omitempty" jsonschema:"Refs type: branch, remote or tag."`
 	All      bool   `json:"all,omitempty" jsonschema:"Include remote branches."`
-	Ref      string `json:"ref,omitempty" jsonschema:"Revision (default: working tree for file, HEAD for show)."`
-	Path     string `json:"path,omitempty" jsonschema:"File path (file, blame) or prefix (diff)."`
+	Ref      string `json:"ref,omitempty" jsonschema:"Revision (default: working tree for file, HEAD for show and grep)."`
+	Path     string `json:"path,omitempty" jsonschema:"File path (file, blame), prefix (diff) or path regexp (grep)."`
 	Base     string `json:"base,omitempty" jsonschema:"Diff base ref."`
 	Head     string `json:"head,omitempty" jsonschema:"Diff final ref."`
 	Staged   bool   `json:"staged,omitempty" jsonschema:"Diff the index against HEAD."`
 	Stat     bool   `json:"stat,omitempty" jsonschema:"Diff summary only."`
 	Context  int    `json:"context,omitempty" jsonschema:"Diff context lines."`
 	MaxLines int    `json:"maxLines,omitempty" jsonschema:"Max blame lines."`
+	Pattern  string `json:"pattern,omitempty" jsonschema:"Grep: regexp to search file contents."`
+	Max      int    `json:"max,omitempty" jsonschema:"Grep: max results (default 200)."`
 }

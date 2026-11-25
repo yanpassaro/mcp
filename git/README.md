@@ -20,10 +20,11 @@ Inspeciona e altera repositórios Git locais. Toda chamada usa `repo`, `action` 
 | `show` | `ref` |
 | `diff` | `base`, `head`, `staged`, `path`, `context`, `stat` |
 | `blame` | `path`, `maxLines` |
+| `grep` | `pattern` (regexp), `ref`, `path` (regexp), `max` |
 
 ## `git_act`
 
-Só é registrada com `GIT_ALLOW_ACT`. Ações destrutivas exigem `data.confirm`.
+Só é registrada com `GIT_ALLOW_ACT`.
 
 | `action` | `data` |
 | --- | --- |
@@ -31,6 +32,7 @@ Só é registrada com `GIT_ALLOW_ACT`. Ações destrutivas exigem `data.confirm`
 | `restore` | `paths`, `staged` |
 | `commit` | `message`, `all`, `amend`, `allowEmpty`, `coAuthors` |
 | `pull` | `remote`, `branch`, `force` |
+| `push` | `remote`, `branch`, `tags` (`--follow-tags`) |
 | `fetch` | `remote`, `all`, `tags`, `prune`, `depth` |
 | `merge` | `ref` (só fast-forward; exige working tree limpo) |
 | `reset` | `mode` (`soft`/`mixed`/`hard`/`keep`), `ref` |

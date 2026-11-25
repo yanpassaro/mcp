@@ -754,4 +754,26 @@ func formatReadFile(path, at string, content string) string {
 	return fmt.Sprintf("## Arquivo `%s` (%s)\n\n```%s\n%s\n```\n", path, at, lang, content)
 }
 
+func formatGrep(ref string, results []git.GrepResult, max int) string {
+	if len(results) == 0 {
+		return fmt.Sprintf("## Grep `%s`\n\n_Nenhum resultado._", ref)
+	}
+	limit := len(results)
+	if max > 0 {
+		if max < limit {
+			limit = max
+		}
+	}
+	b := strings.Builder{}
+	fmt.Fprintf(&b, "## Grep `%s` (%d)\n\n", ref, len(results))
+	for i := range limit {
+		r := results[i]
+		fmt.Fprintf(&b, "- `%s:%d` %s\n", clean(r.FileName), r.LineNumber, clean(strings.TrimRight(r.Content, "\n")))
+	}
+	if limit < len(results) {
+		fmt.Fprintf(&b, "\n_... %d resultado(s) omitido(s)._", len(results)-limit)
+	}
+	return b.String()
+}
+
 

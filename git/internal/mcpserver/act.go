@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/config"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/object"
@@ -23,6 +24,7 @@ import (
 const (
 	DEFAULT_TIMEOUT_SECONDS = 60
 	NETWORK_TIMEOUT_SECONDS = 300
+	GREP_MAX_RESULTS        = 200
 )
 
 func (s *Server) act(ctx context.Context, _ *mcp.CallToolRequest, in actInput) (*mcp.CallToolResult, any, error) {
@@ -59,6 +61,8 @@ func (s *Server) dispatch(ctx context.Context, action string, in actInput) (stri
 		return commitAct(repo, in.Data)
 	case "pull":
 		return pullAct(ctx, repo, in.Data)
+	case "push":
+		return pushAct(ctx, repo, in.Data)
 	case "fetch":
 		return fetchAct(ctx, repo, in.Data)
 	case "merge":
@@ -74,7 +78,7 @@ func (s *Server) dispatch(ctx context.Context, action string, in actInput) (stri
 	case "clean":
 		return cleanAct(repo, in.Data)
 	default:
-		return "", errors.New("'action' inválido: add, restore, commit, pull, fetch, merge, reset, checkout, branch, tag, clone, clean")
+		return "", errors.New("'action' inválido: add, restore, commit, pull, push, fetch, merge, reset, checkout, branch, tag, clone, clean")
 	}
 }
 
@@ -201,11 +205,6 @@ func pullAct(ctx context.Context, repo *git.Repository, d actData) (string, erro
 		return "", err
 	}
 	opts := &git.PullOptions{RemoteName: remote, ClientOptions: auth, Force: d.Force}
-	if d.Force {
-		if !d.Confirm {
-			return "", errors.New("pull com 'force' exige 'confirm'=true")
-		}
-	}
 	branch := strings.TrimSpace(d.Branch)
 	if branch != "" {
 		opts.ReferenceName = plumbing.NewBranchReferenceName(branch)
@@ -218,6 +217,41 @@ func pullAct(ctx context.Context, repo *git.Repository, d actData) (string, erro
 		return "", fmt.Errorf("pull: %w", err)
 	}
 	return fmt.Sprintf("✅ Pull concluído de `%s`.", remote), nil
+}
+
+func pushAct(ctx context.Context, repo *git.Repository, d actData) (string, error) {
+	remote := cmp.Or(strings.TrimSpace(d.Remote), "origin")
+	auth, err := remoteAuth(repo, remote)
+	if err != nil {
+		return "", err
+	}
+	if d.Force {
+		return "", errors.New("push não aceita 'force'")
+	}
+	branch := strings.TrimSpace(d.Branch)
+	if branch == "" {
+		head, e := repo.Head()
+		if e != nil {
+			return "", e
+		}
+		if !head.Name().IsBranch() {
+			return "", errors.New("push exige 'branch' (HEAD está destacado)")
+		}
+		branch = head.Name().Short()
+	}
+	spec := config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch))
+	opts := &git.PushOptions{RemoteName: remote, RefSpecs: []config.RefSpec{spec}, ClientOptions: auth, FollowTags: d.Tags}
+	err = repo.PushContext(ctx, opts)
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return "✅ Nada para enviar: já está sincronizado.", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("push %s: %w", branch, err)
+	}
+	if d.Tags {
+		return fmt.Sprintf("✅ Push de `%s` para `%s` com tags.", branch, remote), nil
+	}
+	return fmt.Sprintf("✅ Push de `%s` para `%s`.", branch, remote), nil
 }
 
 func fetchAct(ctx context.Context, repo *git.Repository, d actData) (string, error) {
@@ -315,11 +349,6 @@ func resetAct(repo *git.Repository, d actData) (string, error) {
 	if mode == "" {
 		mode = "mixed"
 	}
-	if mode == "hard" {
-		if !d.Confirm {
-			return "", errors.New("reset --hard exige 'confirm'=true")
-		}
-	}
 	hash, err := resolveHash(repo, cmp.Or(strings.TrimSpace(d.Ref), "HEAD"))
 	if err != nil {
 		return "", err
@@ -352,11 +381,6 @@ func checkoutAct(repo *git.Repository, d actData) (string, error) {
 	if branch == "" {
 		return "", errors.New("checkout exige 'branch' em 'data'")
 	}
-	if d.Force {
-		if !d.Confirm {
-			return "", errors.New("checkout com 'force' exige 'confirm'=true (descarta alterações locais)")
-		}
-	}
 	wt, err := repo.Worktree()
 	if err != nil {
 		return "", err
@@ -368,7 +392,7 @@ func checkoutAct(repo *git.Repository, d actData) (string, error) {
 	if !status.IsClean() {
 		if !d.Force {
 			if !d.Keep {
-				return "", errors.New("worktree tem alterações não commitadas: commite, use 'keep' ou 'force' com 'confirm'=true")
+				return "", errors.New("worktree tem alterações não commitadas: commite, use 'keep' ou 'force'")
 			}
 		}
 	}
@@ -394,9 +418,6 @@ func branchAct(repo *git.Repository, d actData) (string, error) {
 		return "", errors.New("branch exige 'branch' em 'data'")
 	}
 	if d.Delete {
-		if !d.Confirm {
-			return "", errors.New("branch com 'delete' exige 'confirm'=true")
-		}
 		if err := repo.Storer.RemoveReference(plumbing.NewBranchReferenceName(branch)); err != nil {
 			return "", fmt.Errorf("delete branch %s: %w", branch, err)
 		}
@@ -432,9 +453,6 @@ func tagAct(repo *git.Repository, d actData) (string, error) {
 		return "", errors.New("tag exige 'name' em 'data'")
 	}
 	if d.Delete {
-		if !d.Confirm {
-			return "", errors.New("tag com 'delete' exige 'confirm'=true")
-		}
 		if err := repo.DeleteTag(name); err != nil {
 			return "", fmt.Errorf("delete tag %s: %w", name, err)
 		}
@@ -457,10 +475,7 @@ func tagAct(repo *git.Repository, d actData) (string, error) {
 	return fmt.Sprintf("✅ Tag anotada `%s` criada em `%s`.", name, shortSHA(hash)), nil
 }
 
-func cleanAct(repo *git.Repository, d actData) (string, error) {
-	if !d.Confirm {
-		return "", errors.New("clean exige 'confirm'=true (remove arquivos não rastreados)")
-	}
+func cleanAct(repo *git.Repository, _ actData) (string, error) {
 	wt, err := repo.Worktree()
 	if err != nil {
 		return "", err
@@ -639,7 +654,7 @@ func pathsFor(paths []string) []string {
 
 func isNetwork(action string) bool {
 	switch action {
-	case "pull", "fetch", "clone":
+	case "pull", "push", "fetch", "clone":
 		return true
 	default:
 		return false
@@ -678,7 +693,7 @@ func actAllowed() bool {
 
 type actInput struct {
 	Repo   string  `json:"repo" jsonschema:"Path to the Git repository (required); for clone, the destination directory."`
-	Action string  `json:"action" jsonschema:"Action: add, restore, commit, pull, fetch, merge, reset, checkout, branch, tag, clone or clean (required)."`
+	Action string  `json:"action" jsonschema:"Action: add, restore, commit, pull, push, fetch, merge, reset, checkout, branch, tag, clone or clean (required)."`
 	Data   actData `json:"data,omitempty" jsonschema:"Options for the chosen action; fields that do not apply are ignored."`
 }
 
@@ -696,13 +711,12 @@ type actData struct {
 	Amend          bool     `json:"amend,omitempty" jsonschema:"Amend the previous commit."`
 	AllowEmpty     bool     `json:"allowEmpty,omitempty" jsonschema:"Allow an empty commit."`
 	CoAuthors      []string `json:"coAuthors,omitempty" jsonschema:"Co-authors as 'Name <email>'."`
-	Force          bool     `json:"force,omitempty" jsonschema:"Force pull or discard local changes (needs confirm)."`
-	Tags           bool     `json:"tags,omitempty" jsonschema:"Fetch all tags."`
+	Force          bool     `json:"force,omitempty" jsonschema:"Force pull or checkout (discards local changes)."`
+	Tags           bool     `json:"tags,omitempty" jsonschema:"Fetch: all tags. Push: follow reachable annotated tags."`
 	Prune          bool     `json:"prune,omitempty" jsonschema:"Prune deleted remote refs."`
 	Staged         bool     `json:"staged,omitempty" jsonschema:"Restore the index."`
 	Create         bool     `json:"create,omitempty" jsonschema:"checkout: create the branch."`
 	Keep           bool     `json:"keep,omitempty" jsonschema:"checkout: keep local changes when switching."`
-	Delete         bool     `json:"delete,omitempty" jsonschema:"Delete branch/tag (needs confirm)."`
-	Confirm        bool     `json:"confirm,omitempty" jsonschema:"Required for destructive actions."`
+	Delete         bool     `json:"delete,omitempty" jsonschema:"Delete branch/tag."`
 	Timeout        int      `json:"timeout,omitempty" jsonschema:"Timeout in seconds."`
 }

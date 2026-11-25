@@ -35,13 +35,13 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "git_read",
-		Description: "Read info, status, refs, file, show, diff or blame. Read-only.",
+		Description: "Read info, status, refs, file, show, diff, blame or grep. Read-only.",
 	}, s.read)
 
 	if actAllowed() {
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "git_act",
-			Description: "Write: add, restore, commit, pull, fetch, merge, reset, checkout, branch, tag, clone, clean. Destructive actions need data.confirm.",
+			Description: "Write: add, restore, commit, pull, push, fetch, merge, reset, checkout, branch, tag, clone, clean.",
 		}, s.act)
 	}
 }
@@ -599,6 +599,43 @@ func (s *Server) readFile(ctx context.Context, _ *mcp.CallToolRequest, in readFi
 	return textResult(formatReadFile(path, "working tree", content))
 }
 
+func (s *Server) grep(ctx context.Context, _ *mcp.CallToolRequest, in grepInput) (*mcp.CallToolResult, any, error) {
+	pattern := strings.TrimSpace(in.Pattern)
+	if pattern == "" {
+		return nil, nil, errors.New("'pattern' é obrigatório para grep")
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, nil, fmt.Errorf("pattern inválido: %w", err)
+	}
+	repo, err := s.client.Open(in.Repo)
+	if err != nil {
+		return nil, nil, err
+	}
+	ref := cmp.Or(strings.TrimSpace(in.Ref), "HEAD")
+	hash, err := resolveHash(repo, ref)
+	if err != nil {
+		return nil, nil, err
+	}
+	opts := &git.GrepOptions{CommitHash: hash, Patterns: []*regexp.Regexp{re}}
+	path := strings.TrimSpace(in.Path)
+	if path != "" {
+		pre, e := regexp.Compile(path)
+		if e != nil {
+			return nil, nil, fmt.Errorf("path inválido: %w", e)
+		}
+		opts.PathSpecs = []*regexp.Regexp{pre}
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, nil, err
+	}
+	results, err := wt.Grep(opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return textResult(formatGrep(ref, results, cmp.Or(in.Max, GREP_MAX_RESULTS)))
+}
 
 func fileContentAt(repo *git.Repository, c *object.Commit, path string) (string, error) {
 	f, err := c.File(path)
@@ -858,6 +895,14 @@ type readFileInput struct {
 	Repo string `json:"repo" jsonschema:"Path to the Git repository (required)."`
 	Path string `json:"path" jsonschema:"Path of the file (required)."`
 	Ref  string `json:"ref,omitempty" jsonschema:"Optional ref (branch/tag/SHA) to read the file at that revision; if empty, reads the working tree."`
+}
+
+type grepInput struct {
+	Repo    string `json:"repo" jsonschema:"Path to the Git repository (required)."`
+	Pattern string `json:"pattern" jsonschema:"Regular expression to search in file contents (required)."`
+	Ref     string `json:"ref,omitempty" jsonschema:"Revision to search at (default HEAD)."`
+	Path    string `json:"path,omitempty" jsonschema:"Optional path regexp filter."`
+	Max     int    `json:"max,omitempty" jsonschema:"Maximum results shown (default 200)."`
 }
 
 
