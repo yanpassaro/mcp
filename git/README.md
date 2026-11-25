@@ -31,14 +31,15 @@ Só é registrada com `GIT_ALLOW_ACT`.
 | `add` | `paths`, `all` |
 | `restore` | `paths`, `staged` |
 | `commit` | `message`, `all`, `amend`, `allowEmpty`, `coAuthors` |
-| `pull` | `remote`, `branch`, `force` |
-| `fetch` | `remote`, `all`, `tags`, `prune`, `depth` |
-| `merge` | `ref` (só fast-forward; exige working tree limpo) |
+| `pull` | `remote`, `branch`, `force` (via `git pull`) |
+| `push` | `remote`, `branch`, `tags` (via `git push`) |
+| `fetch` | `remote`, `all`, `tags`, `prune`, `depth` (via `git fetch`) |
+| `merge` | `ref`, `ff`/`ffOnly`, `squash`, `message`, `strategy`, `strategyOption`, `noCommit`, `edit`, `abort`, `continue` (via `git merge`) |
 | `reset` | `mode` (`soft`/`mixed`/`hard`/`keep`), `ref` |
 | `checkout` | `branch`, `create`, `ref`, `force`, `keep` |
 | `branch` | `branch`, `ref`, `delete` |
 | `tag` | `name`, `ref`, `message`, `delete` |
-| `clone` | `url`, `branch`, `depth` (`repo` = destino) |
+| `clone` | `url`, `branch`, `depth` (`repo` = destino; via `git clone`) |
 | `clean` | — |
 
 ```json
@@ -47,7 +48,7 @@ Só é registrada com `GIT_ALLOW_ACT`.
 
 ## Auth
 
-SSH usa o `ssh-agent` (usuário da URL). HTTPS só funciona com repositório público. `GIT_USER`/`GIT_EMAIL` definem o autor dos commits.
+`clone`, `pull`, `fetch`, `push` e `merge` rodam o binário **`git`** e usam a auth do próprio git (credential helper, ssh-agent) — inclusive HTTPS privado. As ações locais (`add`, `restore`, `commit`, `reset`, `checkout`, `branch`, `tag`, `clean`) usam go-git. `GIT_USER`/`GIT_EMAIL` definem o autor dos commits.
 
 ## Env
 

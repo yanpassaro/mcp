@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,9 +14,7 @@ import (
 
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
-	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/object"
-	gitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	gitmcp "ntdsk.com/mcp/git/internal/git"
 )
@@ -44,8 +43,17 @@ func (s *Server) act(ctx context.Context, _ *mcp.CallToolRequest, in actInput) (
 }
 
 func (s *Server) dispatch(ctx context.Context, action string, in actInput) (string, error) {
-	if action == "clone" {
-		return cloneAct(ctx, in.Repo, in.Data)
+	switch action {
+	case "clone":
+		return cloneShell(ctx, in.Repo, in.Data)
+	case "pull":
+		return pullShell(ctx, in.Repo, in.Data)
+	case "fetch":
+		return fetchShell(ctx, in.Repo, in.Data)
+	case "merge":
+		return mergeShell(ctx, in.Repo, in.Data)
+	case "push":
+		return pushShell(ctx, in.Repo, in.Data)
 	}
 	repo, err := s.client.Open(in.Repo)
 	if err != nil {
@@ -58,12 +66,6 @@ func (s *Server) dispatch(ctx context.Context, action string, in actInput) (stri
 		return restoreAct(repo, in.Data)
 	case "commit":
 		return commitAct(repo, in.Data)
-	case "pull":
-		return pullAct(ctx, repo, in.Data)
-	case "fetch":
-		return fetchAct(ctx, repo, in.Data)
-	case "merge":
-		return mergeAct(repo, in.Data)
 	case "reset":
 		return resetAct(repo, in.Data)
 	case "checkout":
@@ -75,7 +77,7 @@ func (s *Server) dispatch(ctx context.Context, action string, in actInput) (stri
 	case "clean":
 		return cleanAct(repo, in.Data)
 	default:
-		return "", errors.New("'action' inválido: add, restore, commit, pull, fetch, merge, reset, checkout, branch, tag, clone, clean")
+		return "", errors.New("'action' inválido: add, restore, commit, pull, push, fetch, merge, reset, checkout, branch, tag, clone, clean")
 	}
 }
 
@@ -191,119 +193,129 @@ func withCoAuthors(message string, extra []string) (string, error) {
 	return fmt.Sprintf("%s\n\n%s", strings.TrimRight(message, "\n"), strings.TrimRight(lines.String(), "\n")), nil
 }
 
-func pullAct(ctx context.Context, repo *git.Repository, d actData) (string, error) {
-	wt, err := repo.Worktree()
-	if err != nil {
-		return "", err
-	}
+func pullShell(ctx context.Context, repo string, d actData) (string, error) {
 	remote := cmp.Or(strings.TrimSpace(d.Remote), "origin")
-	auth, err := remoteAuth(repo, remote)
-	if err != nil {
-		return "", err
-	}
-	opts := &git.PullOptions{RemoteName: remote, ClientOptions: auth, Force: d.Force}
+	args := []string{"pull", remote}
 	branch := strings.TrimSpace(d.Branch)
 	if branch != "" {
-		opts.ReferenceName = plumbing.NewBranchReferenceName(branch)
+		args = append(args, branch)
 	}
-	err = wt.PullContext(ctx, opts)
-	if errors.Is(err, git.NoErrAlreadyUpToDate) {
-		return "✅ Nada a atualizar: já está sincronizado.", nil
+	if d.Force {
+		args = append(args, "--force")
 	}
-	if err != nil {
-		return "", fmt.Errorf("pull: %w", err)
-	}
-	return fmt.Sprintf("✅ Pull concluído de `%s`.", remote), nil
+	return gitShell(ctx, repo, args...)
 }
 
-func fetchAct(ctx context.Context, repo *git.Repository, d actData) (string, error) {
-	if d.All {
-		remotes, err := repo.Remotes()
-		if err != nil {
-			return "", fmt.Errorf("fetch: %w", err)
+func mergeShell(ctx context.Context, repo string, d actData) (string, error) {
+	if d.Abort {
+		if d.Continue {
+			return "", errors.New("merge não aceita 'abort' e 'continue' juntos")
 		}
-		for _, r := range remotes {
-			cfg := r.Config()
-			if len(cfg.URLs) == 0 {
-				return "", fmt.Errorf("remote %q sem URL", cfg.Name)
-			}
-			auth, err := authForURL(cfg.URLs[0])
-			if err != nil {
-				return "", err
-			}
-			if err := r.FetchContext(ctx, fetchOptions(d, auth)); err != nil {
-				if errors.Is(err, git.NoErrAlreadyUpToDate) {
-					continue
-				}
-				return "", fmt.Errorf("fetch %s: %w", cfg.Name, err)
-			}
+		return gitShell(ctx, repo, "merge", "--abort")
+	}
+	if d.Continue {
+		args := []string{"merge", "--continue"}
+		if !d.Edit {
+			args = append(args, "--no-edit")
 		}
-		return fmt.Sprintf("✅ Fetch concluído em %d remoto(s).", len(remotes)), nil
+		return gitShell(ctx, repo, args...)
+	}
+	ref := strings.TrimSpace(d.Ref)
+	if ref == "" {
+		return "", errors.New("merge exige 'ref' em 'data'")
+	}
+	args := []string{"merge"}
+	if d.FFOnly {
+		args = append(args, "--ff-only")
+	}
+	if !d.FFOnly {
+		if d.FF {
+			args = append(args, "--ff")
+		}
+		if !d.FF {
+			args = append(args, "--no-ff")
+		}
+	}
+	if d.Squash {
+		args = append(args, "--squash")
+	}
+	if message := strings.TrimSpace(d.Message); message != "" {
+		args = append(args, "-m", message)
+	}
+	if strategy := strings.TrimSpace(d.Strategy); strategy != "" {
+		args = append(args, "-s", strategy)
+	}
+	if option := strings.TrimSpace(d.StrategyOption); option != "" {
+		args = append(args, "-X", option)
+	}
+	if d.NoCommit {
+		args = append(args, "--no-commit")
+	}
+	if d.Edit {
+		args = append(args, "--edit")
+	}
+	if !d.Edit {
+		args = append(args, "--no-edit")
+	}
+	args = append(args, ref)
+	return gitShell(ctx, repo, args...)
+}
+
+func pushShell(ctx context.Context, repo string, d actData) (string, error) {
+	if d.Force {
+		return "", errors.New("push não aceita 'force'")
 	}
 	remote := cmp.Or(strings.TrimSpace(d.Remote), "origin")
-	auth, err := remoteAuth(repo, remote)
-	if err != nil {
-		return "", err
+	args := []string{"push", remote}
+	branch := strings.TrimSpace(d.Branch)
+	if branch != "" {
+		args = append(args, branch)
 	}
-	opts := fetchOptions(d, auth)
-	if err := repo.FetchContext(ctx, opts); err != nil {
-		if errors.Is(err, git.NoErrAlreadyUpToDate) {
-			return "✅ Nada a buscar: já está atualizado.", nil
-		}
-		return "", fmt.Errorf("fetch: %w", err)
-	}
-	return fmt.Sprintf("✅ Fetch concluído de `%s`.", remote), nil
-}
-
-func fetchOptions(d actData, auth []client.Option) *git.FetchOptions {
-	opts := &git.FetchOptions{ClientOptions: auth, Prune: d.Prune, Depth: d.Depth}
 	if d.Tags {
-		opts.Tags = plumbing.AllTags
+		args = append(args, "--follow-tags")
 	}
-	return opts
+	return gitShell(ctx, repo, args...)
 }
 
-func mergeAct(repo *git.Repository, d actData) (string, error) {
-	wt, err := repo.Worktree()
+func gitShell(ctx context.Context, repo string, args ...string) (string, error) {
+	full := args
+	if r := strings.TrimSpace(repo); r != "" {
+		full = append([]string{"-C", r}, args...)
+	}
+	cmd := exec.CommandContext(ctx, "git", full...)
+	out, err := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(out))
 	if err != nil {
-		return "", err
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), ctx.Err())
+		}
+		if text == "" {
+			return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		}
+		return "", fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, text)
 	}
-	status, err := wt.Status()
-	if err != nil {
-		return "", err
+	if text == "" {
+		return fmt.Sprintf("✅ git %s", strings.Join(args, " ")), nil
 	}
-	if hasTracked(status) {
-		return "", errors.New("merge exige working tree limpo (sem alterações em arquivos rastreados)")
-	}
-	ref, err := lookupRef(repo, d.Ref)
-	if err != nil {
-		return "", err
-	}
-	name := ref.Name().Short()
-	err = repo.Merge(ref, git.MergeOptions{Strategy: git.FastForwardMerge})
-	if errors.Is(err, git.ErrFastForwardMergeNotPossible) {
-		return "", fmt.Errorf("merge %s: apenas fast-forward é suportado; branches divergentes precisam ser resolvidas manualmente", name)
-	}
-	if err != nil {
-		return "", fmt.Errorf("merge %s: %w", name, err)
-	}
-	if err := wt.Reset(&git.ResetOptions{Commit: ref.Hash(), Mode: git.HardReset}); err != nil {
-		return "", fmt.Errorf("merge %s: sincronizar working tree: %w", name, err)
-	}
-	return fmt.Sprintf("✅ Fast-forward de `%s`.", name), nil
+	return text, nil
 }
 
-func hasTracked(status git.Status) bool {
-	for _, s := range status {
-		if s.Staging == git.Untracked {
-			continue
-		}
-		if s.Worktree == git.Untracked {
-			continue
-		}
-		return true
+func fetchShell(ctx context.Context, repo string, d actData) (string, error) {
+	target := cmp.Or(strings.TrimSpace(d.Remote), "origin")
+	if d.All {
+		target = "--all"
 	}
-	return false
+	args := []string{"fetch", target}
+	if d.Tags {
+		args = append(args, "--tags")
+	}
+	if d.Prune {
+		args = append(args, "--prune")
+	}
+	if d.Depth > 0 {
+		args = append(args, "--depth", strconv.Itoa(d.Depth))
+	}
+	return gitShell(ctx, repo, args...)
 }
 
 func resetAct(repo *git.Repository, d actData) (string, error) {
@@ -448,7 +460,7 @@ func cleanAct(repo *git.Repository, _ actData) (string, error) {
 	return "✅ Arquivos não rastreados removidos.", nil
 }
 
-func cloneAct(ctx context.Context, dest string, d actData) (string, error) {
+func cloneShell(ctx context.Context, dest string, d actData) (string, error) {
 	url := strings.TrimSpace(d.URL)
 	if url == "" {
 		return "", errors.New("clone exige 'url' em 'data'")
@@ -457,19 +469,15 @@ func cloneAct(ctx context.Context, dest string, d actData) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	auth, err := authForURL(url)
-	if err != nil {
-		return "", err
+	args := []string{"clone"}
+	if d.Depth > 0 {
+		args = append(args, "--depth", strconv.Itoa(d.Depth))
 	}
-	opts := &git.CloneOptions{URL: url, Depth: d.Depth, ClientOptions: auth}
 	if branch := strings.TrimSpace(d.Branch); branch != "" {
-		opts.ReferenceName = plumbing.NewBranchReferenceName(branch)
-		opts.SingleBranch = true
+		args = append(args, "--branch", branch)
 	}
-	if _, err := git.PlainCloneContext(ctx, path, opts); err != nil {
-		return "", fmt.Errorf("clone %s: %w", url, err)
-	}
-	return fmt.Sprintf("✅ Clonado `%s` em `%s`.", url, path), nil
+	args = append(args, url, path)
+	return gitShell(ctx, "", args...)
 }
 
 func clonePath(dest string) (string, error) {
@@ -501,59 +509,6 @@ func clonePath(dest string) (string, error) {
 	return abs, nil
 }
 
-func remoteAuth(repo *git.Repository, name string) ([]client.Option, error) {
-	remote, err := repo.Remote(name)
-	if err != nil {
-		return nil, fmt.Errorf("remote %q: %w", name, err)
-	}
-	urls := remote.Config().URLs
-	if len(urls) == 0 {
-		return nil, fmt.Errorf("remote %q sem URL", name)
-	}
-	return authForURL(urls[0])
-}
-
-func authForURL(raw string) ([]client.Option, error) {
-	if isSSHURL(raw) {
-		auth, err := gitssh.NewSSHAgentAuth(sshUser(raw))
-		if err != nil {
-			return nil, fmt.Errorf("ssh-agent indisponível: %w", err)
-		}
-		return []client.Option{client.WithSSHAuth(auth)}, nil
-	}
-	return nil, nil
-}
-
-func sshUser(url string) string {
-	at := strings.Index(url, "@")
-	if at < 0 {
-		return "git"
-	}
-	prefix := url[:at]
-	if i := strings.LastIndex(prefix, "/"); i >= 0 {
-		prefix = prefix[i+1:]
-	}
-	if prefix == "" {
-		return "git"
-	}
-	return prefix
-}
-
-func isSSHURL(url string) bool {
-	if strings.HasPrefix(url, "ssh://") {
-		return true
-	}
-	at := strings.Index(url, "@")
-	if at < 0 {
-		return false
-	}
-	colon := strings.Index(url, ":")
-	if colon < 0 {
-		return false
-	}
-	return at < colon
-}
-
 func authorSignature() *object.Signature {
 	name := strings.TrimSpace(os.Getenv("GIT_USER"))
 	email := strings.TrimSpace(os.Getenv("GIT_EMAIL"))
@@ -564,34 +519,6 @@ func authorSignature() *object.Signature {
 		return nil
 	}
 	return &object.Signature{Name: name, Email: email, When: time.Now()}
-}
-
-func lookupRef(repo *git.Repository, rev string) (plumbing.Reference, error) {
-	name := strings.TrimSpace(rev)
-	if name == "" {
-		return plumbing.Reference{}, errors.New("merge exige 'ref' em 'data'")
-	}
-	candidates := []plumbing.ReferenceName{
-		plumbing.ReferenceName(name),
-		plumbing.NewBranchReferenceName(name),
-		plumbing.NewTagReferenceName(name),
-		plumbing.ReferenceName("refs/remotes/" + name),
-	}
-	for _, candidate := range candidates {
-		ref, err := repo.Reference(candidate, true)
-		if err == nil {
-			return *ref, nil
-		}
-	}
-	hash, err := resolveHash(repo, name)
-	if err != nil {
-		return plumbing.Reference{}, err
-	}
-	refName := plumbing.NewBranchReferenceName(name)
-	if strings.Contains(name, "/") {
-		refName = plumbing.ReferenceName("refs/remotes/" + name)
-	}
-	return *plumbing.NewHashReference(refName, hash), nil
 }
 
 func resolveHash(repo *git.Repository, rev string) (plumbing.Hash, error) {
@@ -616,7 +543,7 @@ func pathsFor(paths []string) []string {
 
 func isNetwork(action string) bool {
 	switch action {
-	case "pull", "fetch", "clone":
+	case "pull", "push", "fetch", "clone":
 		return true
 	default:
 		return false
@@ -655,14 +582,14 @@ func actAllowed() bool {
 
 type actInput struct {
 	Repo   string  `json:"repo" jsonschema:"Path to the Git repository (required); for clone, the destination directory."`
-	Action string  `json:"action" jsonschema:"Action: add, restore, commit, pull, fetch, merge, reset, checkout, branch, tag, clone or clean (required)."`
+	Action string  `json:"action" jsonschema:"Action: add, restore, commit, pull, push, fetch, merge, reset, checkout, branch, tag, clone or clean (required)."`
 	Data   actData `json:"data,omitempty" jsonschema:"Options for the chosen action; fields that do not apply are ignored."`
 }
 
 type actData struct {
 	Paths          []string `json:"paths,omitempty" jsonschema:"Files or directories (add, restore)."`
-	Message        string   `json:"message,omitempty" jsonschema:"Commit message; annotated tag message."`
-	Ref            string   `json:"ref,omitempty" jsonschema:"Target ref (merge, reset, branch start point)."`
+	Message        string   `json:"message,omitempty" jsonschema:"Commit message; annotated tag or merge commit message."`
+	Ref            string   `json:"ref,omitempty" jsonschema:"Target ref (reset, branch start point)."`
 	Remote         string   `json:"remote,omitempty" jsonschema:"Remote name (default origin)."`
 	Branch         string   `json:"branch,omitempty" jsonschema:"Branch name."`
 	Name           string   `json:"name,omitempty" jsonschema:"Tag name."`
@@ -676,6 +603,15 @@ type actData struct {
 	Force          bool     `json:"force,omitempty" jsonschema:"Force pull or checkout (discards local changes)."`
 	Tags           bool     `json:"tags,omitempty" jsonschema:"Fetch all tags."`
 	Prune          bool     `json:"prune,omitempty" jsonschema:"Prune deleted remote refs."`
+	FF             bool     `json:"ff,omitempty" jsonschema:"merge: true = --ff (fast-forward quando possível), false = --no-ff (sempre merge commit)."`
+	FFOnly         bool     `json:"ffOnly,omitempty" jsonschema:"merge: --ff-only (falha se não puder fast-forward; ignora ff)."`
+	Squash         bool     `json:"squash,omitempty" jsonschema:"merge: --squash (aplica as mudanças no index sem commit)."`
+	Strategy       string   `json:"strategy,omitempty" jsonschema:"merge: -s/--strategy (ex. ort)."`
+	StrategyOption string   `json:"strategyOption,omitempty" jsonschema:"merge: -X/--strategy-option."`
+	NoCommit       bool     `json:"noCommit,omitempty" jsonschema:"merge: --no-commit (deixa as mudanças no index)."`
+	Edit           bool     `json:"edit,omitempty" jsonschema:"merge: true = --edit, false = --no-edit."`
+	Abort          bool     `json:"abort,omitempty" jsonschema:"merge: --abort (cancela o merge em conflito)."`
+	Continue       bool     `json:"continue,omitempty" jsonschema:"merge: --continue (conclui após resolver os conflitos)."`
 	Staged         bool     `json:"staged,omitempty" jsonschema:"Restore the index."`
 	Create         bool     `json:"create,omitempty" jsonschema:"checkout: create the branch."`
 	Keep           bool     `json:"keep,omitempty" jsonschema:"checkout: keep local changes when switching."`
