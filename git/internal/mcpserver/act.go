@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/object"
+	gitHttp "github.com/go-git/go-git/v6/plumbing/transport/http"
 	gitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	gitmcp "ntdsk.com/mcp/git/internal/git"
@@ -551,15 +553,42 @@ func remoteAuth(repo *git.Repository, name string) ([]client.Option, error) {
 	return authForURL(urls[0])
 }
 
-func authForURL(url string) ([]client.Option, error) {
-	if isSSHURL(url) {
-		auth, err := gitssh.NewSSHAgentAuth(sshUser(url))
+func authForURL(raw string) ([]client.Option, error) {
+	if isSSHURL(raw) {
+		auth, err := gitssh.NewSSHAgentAuth(sshUser(raw))
 		if err != nil {
 			return nil, fmt.Errorf("ssh-agent indisponível: %w", err)
 		}
 		return []client.Option{client.WithSSHAuth(auth)}, nil
 	}
-	return nil, nil
+	user, pass := httpCredentials(raw)
+	if pass == "" {
+		return nil, nil
+	}
+	return []client.Option{client.WithHTTPAuth(&gitHttp.BasicAuth{Username: user, Password: pass})}, nil
+}
+
+func httpCredentials(raw string) (string, string) {
+	u, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", ""
+	}
+	if u.User != nil {
+		user := u.User.Username()
+		pass, ok := u.User.Password()
+		if ok {
+			return user, pass
+		}
+	}
+	token := strings.TrimSpace(os.Getenv("GIT_TOKEN"))
+	if token == "" {
+		return "", ""
+	}
+	user := strings.TrimSpace(os.Getenv("GIT_HTTP_USER"))
+	if user == "" {
+		user = "oauth2"
+	}
+	return user, token
 }
 
 func sshUser(url string) string {
