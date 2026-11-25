@@ -23,7 +23,6 @@ import (
 const (
 	DEFAULT_TIMEOUT_SECONDS = 60
 	NETWORK_TIMEOUT_SECONDS = 300
-	MERGE_COMMIT_STRATEGY   = git.MergeStrategy(1)
 )
 
 func (s *Server) act(ctx context.Context, _ *mcp.CallToolRequest, in actInput) (*mcp.CallToolResult, any, error) {
@@ -269,18 +268,46 @@ func fetchOptions(d actData, auth []client.Option) *git.FetchOptions {
 }
 
 func mergeAct(repo *git.Repository, d actData) (string, error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", err
+	}
+	status, err := wt.Status()
+	if err != nil {
+		return "", err
+	}
+	if hasTracked(status) {
+		return "", errors.New("merge exige working tree limpo (sem alterações em arquivos rastreados)")
+	}
 	ref, err := lookupRef(repo, d.Ref)
 	if err != nil {
 		return "", err
 	}
-	strategy := git.FastForwardMerge
-	if d.NoFF {
-		strategy = MERGE_COMMIT_STRATEGY
+	name := ref.Name().Short()
+	err = repo.Merge(ref, git.MergeOptions{Strategy: git.FastForwardMerge})
+	if errors.Is(err, git.ErrFastForwardMergeNotPossible) {
+		return "", fmt.Errorf("merge %s: apenas fast-forward é suportado; branches divergentes precisam ser resolvidas manualmente", name)
 	}
-	if err := repo.Merge(ref, git.MergeOptions{Strategy: strategy}); err != nil {
-		return "", fmt.Errorf("merge %s: %w", ref.Name().Short(), err)
+	if err != nil {
+		return "", fmt.Errorf("merge %s: %w", name, err)
 	}
-	return fmt.Sprintf("✅ Merge de `%s`.", ref.Name().Short()), nil
+	if err := wt.Reset(&git.ResetOptions{Commit: ref.Hash(), Mode: git.HardReset}); err != nil {
+		return "", fmt.Errorf("merge %s: sincronizar working tree: %w", name, err)
+	}
+	return fmt.Sprintf("✅ Fast-forward de `%s`.", name), nil
+}
+
+func hasTracked(status git.Status) bool {
+	for _, s := range status {
+		if s.Staging == git.Untracked {
+			continue
+		}
+		if s.Worktree == git.Untracked {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func resetAct(repo *git.Repository, d actData) (string, error) {
@@ -672,7 +699,6 @@ type actData struct {
 	Force          bool     `json:"force,omitempty" jsonschema:"Force pull or discard local changes (needs confirm)."`
 	Tags           bool     `json:"tags,omitempty" jsonschema:"Fetch all tags."`
 	Prune          bool     `json:"prune,omitempty" jsonschema:"Prune deleted remote refs."`
-	NoFF           bool     `json:"noFF,omitempty" jsonschema:"Always create a merge commit."`
 	Staged         bool     `json:"staged,omitempty" jsonschema:"Restore the index."`
 	Create         bool     `json:"create,omitempty" jsonschema:"checkout: create the branch."`
 	Keep           bool     `json:"keep,omitempty" jsonschema:"checkout: keep local changes when switching."`

@@ -32,7 +32,7 @@ Só é registrada com `GIT_ALLOW_ACT`. Ações destrutivas exigem `data.confirm`
 | `commit` | `message`, `all`, `amend`, `allowEmpty`, `coAuthors` |
 | `pull` | `remote`, `branch`, `force` |
 | `fetch` | `remote`, `all`, `tags`, `prune`, `depth` |
-| `merge` | `ref`, `noFF` |
+| `merge` | `ref` (só fast-forward; exige working tree limpo) |
 | `reset` | `mode` (`soft`/`mixed`/`hard`/`keep`), `ref` |
 | `checkout` | `branch`, `create`, `ref`, `force`, `keep` |
 | `branch` | `branch`, `ref`, `delete` |
