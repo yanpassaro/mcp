@@ -16,15 +16,16 @@ import (
 func main() {
 	setupLog("shell")
 
-	patterns, err := shell.LoadPatterns(os.Getenv("SHELL_ALLOW_FILE"))
+	tools, err := shell.LoadTools(os.Getenv("SHELL_TOOLS_FILE"))
 	if err != nil {
 		log.Printf("aviso: %v", err)
+		tools = nil
 	}
 
 	registry := shell.NewRegistry()
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "shell-mcp", Version: "0.1.0"}, nil)
-	mcpserver.New(registry, patterns, os.Getenv("SHELL_ALLOW_FILE")).Register(server)
+	mcpserver.New(registry, tools, os.Getenv("SHELL_TOOLS_FILE")).Register(server)
 
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Printf("shell-mcp stopped: %v", err)

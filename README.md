@@ -11,7 +11,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | `sqlize-mcp` | Importa, consulta e exporta dados (SQLite + Postgres/MySQL read-only) |
 | `anydoc` | Lê documentos (Word, PDF, Excel, ODT, RTF, EPUB, CSV) e grava o Markdown ao lado |
 | `sandbox-mcp` | Sandbox **não-destrutivo** de scripts Lua (API `std`, filesystem único, rede via allowlist) |
-| `shell-mcp` | Executa comandos locais **allowlistados** (foreground/background) com logs e kill por id |
+| `shell-mcp` | Tools de comando por JSON (`SHELL_TOOLS_FILE`) — o agente só preenche campos; foreground/background com logs e kill |
 
 ## Tools
 
@@ -22,7 +22,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 - **sqlize**: `sqlize_import`, `sqlize_structure`, `sqlize_query`, `sqlize_export` (+ `postgres_*`/`mysql_*`)
 - **anydoc**: `anydoc_read`
 - **sandbox**: `sandbox_act` (run por `path`/`code` + `args`), `sandbox_doc` (API `std`), `sandbox_os` (copy/mount/del/stat/list)
-- **shell**: `shell_read` (list/log/allow), `shell_act` (run/kill, com `SHELL_ALLOW_ACT`)
+- **shell**: `shell_read` (list/log/tools), `shell_<name>` (uma por item do `SHELL_TOOLS_FILE`) e `shell_kill`, com `SHELL_ALLOW_ACT`
 
 ## Variáveis de ambiente
 
@@ -57,8 +57,8 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | | `SANDBOX_EXEC_TIMEOUT_SECONDS` | `180` | timeout de execução de cada script |
 | | `SANDBOX_FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | allowlist do `std.net` |
 | | `SECRET_*` | — | secrets lidas via `std.secrets.get("chave")`; valores são redigidos em toda saída |
-| `shell` | `SHELL_ALLOW_ACT` | desligado | habilita a tool `shell_act` (`1`, `true`, `yes` ou `on`) |
-| | `SHELL_ALLOW_FILE` | — | txt de regexes permitidas (`^go\s+(build\|test)\b`) |
+| `shell` | `SHELL_ALLOW_ACT` | desligado | habilita as tools `shell_<name>` e `shell_kill` (`1`, `true`, `yes` ou `on`) |
+| | `SHELL_TOOLS_FILE` | — | JSON de tools por comando (ver README do módulo) |
 | | `SHELL_TIMEOUT_SECONDS` | `60` | timeout default do foreground |
 
 O filesystem do sandbox (`mnt`) e a exportação do sqlize ficam **fixos** em `~/.local/state/mcp/mnt` (pasta compartilhada, sem env): o `mnt` do sandbox é `~/.local/state/mcp/mnt` e `tmp` é `~/.local/state/mcp/tmp`.
@@ -74,7 +74,7 @@ O filesystem do sandbox (`mnt`) e a exportação do sqlize ficam **fixos** em `~
     "ssh":     { "command": "~/.local/bin/ssh-mcp.exe", "env": { "LAB_SSH_HOST": "<host>", "LAB_SSH_USER": "<user>", "LAB_SSH_KEY_PATH": "<chave>" } },
     "sqlize":  { "command": "~/.local/bin/sqlize-mcp.exe" },
     "sandbox": { "command": "~/.local/bin/sandbox-mcp.exe" },
-    "shell":   { "command": "~/.local/bin/shell-mcp.exe", "env": { "SHELL_ALLOW_ACT": "true", "SHELL_ALLOW_FILE": "~/.local/state/mcp/run-allow.txt" } },
+    "shell":   { "command": "~/.local/bin/shell-mcp.exe", "env": { "SHELL_ALLOW_ACT": "true", "SHELL_TOOLS_FILE": "~/.local/state/mcp/run-tools.json" } },
     "anydoc":  { "command": "~/.local/bin/anydoc-mcp.exe" }
   }
 }

@@ -19,27 +19,80 @@ const (
 
 type Server struct {
 	registry  *shell.Registry
-	patterns  []shell.Pattern
-	allowFile string
+	tools     []shell.Tool
+	toolsFile string
 	actOn     bool
+	timeout   time.Duration
 }
 
-func New(registry *shell.Registry, patterns []shell.Pattern, allowFile string) *Server {
-	return &Server{registry: registry, patterns: patterns, allowFile: allowFile, actOn: actAllowed()}
+func New(registry *shell.Registry, tools []shell.Tool, toolsFile string) *Server {
+	return &Server{registry: registry, tools: tools, toolsFile: toolsFile, actOn: actAllowed(), timeout: time.Duration(envTimeout()) * time.Second}
 }
 
 func (s *Server) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "shell_read",
-		Description: "Local processes: list (running/exited), log (tail of output by id) or allow (show the command allowlist).",
+		Description: "Local processes: list (running/exited), log (tail of output by id) or tools (registered command tools).",
 	}, s.read)
 
-	if s.actOn {
-		mcp.AddTool(server, &mcp.Tool{
-			Name:        "shell_act",
-			Description: "Run allowlisted commands locally (no shell: plain argv) in foreground or background, or kill a background process by id.",
-		}, s.act)
+	if !s.actOn {
+		return
 	}
+	s.registerTools(server)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "shell_kill",
+		Description: "Kill a background process started by a shell tool, by id.",
+	}, s.killTool)
+}
+
+func (s *Server) registerTools(server *mcp.Server) {
+	for _, t := range s.tools {
+		tool := t
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        fmt.Sprintf("shell_%s", tool.Name),
+			Description: fmt.Sprintf("%s Runs: `%s`", strings.TrimSpace(tool.Desc), tool.Cmd),
+		}, func(ctx context.Context, req *mcp.CallToolRequest, in map[string]string) (*mcp.CallToolResult, any, error) {
+			return s.runTool(ctx, tool, in)
+		})
+	}
+}
+
+func (s *Server) runTool(ctx context.Context, tool shell.Tool, in map[string]string) (*mcp.CallToolResult, any, error) {
+	values := make(map[string]string, len(in))
+	for name, v := range in {
+		values[name] = strings.TrimSpace(v)
+	}
+	fields, err := shell.Render(tool.Cmd, values)
+	if err != nil {
+		return nil, nil, fmt.Errorf("shell_%s: %w", tool.Name, err)
+	}
+	command := strings.Join(fields, " ")
+	cwd := strings.TrimSpace(values["cwd"])
+	if tool.Background {
+		id, err := s.registry.BackgroundFields(command, fields, cwd, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(fmt.Sprintf("✅ Processo `%s` iniciado em background:\n\n- **Comando:** `%s`\n- **Log:** `shell_read` → `{ \"action\": \"log\", \"data\": { \"id\": \"%s\" } }`\n- **Parar:** `shell_kill` → `{ \"id\": \"%s\" }`", id, command, id, id))
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	result, err := s.registry.ForegroundFields(ctx, command, fields, cwd, nil)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil, fmt.Errorf("shell_%s: %w", tool.Name, ctx.Err())
+		}
+		return nil, nil, fmt.Errorf("shell_%s: %w\n\n%s", tool.Name, err, result.Output)
+	}
+	return textResult(formatRun(result))
+}
+
+func (s *Server) killTool(ctx context.Context, req *mcp.CallToolRequest, in map[string]string) (*mcp.CallToolResult, any, error) {
+	info, err := s.registry.Kill(strings.TrimSpace(in["id"]))
+	if err != nil {
+		return nil, nil, err
+	}
+	return textResult(fmt.Sprintf("🛑 Processo `%s` encerrado: `%s` (exit %d).", info.ID, info.Command, info.Exit))
 }
 
 func (s *Server) read(ctx context.Context, _ *mcp.CallToolRequest, in input) (*mcp.CallToolResult, any, error) {
@@ -56,75 +109,13 @@ func (s *Server) read(ctx context.Context, _ *mcp.CallToolRequest, in input) (*m
 			return nil, nil, err
 		}
 		return textResult(formatLog(result))
-	case "allow":
-		return textResult(formatAllow(s.patterns, s.allowFile))
+	case "tools":
+		return textResult(formatTools(s.tools, s.toolsFile))
 	case "":
 		return nil, nil, errors.New("'action' é obrigatório")
 	default:
-		return nil, nil, errors.New("'action' inválido: list, log, allow")
+		return nil, nil, errors.New("'action' inválido: list, log, tools")
 	}
-}
-
-func (s *Server) act(ctx context.Context, _ *mcp.CallToolRequest, in actInput) (*mcp.CallToolResult, any, error) {
-	action := strings.ToLower(strings.TrimSpace(in.Action))
-	if action == "" {
-		return nil, nil, errors.New("'action' é obrigatório")
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeoutFor(in.Data))
-	defer cancel()
-	switch action {
-	case "run":
-		return s.run(ctx, in.Data)
-	case "kill":
-		return s.kill(in.Data)
-	default:
-		return nil, nil, errors.New("'action' inválido: run, kill")
-	}
-}
-
-func (s *Server) run(ctx context.Context, d actData) (*mcp.CallToolResult, any, error) {
-	command := strings.TrimSpace(d.Command)
-	if command == "" {
-		return nil, nil, errors.New("run exige 'command' em 'data'")
-	}
-	pattern, ok := shell.Match(s.patterns, command)
-	if !ok {
-		return nil, nil, fmt.Errorf("comando não permitido: %q (allowlist: %s)", command, s.allowFile)
-	}
-	env, err := parseEnv(d.Env)
-	if err != nil {
-		return nil, nil, err
-	}
-	if d.Background {
-		id, err := s.registry.Background(command, strings.TrimSpace(d.Cwd), env)
-		if err != nil {
-			return nil, nil, err
-		}
-		return textResult(fmt.Sprintf("✅ Processo `%s` iniciado em background:\n\n- **Comando:** `%s`\n- **Padrão:** `%s`\n- **Log:** `shell_read` → `{ \"action\": \"log\", \"data\": { \"id\": \"%s\" } }`\n- **Parar:** `shell_act` → `{ \"action\": \"kill\", \"data\": { \"id\": \"%s\" } }`", id, command, pattern, id, id))
-	}
-	result, err := s.registry.Foreground(ctx, command, strings.TrimSpace(d.Cwd), env)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, nil, fmt.Errorf("run %q: %w", command, ctx.Err())
-		}
-		return nil, nil, fmt.Errorf("run %q: %w\n\n%s", command, err, result.Output)
-	}
-	return textResult(formatRun(result))
-}
-
-func (s *Server) kill(d actData) (*mcp.CallToolResult, any, error) {
-	info, err := s.registry.Kill(d.ID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return textResult(fmt.Sprintf("🛑 Processo `%s` encerrado: `%s` (exit %d).", info.ID, info.Command, info.Exit))
-}
-
-func timeoutFor(d actData) time.Duration {
-	if d.Timeout > 0 {
-		return time.Duration(d.Timeout) * time.Second
-	}
-	return time.Duration(envTimeout()) * time.Second
 }
 
 func envTimeout() int {
@@ -145,19 +136,4 @@ func actAllowed() bool {
 	default:
 		return false
 	}
-}
-
-func parseEnv(env []string) ([]string, error) {
-	cleaned := make([]string, 0, len(env))
-	for _, e := range env {
-		e = strings.TrimSpace(e)
-		if e == "" {
-			continue
-		}
-		if !strings.Contains(e, "=") {
-			return nil, fmt.Errorf("env inválida %q: use KEY=VALUE", e)
-		}
-		cleaned = append(cleaned, e)
-	}
-	return cleaned, nil
 }

@@ -14,7 +14,6 @@ import (
 const (
 	DEFAULT_MAX_LOG  = 512 * 1024
 	DEFAULT_LOG_TAIL = 8 * 1024
-	MAX_FIELDS       = 4096
 )
 
 type Result struct {
@@ -70,11 +69,7 @@ func NewRegistry() *Registry {
 	return &Registry{procs: map[string]*proc{}}
 }
 
-func (r *Registry) Foreground(ctx context.Context, command, cwd string, env []string) (Result, error) {
-	fields, err := split(command)
-	if err != nil {
-		return Result{}, err
-	}
+func (r *Registry) ForegroundFields(ctx context.Context, command string, fields []string, cwd string, env []string) (Result, error) {
 	cmd := exec.CommandContext(ctx, fields[0], fields[1:]...)
 	applyAttr(cmd)
 	out := newRing(DEFAULT_MAX_LOG)
@@ -84,15 +79,11 @@ func (r *Registry) Foreground(ctx context.Context, command, cwd string, env []st
 	if len(env) != 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
-	err = cmd.Run()
-	return Result{Command: strings.TrimSpace(command), Cwd: cwd, ExitCode: out.exit, Output: out.text()}, err
+	err := cmd.Run()
+	return Result{Command: command, Cwd: cwd, ExitCode: out.exit, Output: out.text()}, err
 }
 
-func (r *Registry) Background(command, cwd string, env []string) (string, error) {
-	fields, err := split(command)
-	if err != nil {
-		return "", err
-	}
+func (r *Registry) BackgroundFields(command string, fields []string, cwd string, env []string) (string, error) {
 	p := &proc{
 		command: strings.TrimSpace(command),
 		cwd:     cwd,
@@ -212,17 +203,6 @@ func info(p *proc) Info {
 	default:
 	}
 	return Info{ID: p.id, Command: p.command, Cwd: p.cwd, Started: p.started, Status: status, Exit: exit}
-}
-
-func split(command string) ([]string, error) {
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return nil, errors.New("command é obrigatório")
-	}
-	if len(fields) > MAX_FIELDS {
-		return nil, fmt.Errorf("command tem %d argumentos (máximo %d)", len(fields), MAX_FIELDS)
-	}
-	return fields, nil
 }
 
 func exitCode(err error) int {

@@ -59,15 +59,15 @@ func formatLog(result shell.Log) string {
 	return fmt.Sprintf("%s\n\n```text\n%s```", header, codeBlock(result.Output))
 }
 
-func formatAllow(patterns []shell.Pattern, path string) string {
+func formatTools(tools []shell.Tool, path string) string {
 	b := strings.Builder{}
-	fmt.Fprintf(&b, "## Allowlist (%s)\n\n", path)
-	if len(patterns) == 0 {
-		b.WriteString("_Vazia (arquivo ausente ou sem padrões): nenhum `run` será aceito._\n")
+	fmt.Fprintf(&b, "## Tools (%s)\n\n", path)
+	if len(tools) == 0 {
+		b.WriteString("_Vazia (SHELL_TOOLS_FILE ausente ou vazio)._\n")
 		return b.String()
 	}
-	for _, p := range patterns {
-		fmt.Fprintf(&b, "- `%s`\n", p.String())
+	for _, t := range tools {
+		fmt.Fprintf(&b, "- **`shell_%s`** — %s\n  - `%s`\n", t.Name, strings.TrimSpace(t.Desc), t.Cmd)
 	}
 	return b.String()
 }

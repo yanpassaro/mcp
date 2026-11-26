@@ -1,48 +1,38 @@
 # Shell MCP
 
-Executa comandos locais com **allowlist** — autonomia pra IA sem virar terminal livre. Comandos em foreground (espera e devolve output) ou background (id + logs + kill).
+Tools de comando para o agente local — **uma tool por comando**, definidas em JSON (`SHELL_TOOLS_FILE`). O agente não monta a linha de comando: só preenche os campos do schema. Foreground (espera e devolve output) ou background (id + logs + kill).
 
 ## Env
 
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
-| `SHELL_ALLOW_ACT` | desligado | habilita `shell_act` (`1`, `true`, `yes`, `on`) |
-| `SHELL_ALLOW_FILE` | — | caminho do txt de padrões permitidos (obrigatório pro `run`) |
+| `SHELL_ALLOW_ACT` | desligado | habilita as tools `shell_<name>` e `shell_kill` (`1`, `true`, `yes`, `on`) |
+| `SHELL_TOOLS_FILE` | — | JSON de tools por comando (ver abaixo) |
 | `SHELL_TIMEOUT_SECONDS` | `60` | timeout default do foreground |
 
-## Allowlist
-
-```text
-# uma linha = regex (RE2); casa no início do comando
-^php\s+artisan\s+(serve|migrate|test|tinker|route:list)\b
-^npm\s+(start|test|install)\b
-^pnpm\s+(run\s+)?(dev|build|test|install)\b
-^go\s+(build|test|vet)\b
-^(ls|pwd|cat|head|tail|grep|rg)\b
-^git\s+(status|log|diff|show)\b
-```
-
-- Linhas `#` são comentários; vazias são ignoradas.
-- Casamento por regex (`MatchString` no comando inteiro); padrões inválidos recusam o boot com erro claro.
-- Sem shell: o comando vira `argv` (`strings.Fields`) e roda via `exec.Command` — não há `&&`, `|`, `>`, `$()` nem expansão de variável.
-- Comando sem padrão que case → erro claro apontando o `SHELL_ALLOW_FILE`.
-
-## `shell_act`
-
-| `action` | `data` |
-| --- | --- |
-| `run` | `command`, `cwd`, `env` (`KEY=VALUE`), `background`, `timeout` |
-| `kill` | `id` |
+## Tools por comando (`SHELL_TOOLS_FILE`)
 
 ```json
-{ "action": "run", "data": { "command": "php artisan serve", "cwd": "C:/dev/api", "background": true, "env": ["APP_PORT=8000"] } }
-{ "action": "run", "data": { "command": "go test ./...", "cwd": "C:/dev/api", "timeout": 120 } }
-{ "action": "kill", "data": { "id": "p1" } }
+[
+  { "name": "test",    "desc": "Testa o pacote Go atual", "cmd": "go test ${args}" },
+  { "name": "artisan", "desc": "Artisan do Laravel",      "cmd": "php artisan ${action} ${args?}" },
+  { "name": "serve",   "desc": "Sobe o servidor Laravel", "cmd": "php artisan serve", "background": true }
+]
 ```
 
-- `background: true` inicia e devolve `p1`, `p2`…; logs via `shell_read`.
-- Foreground espera até sair (ou timeout) e devolve output + exit code; timeout mata o processo.
-- `kill` mata a árvore do processo (`taskkill /T /F` no Windows, `SIGKILL` no grupo de processo no Unix).
+- `${x}` obrigatório, `${x?}` opcional (omitido do argv se vazio).
+- Cada item vira a tool `shell_<name>` com a descrição e um campo string por placeholder.
+- `cwd` é placeholder especial: vira diretório de trabalho (não vai pro argv).
+- `background: true` inicia e devolve o id; logs via `shell_read`, stop via `shell_kill`.
+- Executável é fixo no template (não pode começar por placeholder); sem shell — só argv.
+- JSON inválido, name duplicado ou fora de `^[a-z][a-z0-9_-]{0,31}$` recusam o boot.
+
+## Tools
+
+| Tool | input |
+| --- | --- |
+| `shell_<name>` | um campo string por placeholder do `cmd` (+ `cwd` se houver) |
+| `shell_kill` | `id` |
 
 ## `shell_read`
 
@@ -50,7 +40,7 @@ Executa comandos locais com **allowlist** — autonomia pra IA sem virar termina
 | --- | --- |
 | `list` | — |
 | `log` | `id`, `max` (bytes do fim; default `8192`) |
-| `allow` | — |
+| `tools` | — |
 
 ## Notas
 
