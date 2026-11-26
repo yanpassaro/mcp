@@ -23,7 +23,7 @@ Tools de comando para o agente local — **uma tool por comando**, definidas em 
 - `${x}` obrigatório, `${x?}` opcional (omitido do argv se vazio).
 - Cada item vira a tool `shell_<name>` com a descrição e um campo string por placeholder.
 - `cwd` é placeholder especial: vira diretório de trabalho (não vai pro argv).
-- `background: true` inicia e devolve o id; logs via `shell_read`, stop via `shell_kill`.
+- `background: true` inicia, **retorna na hora** o id (o agente não espera) e avisa se o processo saiu logo no início (crash de boot, com output); logs via `shell_read`, stop via `shell_kill`.
 - Executável é fixo no template (não pode começar por placeholder); sem shell — só argv.
 - JSON inválido, name duplicado ou fora de `^[a-z][a-z0-9_-]{0,31}$` recusam o boot.
 

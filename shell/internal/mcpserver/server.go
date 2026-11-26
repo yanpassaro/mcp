@@ -71,7 +71,7 @@ func (s *Server) runTool(ctx context.Context, tool shell.Tool, in map[string]str
 	if tool.Background {
 		id, err := s.registry.BackgroundFields(command, fields, cwd, nil)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("shell_%s: %w", tool.Name, err)
 		}
 		return textResult(fmt.Sprintf("✅ Processo `%s` iniciado em background:\n\n- **Comando:** `%s`\n- **Log:** `shell_read` → `{ \"action\": \"log\", \"data\": { \"id\": \"%s\" } }`\n- **Parar:** `shell_kill` → `{ \"id\": \"%s\" }`", id, command, id, id))
 	}

@@ -14,6 +14,8 @@ import (
 const (
 	DEFAULT_MAX_LOG  = 512 * 1024
 	DEFAULT_LOG_TAIL = 8 * 1024
+	DEATH_CHECK      = 750 * time.Millisecond
+	DEFAULT_DEATH_TAIL = 2 * 1024
 )
 
 type Result struct {
@@ -114,6 +116,15 @@ func (r *Registry) BackgroundFields(command string, fields []string, cwd string,
 		p.out.mu.Unlock()
 		close(p.done)
 	}()
+	select {
+	case <-p.done:
+		p.out.mu.Lock()
+		exit := p.out.exit
+		p.out.mu.Unlock()
+		output := string(p.out.tail(DEFAULT_DEATH_TAIL))
+		return p.id, fmt.Errorf("processo %s saiu já no início (exit %d):\n%s", p.id, exit, output)
+	case <-time.After(DEATH_CHECK):
+	}
 	return p.id, nil
 }
 
