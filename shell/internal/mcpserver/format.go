@@ -59,7 +59,7 @@ func formatLog(result shell.Log) string {
 	return fmt.Sprintf("%s\n\n```text\n%s```", header, codeBlock(result.Output))
 }
 
-func formatAllow(patterns []string, path string) string {
+func formatAllow(patterns []shell.Pattern, path string) string {
 	b := strings.Builder{}
 	fmt.Fprintf(&b, "## Allowlist (%s)\n\n", path)
 	if len(patterns) == 0 {
@@ -67,7 +67,7 @@ func formatAllow(patterns []string, path string) string {
 		return b.String()
 	}
 	for _, p := range patterns {
-		fmt.Fprintf(&b, "- `%s`\n", p)
+		fmt.Fprintf(&b, "- `%s`\n", p.String())
 	}
 	return b.String()
 }

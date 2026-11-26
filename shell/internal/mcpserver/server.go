@@ -19,12 +19,12 @@ const (
 
 type Server struct {
 	registry  *shell.Registry
-	patterns  []string
+	patterns  []shell.Pattern
 	allowFile string
 	actOn     bool
 }
 
-func New(registry *shell.Registry, patterns []string, allowFile string) *Server {
+func New(registry *shell.Registry, patterns []shell.Pattern, allowFile string) *Server {
 	return &Server{registry: registry, patterns: patterns, allowFile: allowFile, actOn: actAllowed()}
 }
 

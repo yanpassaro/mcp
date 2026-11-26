@@ -3,10 +3,19 @@ package shell
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
 
-func LoadPatterns(path string) ([]string, error) {
+type Pattern struct {
+	re *regexp.Regexp
+}
+
+func (p Pattern) String() string {
+	return p.re.String()
+}
+
+func LoadPatterns(path string) ([]Pattern, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, fmt.Errorf("SHELL_ALLOW_FILE não definido: 'run' exige um allowlist de comandos")
@@ -15,33 +24,26 @@ func LoadPatterns(path string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("allowlist %q: %w", path, err)
 	}
-	patterns := make([]string, 0)
+	patterns := make([]Pattern, 0)
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		patterns = append(patterns, strings.ToLower(line))
+		re, err := regexp.Compile(line)
+		if err != nil {
+			return nil, fmt.Errorf("allowlist %q: padrão inválido %q: %w", path, line, err)
+		}
+		patterns = append(patterns, Pattern{re: re})
 	}
 	return patterns, nil
 }
 
-func Match(patterns []string, command string) (string, bool) {
-	command = strings.ToLower(strings.TrimSpace(command))
+func Match(patterns []Pattern, command string) (string, bool) {
+	command = strings.TrimSpace(command)
 	for _, p := range patterns {
-		if strings.HasSuffix(p, "*") {
-			prefix := strings.TrimSuffix(p, "*")
-			prefix = strings.TrimRight(prefix, " ")
-			if strings.EqualFold(command, prefix) {
-				return p, true
-			}
-			if strings.HasPrefix(command, prefix+" ") {
-				return p, true
-			}
-			continue
-		}
-		if strings.EqualFold(command, p) {
-			return p, true
+		if p.re.MatchString(command) {
+			return p.re.String(), true
 		}
 	}
 	return "", false

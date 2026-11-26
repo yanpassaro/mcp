@@ -58,7 +58,7 @@ Servidores MCP (stdio) para agentes/clientes como Zed e Claude Desktop. Cada um 
 | | `SANDBOX_FETCH_ALLOW_HOST` | `localhost,127.0.0.1,::1` | allowlist do `std.net` |
 | | `SECRET_*` | — | secrets lidas via `std.secrets.get("chave")`; valores são redigidos em toda saída |
 | `shell` | `SHELL_ALLOW_ACT` | desligado | habilita a tool `shell_act` (`1`, `true`, `yes` ou `on`) |
-| | `SHELL_ALLOW_FILE` | — | txt de padrões permitidos (`php artisan *`, `task *`) |
+| | `SHELL_ALLOW_FILE` | — | txt de regexes permitidas (`^go\s+(build\|test)\b`) |
 | | `SHELL_TIMEOUT_SECONDS` | `60` | timeout default do foreground |
 
 O filesystem do sandbox (`mnt`) e a exportação do sqlize ficam **fixos** em `~/.local/state/mcp/mnt` (pasta compartilhada, sem env): o `mnt` do sandbox é `~/.local/state/mcp/mnt` e `tmp` é `~/.local/state/mcp/tmp`.

@@ -13,17 +13,17 @@ Executa comandos locais com **allowlist** — autonomia pra IA sem virar termina
 ## Allowlist
 
 ```text
-# uma linha = padrão; termina em * = prefixo livre
-php artisan serve
-php artisan *
-task *
-go test *
-cargo run *
-docker compose *
+# uma linha = regex (RE2); casa no início do comando
+^php\s+artisan\s+(serve|migrate|test|tinker|route:list)\b
+^npm\s+(start|test|install)\b
+^pnpm\s+(run\s+)?(dev|build|test|install)\b
+^go\s+(build|test|vet)\b
+^(ls|pwd|cat|head|tail|grep|rg)\b
+^git\s+(status|log|diff|show)\b
 ```
 
 - Linhas `#` são comentários; vazias são ignoradas.
-- Casamento por linha inteira, insensível a maiúsculas: igualdade exata **ou** prefixo quando termina em `*`.
+- Casamento por regex (`MatchString` no comando inteiro); padrões inválidos recusam o boot com erro claro.
 - Sem shell: o comando vira `argv` (`strings.Fields`) e roda via `exec.Command` — não há `&&`, `|`, `>`, `$()` nem expansão de variável.
 - Comando sem padrão que case → erro claro apontando o `SHELL_ALLOW_FILE`.
 
