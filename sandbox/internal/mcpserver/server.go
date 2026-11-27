@@ -14,8 +14,9 @@ import (
 )
 
 type Server struct {
-	mnt *sandbox.Store
-	tmp *sandbox.Store
+	mnt  *sandbox.Store
+	tmp  *sandbox.Store
+	jobs *sandbox.Jobs
 }
 
 func New(mntDir, tmpDir string) *Server {
@@ -27,7 +28,7 @@ func New(mntDir, tmpDir string) *Server {
 	mnt.MaxTotalBytes = int64(envInt("SANDBOX_MNT_SPACE_MB", 256)) * 1024 * 1024
 	mnt.MaxFiles = 5000
 
-	return &Server{mnt: mnt, tmp: tmp}
+	return &Server{mnt: mnt, tmp: tmp, jobs: sandbox.NewJobs()}
 }
 
 func envInt(name string, def int) int {
@@ -53,8 +54,13 @@ func (s *Server) Register(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sandbox_act",
-		Description: "Run a Lua script by 'path' (host .lua file) or inline 'code'. Action: 'run' (default). Inline 'code' may be just the body — it is auto-wrapped in `function main(std)`. 'args' (array/object) becomes std.args. Sandboxed: no OS/process; filesystem confined to mnt/; network only via std.net (allowlist). Timeout of 180s (3 min) by default, configurable via SANDBOX_EXEC_TIMEOUT_SECONDS.",
+		Description: "Run a Lua script by 'path' (host .lua file) or inline 'code'. Action: 'run' (default). Inline 'code' may be just the body — it is auto-wrapped in `function main(std)`. 'args' (array/object) becomes std.args. Set 'background' to run async and get a job id back (poll with sandbox_job). Sandboxed: no OS/process; filesystem confined to mnt/; network only via std.net (allowlist). Timeout of 180s (3 min) by default, configurable via SANDBOX_EXEC_TIMEOUT_SECONDS.",
 	}, s.act)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "sandbox_job",
+		Description: "Manage background sandbox jobs started with sandbox_act background=true. Actions: 'list' (default), 'status' (id), 'logs' (id, optional tail), 'kill' (id).",
+	}, s.job)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sandbox_os",
@@ -63,10 +69,11 @@ func (s *Server) Register(server *mcp.Server) {
 }
 
 type actInput struct {
-	Action string `json:"action,omitempty" jsonschema:"Action: 'run' (default)."`
-	Path   string `json:"path,omitempty" jsonschema:"Host/project path to a .lua file to run (reads the file)."`
-	Code   string `json:"code,omitempty" jsonschema:"Inline Lua code to run. Pass only the body — the function main(std) wrapper is added automatically if missing."`
-	Args   any    `json:"args,omitempty" jsonschema:"Script arguments (array or object; becomes std.args)."`
+	Action     string `json:"action,omitempty" jsonschema:"Action: 'run' (default)."`
+	Path       string `json:"path,omitempty" jsonschema:"Host/project path to a .lua file to run (reads the file)."`
+	Code       string `json:"code,omitempty" jsonschema:"Inline Lua code to run. Pass only the body — the function main(std) wrapper is added automatically if missing."`
+	Args       any    `json:"args,omitempty" jsonschema:"Script arguments (array or object; becomes std.args)."`
+	Background bool   `json:"background,omitempty" jsonschema:"Run asynchronously and return a job id immediately; poll with sandbox_job (status/logs/kill)."`
 }
 
 type filesystemInput struct {
@@ -103,7 +110,12 @@ func (s *Server) runScript(in actInput) (*mcp.CallToolResult, any, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	res, err := sandbox.Run(s.mnt, s.tmp, sandbox.RunRequest{Code: code, Args: argsStr})
+	request := sandbox.RunRequest{Code: code, Args: argsStr}
+	if in.Background {
+		info := s.jobs.Start(s.mnt, s.tmp, request)
+		return textResult(formatJobStarted(info))
+	}
+	res, err := sandbox.Run(s.mnt, s.tmp, request)
 	return result(formatRunResult(res, err), false)
 }
 

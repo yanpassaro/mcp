@@ -44,6 +44,7 @@ type RunRequest struct {
 	Code    string
 	Args    string
 	Timeout time.Duration
+	Sink    func(string)
 }
 
 type RunResult struct {
@@ -73,6 +74,11 @@ type runOutcome struct {
 
 func Run(store, tmp *Store, r RunRequest) (RunResult, error) {
 	secrets := LoadSecrets()
+
+	if r.Sink != nil {
+		sink := r.Sink
+		r.Sink = func(s string) { sink(secrets.Redact(s)) }
+	}
 
 	select {
 	case scriptSlots <- struct{}{}:
@@ -146,6 +152,9 @@ func execScript(store, tmp *Store, r RunRequest, secrets *Secrets) (RunResult, e
 			truncated = true
 		}
 		outBuf.WriteString(s)
+		if r.Sink != nil {
+			r.Sink(s)
+		}
 	}
 
 	res := (*luaResult)(nil)

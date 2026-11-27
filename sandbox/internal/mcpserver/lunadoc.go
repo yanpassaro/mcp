@@ -47,7 +47,7 @@ func lunaTopicNames() []string {
 	for _, m := range lunaOrder {
 		names = append(names, m.Name)
 	}
-	names = append(names, "meta", "env", "tools", "run", "scripts", "examples")
+	names = append(names, "meta", "env", "tools", "run", "jobs", "scripts", "examples")
 	return names
 }
 
@@ -148,6 +148,7 @@ var lunaMetaPages = map[string]*lunaMod{
 	"meta":     lunaMeta,
 	"tools":    lunaTools,
 	"run":      lunaRun,
+	"jobs":     lunaJobs,
 	"examples": lunaExamples,
 	"env":      lunaEnv,
 }
@@ -191,7 +192,8 @@ var lunaTools = &lunaMod{
 
 | Tool | Action | What it does |
 | --- | --- | --- |
-| ~sandbox_act~ | run (default) | Run a script by ~path~ (host .lua file) or inline ~code~, with optional ~args~ (array/object → ~std.args~). Bare ~code~ is auto-wrapped in ~function main(std)~. |
+| ~sandbox_act~ | run (default) | Run a script by ~path~ (host .lua file) or inline ~code~, with optional ~args~ (array/object → ~std.args~). Bare ~code~ is auto-wrapped in ~function main(std)~. Set ~background: true~ to run async and get a job id back. |
+| ~sandbox_job~ | list, status, logs, kill | Manage background jobs: ~list~ (default), ~status~ (~id~), ~logs~ (~id~, ~tail?~), ~kill~ (~id~). |
 | ~sandbox_doc~ | topic | Return the ~std~ API documentation (optional ~topic~; e.g. ~run~, ~io~). |
 | ~sandbox_os~ | copy, mount, del, stat, list | Manage the sandbox filesystem: copy (host→sandbox), mount (sandbox→host), delete, stat or tree-list a sandbox path. |
 
@@ -261,6 +263,39 @@ end
 - ~std.result.ok(data)~ — sucesso; o ~data~ vira o JSON de saída.
 - ~std.result.err(msg)~ — erro (~msg~ vira a mensagem).
 - Sem ~result~, o valor retornado por ~main~ é usado; ~print()~/~std.log.*~ viram a seção de output.`,
+}
+
+var lunaJobs = &lunaMod{
+	Name: "jobs",
+	Desc: "execução em background (sandbox_act background + sandbox_job)",
+	Body: `# Background jobs
+
+Passando ~background: true~ em ~sandbox_act~, o script roda de forma assíncrona e a chamada retorna na hora com um ~id~ de job. O output (~print()~/~std.log.*~) é gravado incrementalmente, então dá para acompanhar enquanto roda.
+
+~~~jsonc
+{
+  "action": "run",
+  "background": true,
+  "code": "for i = 1, 10 do print('passo', i) end std.result.ok({ fim = true })"
+}
+~~~
+
+Resposta: o ~id~ do job (ex.: ~job-1~). Gerencie com ~sandbox_job~:
+
+| action | args | O que faz |
+| --- | --- | --- |
+| ~list~ (default) | - | lista os jobs (mais recentes primeiro) |
+| ~status~ | ~id~ | status, duração e resultado final |
+| ~logs~ | ~id~, ~tail?~ | saída incremental; ~tail~ limita às últimas N linhas |
+| ~kill~ | ~id~ | marca como cancelado |
+
+Status: ~running~, ~done~, ~failed~, ~cancelled~.
+
+## Limites
+- Os jobs vivem só na memória do processo (somem ao reiniciar) e os **50 últimos** são mantidos.
+- O timeout de execução continua valendo (~SANDBOX_EXEC_TIMEOUT_SECONDS~).
+- Background jobs e chamadas síncronas compartilham o mesmo limite de **4 scripts simultâneos**.
+- **Limitação:** o Lua não é interrompível — ~kill~/timeout marcam o job como encerrado, mas o slot só é liberado quando o script retorna.`,
 }
 
 var lunaExamples = &lunaMod{

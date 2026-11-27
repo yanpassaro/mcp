@@ -34,13 +34,41 @@ sandbox_act
 
 Opcional: `-- name=meu_script` e `-- desc=faz algo` no topo do script aparecem no cabeçalho da saída.
 
-## As 3 tools
+## As 4 tools
 
 | Tool | O que faz |
 | --- | --- |
-| `sandbox_act` | Roda um script por `path` (`.lua` no host) ou `code` inline, com `args` opcional (vira `std.args`). Ação: `run` (default). |
+| `sandbox_act` | Roda um script por `path` (`.lua` no host) ou `code` inline, com `args` opcional (vira `std.args`). Ação: `run` (default). Com `background: true` roda assíncrono e devolve um `id` de job. |
+| `sandbox_job` | Gerencia jobs em background: `list` (default), `status` (`id`), `logs` (`id`, `tail?`), `kill` (`id`). |
 | `sandbox_doc` | Documentação da API `std`. `sandbox_doc topic=<módulo>` traz assinaturas + retorno + exemplo (ex.: `io`, `run`, `net`, `limits`). |
 | `sandbox_os` | Gerencia o filesystem: `copy` (host→sandbox), `mount` (sandbox→host), `del`, `stat`, `list`. |
+
+## Execução em background
+
+Passando `background: true` em `sandbox_act`, o script roda de forma assíncrona e a chamada retorna na hora com um `id` de job (`job-1`, `job-2`, …). O output (`print`/`std.log.*`) é gravado incrementalmente, então dá para acompanhar enquanto roda:
+
+```
+sandbox_act
+  action: run
+  background: true
+  code: |
+    for i = 1, 10 do
+      print("passo", i)
+      std.date.now()
+    end
+    std.result.ok({ fim = true })
+```
+
+Depois:
+
+```
+sandbox_job  action: list
+sandbox_job  action: status id: job-1
+sandbox_job  action: logs   id: job-1 tail: 50
+sandbox_job  action: kill   id: job-1
+```
+
+Status possíveis: `running`, `done`, `failed`, `cancelled`. Os jobs vivem só na memória do processo (somem ao reiniciar) e os **50 últimos** são mantidos. O timeout de execução continua valendo. **Limitação:** o Lua não é interrompível — `kill`/timeout marcam o job como encerrado, mas o slot só é liberado quando o script retorna (mesmo comportamento do modo síncrono hoje).
 
 ## A API `std`
 

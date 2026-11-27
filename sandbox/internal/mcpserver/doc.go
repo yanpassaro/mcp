@@ -57,6 +57,10 @@ var docAliases = map[string]string{
 	"execute":  "run",
 	"exec":     "run",
 	"executar": "run",
+	"jobs":     "jobs",
+	"job":      "jobs",
+	"background": "jobs",
+	"async":    "jobs",
 }
 
 func (s *Server) doc(ctx context.Context, _ *mcp.CallToolRequest, in docInput) (*mcp.CallToolResult, any, error) {
