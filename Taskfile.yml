@@ -29,7 +29,6 @@ tasks:
       - task: build:ssh
       - task: build:sqlize
       - task: build:sandbox
-      - task: build:shell
 
   build:linux:
     desc: Build all Go MCP servers for Linux (GOARCH defaults to amd64)
@@ -41,7 +40,6 @@ tasks:
       - task: build:ssh:linux
       - task: build:sqlize:linux
       - task: build:sandbox:linux
-      - task: build:shell:linux
 
   build:git:
     desc: Build git-mcp.exe
@@ -148,22 +146,6 @@ tasks:
     cmds:
       - go build -o ../{{.DIST}}/sandbox-mcp ./cmd/sandbox-mcp
 
-  build:shell:
-    desc: Build shell-mcp.exe
-    dir: shell
-    cmds:
-      - go mod tidy
-      - go build -o ../{{.DIST}}/shell-mcp.exe ./cmd/shell-mcp
-
-  build:shell:linux:
-    desc: Build shell-mcp for Linux (GOARCH defaults to amd64)
-    dir: shell
-    env:
-      GOOS: linux
-    cmds:
-      - go mod tidy
-      - go build -o ../{{.DIST}}/shell-mcp ./cmd/shell-mcp
-
   format:
     desc: Format all modules
     cmds:
@@ -173,7 +155,6 @@ tasks:
       - task: format:ssh
       - task: format:sqlize
       - task: format:sandbox
-      - task: format:shell
       - task: format:anydoc
 
   format:git:
@@ -219,14 +200,6 @@ tasks:
   format:sandbox:
     desc: Format the sandbox module
     dir: sandbox
-    cmds:
-      - gofmt -w .
-      - go mod tidy
-      - go vet ./...
-
-  format:shell:
-    desc: Format the shell module
-    dir: shell
     cmds:
       - gofmt -w .
       - go mod tidy
